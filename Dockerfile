@@ -1,5 +1,7 @@
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY prisma.config.ts tsconfig.json next.config.ts postcss.config.mjs ./
@@ -8,6 +10,7 @@ COPY app app
 COPY components components
 COPY lib lib
 COPY workers workers
+COPY types types
 COPY auth.ts proxy.ts ./
 RUN npx prisma generate && DATABASE_URL=file:/tmp/evn-build-placeholder.db npm run build \
     && ./node_modules/.bin/esbuild workers/inquiry-sync.ts --bundle --platform=node --format=esm --packages=external --outfile=worker.mjs

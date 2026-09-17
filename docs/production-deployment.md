@@ -20,6 +20,11 @@
 - 최초 웹 확인 단계에서는 수집기 프로필과 WARP 자동 전송을 끈다. DB 이전 및 로컬 수집기 종료 확인 후 수집기를 하나만 시작한다.
 - 이미지 시작 시 seed나 `prisma db push`를 실행하지 않는다. 운영에 개발용 seed 계정을 생성하지 않는다.
 - CI는 합성 데이터와 네트워크 없는 브라우저 확인에만 사용한다. AWS 권한과 운영 인증정보를 CI에 제공하지 않는다. CI 성공은 실제 원본 로그인 또는 운영 배포 성공을 뜻하지 않는다.
+- 운영 이미지 빌드는 서버 밖의 승인된 CI/빌드 경로에서 수행한다. `MARKETING_IMAGE`에는 검토된 이미지의 고정 digest를 주입하고 운영 Compose는 `--no-build`로 실행한다. 현재 PR CI는 검증 전용이며 이미지 게시·서버 배포 workflow를 대신하지 않는다.
+
+## 의존성 검사
+
+Next.js와 eslint-config-next를 16.3.5, sharp를 0.35.4로 고정/잠금 반영했다. [Next.js 공식 공지](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4)와 [sharp 공식 공지](https://github.com/lovell/sharp/security/advisories/GHSA-rgj7-g3m4-5g8c)의 수정 버전 이상이다. 변경 후 소스의 `npm audit --omit=dev`는 critical 0, high 4(@prisma/config, deepmerge-ts, mysql2, prisma)를 보고했다. 모두 Prisma CLI 의존성 경로이며 CLI는 서버 실행에 필요하지 않다. CI는 최종 이미지에 이 개발 도구들이 들어 있으면 실패하도록 확인한다. 다른 서비스의 보안 예외를 자동으로 승계하지 않으며 전체 소스 감사 또는 OS 이미지 검사가 무결점이라고 주장하지 않는다.
 
 ## 운영 담당자가 확정할 항목
 

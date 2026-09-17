@@ -17,6 +17,8 @@
 !lib/**
 !workers/
 !workers/**
+!types/
+!types/**
 app/generated/
 **/.env*
 **/*.db*

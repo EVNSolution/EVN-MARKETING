@@ -77,6 +77,8 @@ npm run lint
 
 ## 서버 컨테이너 준비
 
-`docker compose up -d --build web`는 웹만 127.0.0.1:3100에 바인딩합니다. 인증 비밀값과 공개 `AUTH_URL` 등은 실행 환경에서 주입하며 Compose용 `.env` 파일에 비밀값을 저장하지 마세요. 데이터베이스 URL은 `file:/data/marketing.db`, 업로드 경로는 `/data/uploads`입니다. 기존 SQLite 파일 전체(사용자, 문의, WARP 전송 기록 포함)와 업로드 파일을 같은 영구 볼륨에 이관한 후 실행해야 합니다. 컨테이너 시작 시 migration이나 seed는 실행하지 않습니다.
+격리된 검증 환경에서는 `docker compose up -d --build web`로 웹만 127.0.0.1:3100에 바인딩할 수 있습니다. 운영에서는 서버에서 빌드하지 않고 승인된 경로에서 만든 이미지 digest를 `MARKETING_IMAGE`로 주입해 `--no-build`로 실행합니다. 인증 비밀값과 공개 `AUTH_URL` 등은 실행 환경에서 주입하며 Compose용 `.env` 파일에 비밀값을 저장하지 마세요. 데이터베이스 URL은 `file:/data/marketing.db`, 업로드 경로는 `/data/uploads`입니다. 기존 SQLite 파일 전체(사용자, 문의, WARP 전송 기록 포함)와 업로드 파일을 같은 영구 볼륨에 이관한 후 실행해야 합니다. 컨테이너 시작 시 migration이나 seed는 실행하지 않습니다.
 
 기존 Mac 수집기를 중지하고 데이터 이관을 확인한 뒤에만 `MLEVERAGE_USERNAME`과 `MLEVERAGE_PASSWORD`를 실행 환경에 함께 주입하고 `docker compose --profile collector up -d worker`로 서버 수집기를 켜세요. 서버에서는 Chromium이 기본적으로 headless입니다. `INQUIRY_BROWSER_HEADLESS`는 `true` 또는 `false`만 지정할 수 있습니다. WARP 전송은 기본적으로 꺼져 있으며, 승인된 점검 후 `WARP_DELIVERY_ENABLED=true`로 활성화합니다.
+
+현재 이 구성은 [서버 이전 준비안](docs/production-deployment.md)이며 운영 배포 완료를 의미하지 않습니다. 기존 WARP 서버에 추가 설치하기 전 운영 담당자의 용량·배포 경로·HTTPS·비밀값 주입 검토가 필요합니다.
