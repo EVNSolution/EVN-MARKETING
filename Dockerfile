@@ -1,0 +1,30 @@
+FROM node:22-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY prisma.config.ts tsconfig.json next.config.ts postcss.config.mjs ./
+COPY prisma/schema.prisma prisma/schema.prisma
+COPY app app
+COPY components components
+COPY lib lib
+COPY workers workers
+COPY auth.ts proxy.ts ./
+RUN npx prisma generate && DATABASE_URL=file:/tmp/evn-build-placeholder.db npm run build \
+    && ./node_modules/.bin/esbuild workers/inquiry-sync.ts --bundle --platform=node --format=esm --packages=external --outfile=worker.mjs
+
+FROM node:22-bookworm-slim
+ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0 PORT=3000
+WORKDIR /app
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/worker.mjs ./worker.mjs
+COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
+COPY --from=build /app/node_modules/dotenv ./node_modules/dotenv
+COPY --from=build /app/node_modules/@prisma/adapter-better-sqlite3 ./node_modules/@prisma/adapter-better-sqlite3
+COPY --from=build /app/node_modules/@prisma/driver-adapter-utils ./node_modules/@prisma/driver-adapter-utils
+COPY --from=build /app/node_modules/@prisma/debug ./node_modules/@prisma/debug
+RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
+    && chmod -R a+rX /ms-playwright
+RUN mkdir -p /data/uploads && chown -R node:node /data
+USER node
+CMD ["node", "server.js"]

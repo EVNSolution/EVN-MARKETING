@@ -1,0 +1,296 @@
+'use client'
+
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react'
+
+type Inquiry = {
+  id: string
+  inquiryDate: string
+  inquiryTime: string
+  sourceStatus: string | null
+  name: string | null
+  phone: string
+}
+
+type SyncRun = {
+  status: string
+  trigger: string
+  readCount: number
+  createdCount: number
+  updatedCount: number
+  unchangedCount: number
+  pagesRead: number
+  createdAt: string
+  startedAt: string | null
+  heartbeatAt: string | null
+  completedAt: string | null
+}
+
+type InquiryResponse = {
+  rows: Inquiry[]
+  warp: { configured: boolean; delivered: number; pending: number; failed: number }
+  pagination: { page: number; limit: number; total: number; totalPages: number }
+  filters: { statuses: string[]; hasEmptyStatus: boolean }
+  sync: {
+    currentStatus: string
+    lastSuccessfulAt: string | null
+    nextRunAt: string | null
+    latestRun: SyncRun | null
+  }
+}
+
+const statusText: Record<string, { label: string; className: string }> = {
+  success: { label: '정상 대기', className: 'bg-lime-100 text-lime-800' },
+  running: { label: '가져오는 중', className: 'bg-sky-100 text-sky-700' },
+  pending: { label: '실행 대기', className: 'bg-amber-100 text-amber-800' },
+  offline: { label: '수집 연결 끊김', className: 'bg-slate-200 text-slate-700' },
+  partial: { label: '일부 수집', className: 'bg-orange-100 text-orange-800' },
+  login_required: { label: '원본 서비스 로그인이 필요해요', className: 'bg-red-100 text-red-700' },
+  failed: { label: '조회 실패', className: 'bg-red-100 text-red-700' },
+}
+
+function kst(value: string | null) {
+  if (!value) return '아직 없음'
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(value))
+}
+
+export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const queryString = searchParams.toString()
+  const [data, setData] = useState<InquiryResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('')
+  const [from, setFrom] = useState(searchParams.get('from') ?? '')
+  const [to, setTo] = useState(searchParams.get('to') ?? '')
+  const [status, setStatus] = useState(searchParams.get('status') ?? '')
+  const [query, setQuery] = useState(searchParams.get('q') ?? '')
+  const request = useRef<{ id: number; controller: AbortController } | null>(null)
+  const requestId = useRef(0)
+
+  const load = useCallback(async () => {
+    request.current?.controller.abort()
+    const id = ++requestId.current
+    const controller = new AbortController()
+    request.current = { id, controller }
+    setLoading(true)
+    try {
+      const response = await fetch(`/api/inquiries${queryString ? `?${queryString}` : ''}`, { signal: controller.signal, cache: 'no-store' })
+      if (!response.ok) throw new Error()
+      const next = await response.json() as InquiryResponse
+      if (request.current?.id !== id) return
+      setData(next)
+      setError('')
+    } catch (loadError) {
+      if (request.current?.id === id && !(loadError instanceof DOMException && loadError.name === 'AbortError')) {
+        setError('문의 내역을 새로 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.')
+      }
+    } finally {
+      if (request.current?.id === id) {
+        request.current = null
+        setLoading(false)
+      }
+    }
+  }, [queryString])
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => void load(), 0)
+    const timer = window.setInterval(() => {
+      if (!request.current) void load()
+    }, 15_000)
+    return () => {
+      request.current?.controller.abort()
+      window.clearTimeout(initial)
+      window.clearInterval(timer)
+    }
+  }, [load])
+
+  const navigate = (changes: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams.toString())
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
+    router.replace(`/inquiries${next.size ? `?${next}` : ''}`)
+  }
+
+  const submitFilters = (event: FormEvent) => {
+    event.preventDefault()
+    navigate({ from, to, status, q: query.trim(), page: '1' })
+  }
+
+  const requestSync = async () => {
+    if (syncing) return
+    setSyncing(true)
+    setSyncMessage('')
+    try {
+      const response = await fetch('/api/inquiries/sync', { method: 'POST' })
+      const result = await response.json() as { queued?: boolean; error?: string }
+      if (!response.ok) throw new Error(result.error)
+      setSyncMessage(result.queued ? '가져오기 요청을 등록했습니다.' : '이미 실행 중이거나 원본 로그인이 필요합니다.')
+      await load()
+    } catch (syncError) {
+      setSyncMessage(syncError instanceof Error && syncError.message ? syncError.message : '요청을 처리하지 못했습니다.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const sync = data?.sync
+  const state = statusText[sync?.currentStatus ?? 'offline'] ?? statusText.failed
+  const run = sync?.latestRun
+
+  return (
+    <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
+      <section className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">현재 상태</div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${state.className}`}>{state.label}</span>
+          </div>
+          {sync?.currentStatus === 'login_required' && (
+            <p className="mt-2 text-[11px] text-red-600">별도 수집 브라우저에서 원본 서비스에 로그인해 주세요.</p>
+          )}
+          {sync?.nextRunAt && <p className="mt-2 text-[11px] text-slate-400">다음 예정 {kst(sync.nextRunAt)}</p>}
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">마지막 수집 성공</div>
+          <div className="mt-2 text-sm font-bold text-slate-800">{kst(sync?.lastSuccessfulAt ?? null)}</div>
+          <p className="mt-2 text-[11px] text-slate-400">한국 시간 기준</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">최근 실행</div>
+            {isAdmin && (
+              <button type="button" onClick={requestSync} disabled={syncing || sync?.currentStatus === 'running' || sync?.currentStatus === 'pending'}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45">
+                <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
+                지금 가져오기
+              </button>
+            )}
+          </div>
+          <div className="mt-2 flex gap-4 text-xs text-slate-500">
+            <span>읽음 <b className="text-slate-800">{run?.readCount ?? 0}</b></span>
+            <span>신규 <b className="text-lime-700">{run?.createdCount ?? 0}</b></span>
+            <span>기존 <b className="text-sky-700">{run?.unchangedCount ?? 0}</b></span>
+          </div>
+          <p className="mt-2 min-h-4 text-[11px] text-slate-400">{syncMessage || (run ? `${kst(run.completedAt ?? run.startedAt ?? run.createdAt)} · ${run.trigger === 'manual' ? '수동' : '자동'}` : '실행 기록 없음')}</p>
+        </div>
+      </section>
+
+      {data?.warp && (
+        <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs text-slate-600" aria-label="WARP 고객관리 연동">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <b className="text-slate-800">WARP 고객관리 자동 등록</b>
+            <a className="font-semibold underline underline-offset-2" href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer">WARP 고객관리 열기</a>
+          </div>
+          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''}</p>
+          <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '파일럿 전송과 CRM 확인 후 자동 등록을 활성화합니다.' : '같은 연락처는 기존 고객에 문의 이력을 추가하며, 고객 정보를 덮어쓰지 않습니다.'}</p>
+        </section>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <AlertCircle size={15} /> {error}
+        </div>
+      )}
+
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <form onSubmit={submitFilters} className="flex flex-wrap items-end gap-3 border-b border-slate-200 bg-slate-50 p-3">
+          <label className="grid gap-1 text-[11px] font-semibold text-slate-500">
+            시작일
+            <input type="date" value={from} onChange={(event) => setFrom(event.target.value)}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400" />
+          </label>
+          <label className="grid gap-1 text-[11px] font-semibold text-slate-500">
+            종료일
+            <input type="date" value={to} onChange={(event) => setTo(event.target.value)}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400" />
+          </label>
+          <label className="grid gap-1 text-[11px] font-semibold text-slate-500">
+            상담상태
+            <select value={status} onChange={(event) => setStatus(event.target.value)}
+              className="h-9 min-w-32 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400">
+              <option value="">전체</option>
+              {data?.filters.hasEmptyStatus && <option value="__empty__">상태 없음</option>}
+              {data?.filters.statuses.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="grid min-w-52 flex-1 gap-1 text-[11px] font-semibold text-slate-500">
+            검색
+            <span className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} maxLength={100} placeholder="성함 또는 연락처"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-xs text-slate-700 outline-none focus:border-slate-400" />
+            </span>
+          </label>
+          <button type="submit" className="h-9 rounded-lg bg-slate-800 px-4 text-xs font-bold text-white hover:bg-slate-700">조회</button>
+        </form>
+
+        <div className="min-h-72 overflow-x-auto">
+          {!data ? (
+            <div className="flex min-h-72 flex-col items-center justify-center gap-3 text-sm text-slate-400">
+              {loading ? '문의 내역을 불러오는 중입니다.' : '문의 내역을 불러오지 못했습니다.'}
+              {!loading && (
+                <button type="button" onClick={() => void load()}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                  다시 시도
+                </button>
+              )}
+            </div>
+          ) : data?.rows.length ? (
+            <table className="w-full min-w-[720px] text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 bg-white text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  <th className="px-4 py-3">문의일자</th>
+                  <th className="px-4 py-3">문의시간</th>
+                  <th className="px-4 py-3">상담상태</th>
+                  <th className="px-4 py-3">성함</th>
+                  <th className="px-4 py-3">연락처</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {data.rows.map((row) => (
+                  <tr key={row.id} className="transition-colors hover:bg-slate-50">
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">{row.inquiryDate}</td>
+                    <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{row.inquiryTime}</td>
+                    <td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{row.sourceStatus ?? '—'}</span></td>
+                    <td className="px-4 py-3 font-medium text-slate-700">{row.name ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{row.phone}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="flex min-h-72 items-center justify-center text-sm text-slate-400">조건에 맞는 문의가 없습니다.</div>
+          )}
+        </div>
+
+        {data && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <b className="text-slate-800">{data.pagination.total.toLocaleString()}</b>건
+              <select aria-label="페이지당 문의 수" value={data.pagination.limit} onChange={(event) => navigate({ limit: event.target.value, page: '1' })}
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs outline-none">
+                {[20, 50, 100, 200].map((size) => <option key={size} value={size}>{size}개씩</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" disabled={data.pagination.page <= 1} onClick={() => navigate({ page: String(data.pagination.page - 1) })}
+                aria-label="이전 페이지" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-30"><ChevronLeft size={15} /></button>
+              <span className="min-w-20 text-center text-xs font-semibold text-slate-600">{data.pagination.page} / {data.pagination.totalPages}</span>
+              <button type="button" disabled={data.pagination.page >= data.pagination.totalPages} onClick={() => navigate({ page: String(data.pagination.page + 1) })}
+                aria-label="다음 페이지" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-30"><ChevronRight size={15} /></button>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}

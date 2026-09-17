@@ -1,0 +1,36 @@
+x-runtime: &runtime
+  image: ${MARKETING_IMAGE:-evn-marketing:local}
+  build: .
+  init: true
+  restart: unless-stopped
+  environment: &environment
+    DATABASE_URL: file:/data/marketing.db
+    UPLOADS_DIR: /data/uploads
+    AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in the deployment environment}
+    AUTH_TRUST_HOST: "true"
+    AUTH_URL: ${AUTH_URL:?Set the public AUTH_URL}
+    NEXTAUTH_URL: ${AUTH_URL:?Set the public AUTH_URL}
+    LEADS_INTAKE_API_KEY: ${LEADS_INTAKE_API_KEY-}
+    WARP_MARKETING_API_KEY: ${WARP_MARKETING_API_KEY-}
+    WARP_DELIVERY_ENABLED: ${WARP_DELIVERY_ENABLED:-false}
+  volumes:
+    - marketing_data:/data
+
+services:
+  web:
+    <<: *runtime
+    ports:
+      - "127.0.0.1:3100:3000"
+  worker:
+    <<: *runtime
+    profiles: [collector]
+    command: ["node", "worker.mjs"]
+    environment:
+      <<: *environment
+      MLEVERAGE_USERNAME: ${MLEVERAGE_USERNAME-}
+      MLEVERAGE_PASSWORD: ${MLEVERAGE_PASSWORD-}
+      INQUIRY_BROWSER_HEADLESS: ${INQUIRY_BROWSER_HEADLESS-}
+      INQUIRY_BROWSER_EXECUTABLE: ${INQUIRY_BROWSER_EXECUTABLE-}
+
+volumes:
+  marketing_data:

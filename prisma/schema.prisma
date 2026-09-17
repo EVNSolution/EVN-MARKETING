@@ -1,0 +1,199 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  users     User[]
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("user") // "admin" | "user"
+  teamId    String?
+  team      Team?    @relation(fields: [teamId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ── 고객 마스터 ──────────────────────────────────────────────────────────
+model Customer {
+  id              String   @id @default(cuid())
+
+  // 기본정보
+  name            String
+  phone           String?
+  email           String?
+  customerSegment String?   // "B2C" | "B2B"
+  customerCategory String?
+
+  // 고객 분류
+  status          String   @default("잠재고객")
+  // "잠재고객" | "활성" | "완료" | "이탈"
+  grade           String?   // null | "브론즈" | "실버" | "골드"
+  tags            String?   // JSON: ["VIP","재구매", ...]
+
+  // 유입 정보
+  source          String?
+  collectedAt     DateTime?
+  referrer        String?
+  leadType        String?
+  assignee        String?
+  isAgent         Boolean  @default(false)  // 이 고객이 소개자(Agent)로 활동 가능 여부
+  memo            String?
+
+  // 인적사항 (B2C)
+  birthYear       Int?
+  regionCity      String?
+  regionDist      String?
+  gender          String?
+  birthInfo       String?
+  maritalStatus   String?
+  childrenCount   Int?
+  addressDetail   String?
+  isSoleProprietor Boolean?
+  soleBusinessName String?
+  soleBusinessNo   String?
+  soleBusinessType String?
+
+  // 법인정보 (B2B)
+  b2bCategory     String?
+  companyName     String?
+  businessRegNo   String?
+  contactTitle    String?
+  industry        String?
+  companyAddress  String?
+  companyPhone    String?
+  employeeCount   Int?
+  mainContactCardUrl String?   // 거래처 담당자(대표) 명함 이미지 URL
+  contactsJson    String?   // B2B 관계자 목록 [{id,name,phone,title,role,note,email,cardUrl}[]] JSON
+
+  // 차량정보
+  hasVehicle      Boolean?
+  vehicleMaker    String?
+  vehicleName     String?
+  vehiclePlateNo  String?
+  vehicleYear     String?
+  totalMileage    Int?
+  truckType1      String?
+  truckType2      String?
+  truckType3      String?
+  truckType4      String?
+  vehicleCount    Int?
+  vehicleListJson String?
+  documentsJson   String?   // [{type,name,path,size,uploadedAt}[]] JSON
+
+  // B2B 법인 매출 (최근 3개년, 단위 자유입력)
+  b2bRevenue1     String?
+  b2bRevenue2     String?
+  b2bRevenue3     String?
+
+  // 화주·물류정보
+  shipperName     String?
+  cargoType       String?
+  deliveryCity    String?
+  deliveryDist    String?
+  deliveryFreq    String?
+  workShift       String?
+  monthlyIncome   String?
+  cargoNote       String?
+
+  activities      CustomerActivity[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model CustomerActivity {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  type        String    // "전화" | "문자" | "방문" | "이메일" | "이벤트" | "기타"
+  date        DateTime
+  content     String?
+  result      String?
+  nextAction  String?
+  assignee    String?
+
+  createdAt   DateTime @default(now())
+}
+
+model Inquiry {
+  id              String   @id @default(cuid())
+  source          String
+  companyScopeId  String
+  homepageScopeId String
+  sourceId        String
+  inquiryDate     String
+  inquiryTime     String
+  sourceStatus    String?
+  name            String?
+  phone           String
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime
+  warpCustomerId  String?
+  warpActivityId  String?
+  warpDeliveredAt DateTime?
+  warpAttemptedAt DateTime?
+  warpError       String?
+
+  @@unique([source, companyScopeId, homepageScopeId, sourceId])
+  @@index([inquiryDate, inquiryTime])
+  @@index([sourceStatus])
+  @@index([warpDeliveredAt, warpAttemptedAt])
+}
+
+model InquirySyncRun {
+  id              String    @id @default(cuid())
+  source          String
+  companyScopeId  String
+  homepageScopeId String
+  trigger         String
+  status          String    @default("pending")
+  rangeStart      String
+  rangeEnd        String
+  startedAt       DateTime?
+  heartbeatAt     DateTime?
+  completedAt     DateTime?
+  expectedCount   Int?
+  readCount       Int       @default(0)
+  createdCount    Int       @default(0)
+  updatedCount    Int       @default(0)
+  unchangedCount  Int       @default(0)
+  pagesRead       Int       @default(0)
+  errorType       String?
+  createdAt       DateTime  @default(now())
+
+  @@index([source, companyScopeId, homepageScopeId, status, createdAt])
+}
+
+model InquirySyncState {
+  id               String   @id
+  source           String
+  companyScopeId   String
+  homepageScopeId  String
+  status           String   @default("offline")
+  lastSuccessfulAt DateTime?
+  lastRunId        String?
+  nextRunAt        DateTime?
+  workerHeartbeatAt DateTime?
+  workerOwner      String?
+  workerLeaseExpiresAt DateTime?
+  lockOwner        String?
+  lockExpiresAt    DateTime?
+  updatedAt        DateTime @updatedAt
+
+  @@unique([source, companyScopeId, homepageScopeId])
+}
