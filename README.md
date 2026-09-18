@@ -81,4 +81,4 @@ npm run lint
 
 기존 Mac 수집기를 중지하고 데이터 이관을 확인한 뒤에만 `MLEVERAGE_USERNAME`과 `MLEVERAGE_PASSWORD`를 실행 환경에 함께 주입하고 `docker compose --profile collector up -d worker`로 서버 수집기를 켜세요. 서버에서는 Chromium이 기본적으로 headless입니다. `INQUIRY_BROWSER_HEADLESS`는 `true` 또는 `false`만 지정할 수 있습니다. WARP 전송은 기본적으로 꺼져 있으며, 승인된 점검 후 `WARP_DELIVERY_ENABLED=true`로 활성화합니다.
 
-현재 이 구성은 [서버 이전 준비안](docs/production-deployment.md)이며 운영 배포 완료를 의미하지 않습니다. 기존 WARP 서버에 추가 설치하기 전 운영 담당자의 용량·배포 경로·HTTPS·비밀값 주입 검토가 필요합니다.
+현재 이 구성은 운영 배포 완료를 의미하지 않습니다. 배포 대상은 **WARP와 자원을 공유하지 않는 Marketing 전용 신규 서버**입니다. [배포 계획 안내](docs/production-deployment.md), [전용 서버·자료 이관 계획](docs/dedicated-server-plan.md), [WARP 방식 무중단 배포 명세](docs/zero-downtime-deployment-plan.md), [PR #1 검토 결과](docs/pr-1-review.md)를 확인하세요. 일반 배포는 웹 blue/green과 수집기 단일 인계를 목표로 하며, 현재 Compose에 이 절차가 구현되었다는 뜻은 아닙니다.
