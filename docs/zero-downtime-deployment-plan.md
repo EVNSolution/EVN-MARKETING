@@ -117,6 +117,8 @@ Marketing은 Next 16.3.5 standalone이고 로그인/로그아웃에 Server Actio
 
 ## 8. 구현 PR 순서와 검토 책임
 
+M3 구현의 현재 계약과 부분 검증 범위는 [배포·복귀 컨트롤러](release-controller.md), AWS 실행 경계는 [AWS 배포 연결](cloud-release.md)에 기록합니다. 구현은 Python 표준 라이브러리와 Docker CLI를 사용하여 아래 계획의 Compose 계층을 대체합니다. 초기 설치·실제 AWS 실행·전체 Z01–Z09 통과를 의미하지 않습니다.
+
 | 단계 | 범위 | 완료 조건·다음 단계 gate |
 | --- | --- | --- |
 | M1 보안/수집 선행 수정 | 검토서 P1, 업로드 수명주기/캐시, 자동로그인 복구, collector opt-in | 관련 회귀+타입/lint 통과; 실제 서비스 공개 전 필수 |

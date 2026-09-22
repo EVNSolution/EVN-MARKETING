@@ -1,0 +1,19 @@
+{
+  "repository": "ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/evn-marketing",
+  "publicUrl": "https://APPROVED_DOMAIN",
+  "proxyImage": "nginx@sha256:APPROVED_DIGEST",
+  "volume": "evn-marketing-data",
+  "volumeId": "APPROVED_VOLUME_MARKER",
+  "ebsVolumeId": "APPROVED_EBS_VOLUME_ID",
+  "network": "evn-marketing",
+  "collectorEnabled": false,
+  "warpDeliveryEnabled": false,
+  "minFreeMemoryMiB": 1024,
+  "minFreeDiskMiB": 4096,
+  "parameters": {
+    "AUTH_SECRET": "/evn-marketing/production/auth-secret",
+    "MLEVERAGE_USERNAME": "/evn-marketing/production/source-username",
+    "MLEVERAGE_PASSWORD": "/evn-marketing/production/source-password",
+    "WARP_MARKETING_API_KEY": "/evn-marketing/production/warp-api-key"
+  }
+}

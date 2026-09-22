@@ -19,6 +19,7 @@ ARG MARKETING_BUILD_REVISION
 RUN test -n "$MARKETING_BUILD_REVISION" \
     && node scripts/schema-check.mjs manifest /app "$MARKETING_BUILD_REVISION" /app/schema-manifest.json \
     && chmod 644 /app/schema-manifest.json \
+    && printf '1\n' > /app/worker-activation.version \
     && npx prisma generate && DATABASE_URL=file:/tmp/evn-build-placeholder.db npm run build \
     && ./node_modules/.bin/esbuild workers/inquiry-sync.ts --bundle --platform=node --format=esm --packages=external --outfile=worker.mjs \
     && ./node_modules/.bin/esbuild scripts/warp-delivery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-delivery.mjs \
@@ -35,6 +36,7 @@ COPY --from=build /app/worker-health.mjs ./worker-health.mjs
 COPY --from=build /app/warp-delivery.mjs ./warp-delivery.mjs
 COPY --from=build /app/scripts/schema-check.mjs ./schema-check.mjs
 COPY --from=build /app/schema-manifest.json ./schema-manifest.json
+COPY --from=build /app/worker-activation.version ./worker-activation.version
 COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
 COPY --from=build /app/node_modules/dotenv ./node_modules/dotenv
 COPY --from=build /app/node_modules/@prisma/adapter-better-sqlite3 ./node_modules/@prisma/adapter-better-sqlite3

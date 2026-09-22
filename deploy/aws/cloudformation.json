@@ -1,0 +1,446 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Marketing release declarations only. No instance, secrets, bootstrap or deployment. Apply only in ap-northeast-2 after review.",
+  "Parameters": {
+    "MarketingInstanceId": {
+      "Type": "String",
+      "AllowedPattern": "i-([0-9a-f]{8}|[0-9a-f]{17})",
+      "Description": "Existing dedicated Marketing EC2 instance; never WARP."
+    },
+    "MarketingSecretsKmsKeyArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws:kms:ap-northeast-2:[0-9]{12}:key/[0-9a-f-]{36}",
+      "Description": "Existing Marketing-only symmetric KMS key for the four SecureStrings."
+    },
+    "GitHubOidcSubject": {
+      "Type": "String",
+      "Default": "repo:EVNSolution/EVN-MARKETING:environment:production",
+      "AllowedPattern": "repo:EVNSolution(@[0-9]+)?/EVN-MARKETING(@[0-9]+)?:environment:production",
+      "Description": "Exact verified GitHub subject; use owner/repository IDs if immutable subject claims are enabled."
+    }
+  },
+  "Resources": {
+    "Images": {
+      "Type": "AWS::ECR::Repository",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "RepositoryName": "evn-marketing",
+        "ImageTagMutability": "IMMUTABLE",
+        "ImageScanningConfiguration": {
+          "ScanOnPush": true
+        },
+        "EncryptionConfiguration": {
+          "EncryptionType": "AES256"
+        }
+      }
+    },
+    "ReleaseDocument": {
+      "Type": "AWS::SSM::Document",
+      "Properties": {
+        "Name": "EVN-Marketing-Release",
+        "DocumentType": "Command",
+        "DocumentFormat": "JSON",
+        "UpdateMethod": "NewVersion",
+        "Content": {
+          "schemaVersion": "2.2",
+          "description": "Run only the reviewed, preinstalled Marketing controller after bundle verification.",
+          "parameters": {
+            "Action": {
+              "type": "String",
+              "allowedValues": [
+                "release",
+                "rollback"
+              ],
+              "interpolationType": "ENV_VAR"
+            },
+            "Revision": {
+              "type": "String",
+              "allowedPattern": "^[0-9a-f]{40}$",
+              "interpolationType": "ENV_VAR"
+            },
+            "Digest": {
+              "type": "String",
+              "allowedPattern": "^(sha256:[0-9a-f]{64}|previous)$",
+              "interpolationType": "ENV_VAR"
+            },
+            "BundleSha256": {
+              "type": "String",
+              "allowedPattern": "^[0-9a-f]{64}$",
+              "interpolationType": "ENV_VAR"
+            }
+          },
+          "mainSteps": [
+            {
+              "action": "aws:runShellScript",
+              "name": "MarketingController",
+              "precondition": {
+                "StringEquals": [
+                  "platformType",
+                  "Linux"
+                ]
+              },
+              "inputs": {
+                "timeoutSeconds": "3600",
+                "runCommand": [
+                  "set -eu",
+                  "/usr/bin/python3 -I - <<'PY'",
+                  "import hashlib",
+                  "import os",
+                  "from pathlib import Path",
+                  "import re",
+                  "import stat",
+                  "import subprocess",
+                  "",
+                  "BUNDLE = (\"deploy/controller.py\", \"deploy/nginx-config.mjs\")",
+                  "",
+                  "def run():",
+                  "    action = os.environ.get(\"SSM_Action\", \"\")",
+                  "    revision = os.environ.get(\"SSM_Revision\", \"\")",
+                  "    digest = os.environ.get(\"SSM_Digest\", \"\")",
+                  "    expected = os.environ.get(\"SSM_BundleSha256\", \"\")",
+                  "    if (action not in (\"release\", \"rollback\")",
+                  "            or not re.fullmatch(r\"[0-9a-f]{40}\", revision)",
+                  "            or not re.fullmatch(r\"[0-9a-f]{64}\", expected)",
+                  "            or (action == \"release\" and not re.fullmatch(r\"sha256:[0-9a-f]{64}\", digest))",
+                  "            or (action == \"rollback\" and digest != \"previous\")):",
+                  "        raise ValueError(\"invalid parameters\")",
+                  "    if os.geteuid() != 0:",
+                  "        raise ValueError(\"root controller required\")",
+                  "    root = Path(\"/opt/evn-marketing-runtime\")",
+                  "    files = [root / name for name in BUNDLE] + [root / \"config.json\"]",
+                  "    paths = set(files)",
+                  "    for path in files:",
+                  "        paths.update(path.parents)",
+                  "    for path in paths:",
+                  "        info = path.lstat()",
+                  "        if (info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode)",
+                  "                or not (stat.S_ISREG(info.st_mode) if path in files else stat.S_ISDIR(info.st_mode))):",
+                  "            raise ValueError(\"administrator-owned installation required\")",
+                  "    manifest = \"\".join(hashlib.sha256((root / name).read_bytes()).hexdigest()",
+                  "                       + \"  \" + name + \"\\n\" for name in BUNDLE)",
+                  "    if hashlib.sha256(manifest.encode()).hexdigest() != expected:",
+                  "        raise ValueError(\"installed controller bundle mismatch\")",
+                  "    command = [\"/usr/bin/python3\", \"-I\", str(root / \"deploy/controller.py\"), action]",
+                  "    if action == \"release\":",
+                  "        command += [\"--revision\", revision, \"--digest\", digest]",
+                  "    # Fixed config is the controller default. No path/command is supplied by CI.",
+                  "    result = subprocess.run(command, cwd=root, check=False,",
+                  "                            env={\"PATH\": \"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\",",
+                  "                                 \"AWS_REGION\": \"ap-northeast-2\", \"AWS_DEFAULT_REGION\": \"ap-northeast-2\",",
+                  "                                 \"AWS_ECR_DISABLE_CACHE\": \"true\", \"AWS_SHARED_CREDENTIALS_FILE\": \"/dev/null\",",
+                  "                                 \"AWS_CONFIG_FILE\": \"/dev/null\", \"DOCKER_CONFIG\": \"/root/.docker\",",
+                  "                                 \"AWS_ECR_CACHE_DIR\": \"/run/evn-marketing-ecr\"},",
+                  "                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)",
+                  "    if result.returncode:",
+                  "        raise ValueError(\"controller failed\")",
+                  "",
+                  "if __name__ == \"__main__\":",
+                  "    try:",
+                  "        run()",
+                  "    except Exception:",
+                  "        raise SystemExit(\"Marketing controller refused or failed; administrator review required\")",
+                  "    print(\"Marketing controller completed\")",
+                  "PY"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ReleaseRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "EVN-Marketing-Release",
+        "MaxSessionDuration": 7200,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+                }
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": {
+                    "Ref": "GitHubOidcSubject"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "MarketingReleaseOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecr:GetAuthorizationToken"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecr:DescribeRepositories",
+                    "ecr:DescribeImages",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart",
+                    "ecr:CompleteLayerUpload",
+                    "ecr:PutImage",
+                    "ecr:DescribeImageScanFindings"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Images",
+                      "Arn"
+                    ]
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:SendCommand"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:document/EVN-Marketing-Release"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:instance/${MarketingInstanceId}"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:GetCommandInvocation"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "HostRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "EVN-Marketing-Host",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "MarketingHostOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:UpdateInstanceInformation",
+                    "ssmmessages:CreateControlChannel",
+                    "ssmmessages:CreateDataChannel",
+                    "ssmmessages:OpenControlChannel",
+                    "ssmmessages:OpenDataChannel"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecr:GetAuthorizationToken"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecr:BatchGetImage",
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchCheckLayerAvailability"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Images",
+                      "Arn"
+                    ]
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:GetParameters"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/auth-secret"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/source-username"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/source-password"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/warp-api-key"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "kms:Decrypt"
+                  ],
+                  "Resource": {
+                    "Ref": "MarketingSecretsKmsKeyArn"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2",
+                      "kms:ViaService": "ssm.ap-northeast-2.amazonaws.com",
+                      "kms:EncryptionContext:PARAMETER_ARN": [
+                        {
+                          "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/auth-secret"
+                        },
+                        {
+                          "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/source-username"
+                        },
+                        {
+                          "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/source-password"
+                        },
+                        {
+                          "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/warp-api-key"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeSnapshots"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "HostProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "HostRole"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "ReleaseRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ReleaseRole",
+          "Arn"
+        ]
+      }
+    },
+    "HostProfileArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "HostProfile",
+          "Arn"
+        ]
+      }
+    },
+    "RepositoryUri": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Images",
+          "RepositoryUri"
+        ]
+      }
+    },
+    "DocumentName": {
+      "Value": {
+        "Ref": "ReleaseDocument"
+      }
+    },
+    "TargetInstanceId": {
+      "Value": {
+        "Ref": "MarketingInstanceId"
+      }
+    }
+  }
+}
