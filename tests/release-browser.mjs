@@ -50,9 +50,12 @@ async function context(options = {}) {
   return ctx
 }
 
-async function loginPage(ctx) {
+async function loginPage(ctx, release = a) {
   const page = await ctx.newPage()
-  await page.goto(`${base}/login`)
+  const document = await page.goto(`${base}/login`)
+  assert.equal(document.headers()['x-marketing-release'], release)
+  // Next consumes and removes data-dpl-id during bootstrap; inspect the original document.
+  assert.ok((await document.text()).includes(`data-dpl-id="${release}"`))
   await page.waitForLoadState('networkidle')
   return page
 }
@@ -105,9 +108,8 @@ try {
 
   await phase('switch')
   await until(async () => (await (await fetch(`${base}/api/readyz`)).json()).revision === b)
-  const newLogin = await loginPage(jsContext)
-  assert.equal(await newLogin.locator('html').getAttribute('data-dpl-id'), b)
-  const newNative = await loginPage(nativeContext)
+  await loginPage(jsContext, b)
+  const newNative = await loginPage(nativeContext, b)
   const newEncoding = await newNative.locator('input[name^="$ACTION_"]').evaluateAll(inputs => inputs.map(input => input.value))
   assert.notDeepEqual(newEncoding, oldEncoding, 'two independently built images have distinct action encodings')
   // HTTPS makes this cookie secure in production. Explicitly change it in this isolated HTTP fixture.
@@ -147,8 +149,8 @@ try {
   await edit.waitForURL(url => url.pathname === '/inquiries')
   await edit.waitForLoadState('networkidle')
   const fresh = await authenticated.newPage()
-  await fresh.goto(`${base}/customers/synthetic-edit`)
-  assert.equal(await fresh.locator('html').getAttribute('data-dpl-id'), b, 'ordinary documents go to active while sharing session')
+  const freshDocument = await fresh.goto(`${base}/customers/synthetic-edit`)
+  assert.equal(freshDocument.headers()['x-marketing-release'], b, 'ordinary documents go to active while sharing session')
 
   const pdf = Buffer.alloc(6 * 1024 * 1024)
   pdf.write('%PDF-synthetic-quota')
@@ -190,10 +192,11 @@ try {
 
   // This other context still has the session created by its old login action.
   await oldLogin.locator('a[href="/customers/synthetic-edit"]').evaluate(anchor => { anchor.href = '/customers/synthetic-edit?returnTo=%2Finquiries' })
+  const detailNavigation = oldLogin.waitForResponse(response => new URL(response.url()).pathname === '/customers/synthetic-edit' && response.request().headers().rsc === '1')
   await oldLogin.locator('a[href^="/customers/synthetic-edit?"]').click()
+  assert.equal((await detailNavigation).headers()['x-marketing-release'], a)
   await oldLogin.waitForURL(url => url.pathname === '/customers/synthetic-edit')
   await oldLogin.waitForLoadState('networkidle')
-  assert.equal(await oldLogin.locator('html').getAttribute('data-dpl-id'), a)
   await oldLogin.locator('textarea[rows="4"]').fill('keep unsaved after expiry')
   const lastSavedMemo = db.prepare('SELECT memo FROM Customer WHERE id = ?').get('synthetic-edit').memo
   assert.deepEqual(errors, [], 'compatible window has no browser or asset errors')
