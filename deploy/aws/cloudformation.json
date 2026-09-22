@@ -2,6 +2,11 @@
   "AWSTemplateFormatVersion": "2010-09-09",
   "Description": "Marketing release declarations only. No instance, secrets, bootstrap or deployment. Apply only in ap-northeast-2 after review.",
   "Parameters": {
+    "MarketingDataVolumeId": {
+      "Type": "String",
+      "AllowedPattern": "vol-([0-9a-f]{8}|[0-9a-f]{17})",
+      "Description": "Existing dedicated encrypted Marketing data EBS volume; never WARP."
+    },
     "MarketingInstanceId": {
       "Type": "String",
       "AllowedPattern": "i-([0-9a-f]{8}|[0-9a-f]{17})",
@@ -381,7 +386,8 @@
                 {
                   "Effect": "Allow",
                   "Action": [
-                    "ec2:DescribeSnapshots"
+                    "ec2:DescribeSnapshots",
+                    "ec2:DescribeVolumes"
                   ],
                   "Resource": "*",
                   "Condition": {
@@ -389,6 +395,28 @@
                       "aws:RequestedRegion": "ap-northeast-2"
                     }
                   }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": ["ec2:CreateSnapshot"],
+                  "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:volume/${MarketingDataVolumeId}"},
+                  "Condition": {"StringEquals": {"aws:RequestedRegion": "ap-northeast-2"}}
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": ["ec2:CreateSnapshot"],
+                  "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2::snapshot/*"},
+                  "Condition": {
+                    "StringEquals": {"aws:RequestedRegion": "ap-northeast-2", "aws:RequestTag/Service": "evn-marketing"},
+                    "Null": {"aws:RequestTag/BackupId": "false"},
+                    "ForAllValues:StringEquals": {"aws:TagKeys": ["Service", "BackupId"]}
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": ["ec2:CreateTags"],
+                  "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2::snapshot/*"},
+                  "Condition": {"StringEquals": {"ec2:CreateAction": "CreateSnapshot", "aws:RequestedRegion": "ap-northeast-2"}}
                 }
               ]
             }

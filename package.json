@@ -12,6 +12,8 @@
     "test:db": "tsx tests/db.test.ts",
     "test:schema": "node tests/schema-check.test.mjs",
     "test:data-recovery": "tsx tests/data-recovery.test.ts",
+    "test:backup": "node tests/data-backup.test.mjs && python3 tests/data-ops.test.py",
+    "test:warp-recovery": "tsx tests/warp-recovery.test.ts",
     "test:inquiries": "tsx tests/inquiry-sync.test.ts && tsx tests/mleverage-source.test.ts",
     "test:server-runtime": "tsx tests/server-runtime.test.ts && tsx tests/readiness.test.ts",
     "test:upload-security": "tsx tests/upload-security.test.ts",

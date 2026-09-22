@@ -4,9 +4,9 @@ import { heartbeatWorker, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID, INQUIRY_SOURC
 
 const WARP_ENDPOINT = 'https://warp.cleversystem.ai/api/external/marketing-inquiries'
 const RETRY_MS = 60 * 60_000
-const scope = { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID }
+export const scope = { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID }
 const connectionErrors = ['warp_auth_required', 'warp_not_configured', 'warp_endpoint_missing', 'warp_unavailable', 'warp_invalid_receipt']
-type Env = Readonly<Record<string, string | undefined>>
+export type Env = Readonly<Record<string, string | undefined>>
 type InquiryPayload = typeof scope & { sourceId: string; inquiryDate: string; inquiryTime: string; sourceStatus: string; name: string; phone: string }
 type Receipt = { customerId: string; activityId: string; created: boolean; duplicate: boolean }
 type Delivery = { receipt?: Receipt; error: string }
@@ -24,9 +24,9 @@ export function warpActivityId(sourceId: string) {
   return `mleverage_${createHash('sha256').update([INQUIRY_SOURCE, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID, sourceId.toLowerCase()].join(':')).digest('hex')}`
 }
 
-async function postWarp(payload: object, send: typeof fetch, env: Env) {
+async function postWarp(payload: object, send: typeof fetch, env: Env, signal?: AbortSignal) {
   return send(WARP_ENDPOINT, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
+    method: 'POST', redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
     headers: { 'Content-Type': 'application/json', 'x-api-key': env.WARP_MARKETING_API_KEY! },
     body: JSON.stringify(payload),
   })
@@ -40,9 +40,9 @@ function validReceipt(body: unknown, sourceId: string): body is { ok: true } & R
     && ((value.created === true && value.duplicate === false) || (value.created === false && value.duplicate === true))
 }
 
-async function deliver(payload: InquiryPayload, send: typeof fetch, env: Env): Promise<Delivery> {
+export async function deliver(payload: InquiryPayload, send: typeof fetch, env: Env, signal?: AbortSignal): Promise<Delivery> {
   try {
-    const response = await postWarp(payload, send, env)
+    const response = await postWarp(payload, send, env, signal)
     if (response.status === 200) {
       const body: unknown = await response.json()
       return validReceipt(body, payload.sourceId) ? { receipt: body, error: '' } : { error: 'warp_invalid_receipt' }
@@ -86,7 +86,7 @@ export async function warpDeliverySummary(db: PrismaClient) {
   return { configured: warpConfigured(), delivered, pending, failed }
 }
 
-const rowSelect = { id: true, sourceId: true, inquiryDate: true, inquiryTime: true, sourceStatus: true, name: true, phone: true } as const
+export const rowSelect = { id: true, sourceId: true, inquiryDate: true, inquiryTime: true, sourceStatus: true, name: true, phone: true } as const
 
 async function pendingRows(db: PrismaClient, now: Date, take: number, respectRetry = true) {
   const retryBefore = new Date(now.getTime() - RETRY_MS)
@@ -100,12 +100,12 @@ async function pendingRows(db: PrismaClient, now: Date, take: number, respectRet
   })
 }
 
-function payloadFor(row: Awaited<ReturnType<typeof pendingRows>>[number]): InquiryPayload {
+export function payloadFor(row: Awaited<ReturnType<typeof pendingRows>>[number]): InquiryPayload {
   return { ...scope, sourceId: row.sourceId.toLowerCase(), inquiryDate: row.inquiryDate,
     inquiryTime: row.inquiryTime, sourceStatus: row.sourceStatus ?? '', name: row.name ?? '', phone: row.phone }
 }
 
-async function acknowledge(db: PrismaClient, id: string, receipt: Receipt, at: Date) {
+export async function acknowledge(db: Pick<PrismaClient, 'inquiry'>, id: string, receipt: Receipt, at: Date) {
   await db.inquiry.update({ where: { id }, data: {
     warpCustomerId: receipt.customerId, warpActivityId: receipt.activityId,
     warpDeliveredAt: at, warpAttemptedAt: at, warpError: null,

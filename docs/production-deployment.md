@@ -1,6 +1,6 @@
 # EV&Marketing 운영 배포 계획 안내
 
-갱신: 2026-09-22 KST. 상태: **배포 전 수정·검증 진행 / 운영 미배포**.
+갱신: 2026-09-23 KST. 상태: **배포 전 수정·검증 진행 / 운영 미배포**.
 
 배포 대상은 **Marketing 전용 신규 AWS 서버**입니다. WARP 서버 동거와 자원 증설을 기본으로 삼았던 이전 제안은 이 계획에서 대체합니다. WARP에는 기존 공개 HTTPS 문의 API와 전용 인증키로만 연결합니다.
 
@@ -13,6 +13,7 @@
 | [WARP 방식 무중단 배포 명세](zero-downtime-deployment-plan.md) | 고정 WARP source 근거, 웹 blue/green, worker 단일 인계, schema/Next 호환성, 상태 전이·rollback, Z01–Z10 검사, 구현 PR 순서 |
 | [배포·복귀 컨트롤러](release-controller.md) | M3 호스트 상태 전이, 복구 경계, 격리 Docker 검사와 남은 운영 인수 항목 |
 | [배포 인수 검사](release-acceptance.md) | 30분 실제 관측, API 부하, 진행 요청 drain, 중단 복구와 운영 증거 경계 |
+| [백업·복원과 전송 이력 복구](backup-recovery.md) | M4 일관된 자료 복원, 승인한 문의 재확인, 별도 migration 이미지와 합성 이전·메모리 측정 |
 | [AWS 배포 연결](cloud-release.md) | 전용 ECR/OIDC/SSM 선언, 설치 전제, 수동 실행 workflow와 권한 경계 |
 
 ## 채택한 방향
