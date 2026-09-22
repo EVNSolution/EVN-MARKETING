@@ -20,6 +20,14 @@ trap cleanup EXIT
 docker pull nginx:1.28-alpine
 mkdir "$compat_dir/previous"
 git archive "$release_a" | tar -x -C "$compat_dir/previous"
+# Only add native build tools to the historical recipe; its app source/lockfile stay pinned.
+node --input-type=module - "$compat_dir/previous/Dockerfile" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = process.argv[2], original = readFileSync(file, 'utf8');
+const line = 'apt-get install -y --no-install-recommends openssl ca-certificates';
+if (original.split(line).length !== 2) throw new Error('unexpected historical build recipe');
+writeFileSync(file, original.replace(line, `${line} python3 make g++`));
+NODE
 docker build --build-arg MARKETING_BUILD_REVISION="$release_a" -t evn-marketing:compat-a "$compat_dir/previous"
 # PR #7 predates packaged manifests: derive its contract from this exact pinned source for CI only.
 node scripts/schema-check.mjs manifest "$compat_dir/previous" "$release_a" "$compat_dir/previous-manifest.json"
