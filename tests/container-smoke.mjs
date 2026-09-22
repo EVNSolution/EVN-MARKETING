@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
 
@@ -23,6 +23,8 @@ for (const path of [
 assert.equal(existsSync('/app/warp-delivery.mjs'), true, 'packaged WARP CLI is present')
 const Database = require('better-sqlite3')
 const { chromium } = require('playwright-core')
+mkdirSync('/data/uploads', { recursive: true })
+writeFileSync('/data/.marketing-volume-id', 'synthetic-volume-ci\n', { flag: 'wx', mode: 0o600 })
 const inquiry = {
   source: 'mleverage-admin',
   companyScopeId: '55f9a8bb-73f9-4316-bcd7-7dcdce0bdcc3',

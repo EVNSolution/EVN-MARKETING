@@ -32,7 +32,7 @@ async function main() {
       claimNextRun: sync.claimNextRun,
       reconcile: sync.reconcile,
       finishRun: sync.finishRun,
-      dispatchPendingWarp: warp.dispatchPendingWarp,
+      dispatchPendingWarp: (db, owner, signal) => warp.dispatchPendingWarp(db, owner, undefined, undefined, undefined, signal),
       launchSourceBrowser: source.launchSourceBrowser,
       openLogin: source.openLogin,
       prepareProtectedPage: source.prepareProtectedPage,

@@ -144,18 +144,21 @@ export async function dispatchPendingWarp(
   send: typeof fetch = fetch,
   env: Env = process.env,
   now: () => Date = () => new Date(),
+  signal?: AbortSignal,
 ) {
   const result = { configured: warpConfigured(env), delivered: 0, failed: 0 }
-  if (!result.configured) return result
+  if (!result.configured || signal?.aborted) return result
   const retryBefore = new Date(now().getTime() - RETRY_MS)
   const connectionBlocked = await db.inquiry.findFirst({
     where: { ...scope, warpDeliveredAt: null, warpError: { in: connectionErrors }, warpAttemptedAt: { gt: retryBefore } },
     select: { id: true },
   })
-  if (connectionBlocked) return result
+  if (connectionBlocked || signal?.aborted) return result
   const rows = await pendingRows(db, now(), 50)
   for (const row of rows) {
+    if (signal?.aborted) break
     await heartbeatWorker(db, workerOwner, now())
+    if (signal?.aborted) break
     const delivery = await deliver(payloadFor(row), send, env)
     await heartbeatWorker(db, workerOwner, now())
     const attemptedAt = now()

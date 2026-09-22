@@ -177,47 +177,57 @@ export async function releaseWorker(db: PrismaClient, owner: string, now = new D
   })
 }
 
-export async function claimNextRun(db: PrismaClient, now = new Date(), owner: string = randomUUID(), executionEndDate?: string) {
-  await ensureSyncState(db)
-  const run = await db.inquirySyncRun.findFirst({
-    where: { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID, status: 'pending' },
-    orderBy: { createdAt: 'asc' },
-  })
-  if (!run) return null
+export async function claimNextRun(db: PrismaClient, now = new Date(), owner: string = randomUUID(), executionEndDate?: string, signal?: AbortSignal) {
+  if (signal?.aborted) return null
+  try {
+    return await db.$transaction(async (tx) => {
+      await ensureSyncState(tx)
+      const run = await tx.inquirySyncRun.findFirst({
+        where: { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID, status: 'pending' },
+        orderBy: { createdAt: 'asc' },
+      })
+      if (!run || signal?.aborted) return null
 
-  const rangeEnd = executionEndDate ?? run.rangeEnd
-  if (!isCalendarDate(rangeEnd) || rangeEnd < run.rangeStart) throw new SyncError('invalid_range')
-  const lockExpiresAt = new Date(now.getTime() + 3 * 60_000)
-  const locked = await db.inquirySyncState.updateMany({
-    where: {
-      id: INQUIRY_SCOPE_ID,
-      status: { notIn: BLOCKING_STATUSES },
-      AND: [
-        { OR: [{ workerOwner: null }, { workerOwner: owner }, { workerLeaseExpiresAt: { lt: now } }] },
-        { OR: [{ lockExpiresAt: null }, { lockExpiresAt: { lt: now } }] },
-      ],
-    },
-    data: {
-      workerOwner: owner,
-      workerHeartbeatAt: now,
-      workerLeaseExpiresAt: new Date(now.getTime() + 180_000),
-      lockOwner: owner,
-      lockExpiresAt,
-      status: 'running',
-      lastRunId: run.id,
-    },
-  })
-  if (locked.count !== 1) return null
+      const rangeEnd = executionEndDate ?? run.rangeEnd
+      if (!isCalendarDate(rangeEnd) || rangeEnd < run.rangeStart) throw new SyncError('invalid_range')
+      const lockExpiresAt = new Date(now.getTime() + 3 * 60_000)
+      const locked = await tx.inquirySyncState.updateMany({
+        where: {
+          id: INQUIRY_SCOPE_ID,
+          status: { notIn: BLOCKING_STATUSES },
+          AND: [
+            { OR: [{ workerOwner: null }, { workerOwner: owner }, { workerLeaseExpiresAt: { lt: now } }] },
+            { OR: [{ lockExpiresAt: null }, { lockExpiresAt: { lt: now } }] },
+          ],
+        },
+        data: {
+          workerOwner: owner,
+          workerHeartbeatAt: now,
+          workerLeaseExpiresAt: new Date(now.getTime() + 180_000),
+          lockOwner: owner,
+          lockExpiresAt,
+          status: 'running',
+          lastRunId: run.id,
+        },
+      })
+      if (locked.count !== 1) return null
+      if (signal?.aborted) throw new SyncError('interrupted')
 
-  const started = await db.inquirySyncRun.updateMany({
-    where: { id: run.id, status: 'pending' },
-    data: { status: 'running', rangeEnd, startedAt: now, heartbeatAt: now },
-  })
-  if (started.count !== 1) {
-    await db.inquirySyncState.updateMany({ where: { id: INQUIRY_SCOPE_ID, lockOwner: owner }, data: { lockOwner: null, lockExpiresAt: null } })
-    return null
+      const started = await tx.inquirySyncRun.updateMany({
+        where: { id: run.id, status: 'pending' },
+        data: { status: 'running', rangeEnd, startedAt: now, heartbeatAt: now },
+      })
+      if (signal?.aborted) throw new SyncError('interrupted')
+      if (started.count !== 1) {
+        await tx.inquirySyncState.updateMany({ where: { id: INQUIRY_SCOPE_ID, lockOwner: owner }, data: { lockOwner: null, lockExpiresAt: null } })
+        return null
+      }
+      return { ...run, rangeEnd, owner }
+    })
+  } catch (error) {
+    if (error instanceof SyncError && error.type === 'interrupted') return null
+    throw error
   }
-  return { ...run, rangeEnd, owner }
 }
 
 export async function recoverStaleRuns(db: PrismaClient, now = new Date()) {
@@ -252,6 +262,7 @@ export async function reconcile(
   rangeEnd: string,
   fetchPage: (page: number, previousFirstPageIds?: string[]) => Promise<SourcePage>,
   now = () => new Date(),
+  signal?: AbortSignal,
 ): Promise<ReconcileResult> {
   const outcomes = new Map<string, Outcome>()
   let pagesRead = 0
@@ -274,7 +285,9 @@ export async function reconcile(
         let page = 1
 
         while (true) {
+          if (signal?.aborted) throw new SyncError('interrupted')
           await heartbeat(db, runId, owner, now())
+          if (signal?.aborted) throw new SyncError('interrupted')
           const sourcePage = validatePage(await fetchPage(page, page === 1 ? undefined : firstPageIds), page)
           attemptTotal ??= sourcePage.total
           if (sourcePage.total !== attemptTotal) throw new SyncError('shifting_count')
@@ -302,6 +315,7 @@ export async function reconcile(
           pagesRead++
           attemptPages++
           await updateRunCounts(db, runId, owner, expectedCount, pagesRead, outcomes, now())
+          if (signal?.aborted) throw new SyncError('interrupted')
 
           if (saved.reachedCutoff) {
             stoppedAtCutoff = true
@@ -314,6 +328,7 @@ export async function reconcile(
 
         if (!stoppedAtCutoff && seen.size !== attemptTotal) throw new SyncError('count_mismatch')
         if (attemptPages > 1) {
+          if (signal?.aborted) throw new SyncError('interrupted')
           const probe = validatePage(await fetchPage(1, firstPageIds), 1)
           const probeRows = probe.rows.map(normalizeInquiry)
           let probeSortKey: string | null = null
@@ -326,6 +341,7 @@ export async function reconcile(
           const probeIds = probeRows.map((row) => row.sourceId)
           if (probe.total !== attemptTotal || probeIds.join() !== firstPageIds.join()) throw new SyncError('shifting_count')
         }
+        if (signal?.aborted) throw new SyncError('interrupted')
         return { status: 'success' as const, expectedCount, pagesRead, ...countOutcomes(outcomes) }
       } catch (error) {
         if (attempt === 0 && error instanceof SyncError && error.type === 'shifting_count') continue
@@ -336,7 +352,7 @@ export async function reconcile(
   } catch (error) {
     const errorType = error instanceof SyncError ? error.type : 'page_error'
     const readCount = outcomes.size
-    const status = errorType === 'login_required' ? 'login_required' : errorType.startsWith('offline_') ? 'offline' : readCount ? 'partial' : 'failed'
+    const status = errorType === 'interrupted' ? 'partial' : errorType === 'login_required' ? 'login_required' : errorType.startsWith('offline_') ? 'offline' : readCount ? 'partial' : 'failed'
     return { status, errorType, expectedCount, pagesRead, ...countOutcomes(outcomes) }
   }
 }
@@ -416,8 +432,8 @@ export async function finishRun(db: PrismaClient, runId: string, owner: string, 
       data: {
         status: result.status,
         lastRunId: runId,
-        lastSuccessfulAt: result.status === 'success' ? at : undefined,
-        nextRunAt: new Date(at.getTime() + 60 * 60_000),
+        lastSuccessfulAt: result.status === 'success' && result.errorType !== 'interrupted' ? at : undefined,
+        nextRunAt: result.errorType === 'interrupted' ? undefined : new Date(at.getTime() + 60 * 60_000),
         lockOwner: null,
         lockExpiresAt: null,
       },
