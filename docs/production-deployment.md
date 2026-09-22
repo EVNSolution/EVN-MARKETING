@@ -12,6 +12,7 @@
 | [전용 서버·자료 이전 계획](dedicated-server-plan.md) | 독립 EC2/ECR/IAM/SSM/HTTPS, DB·업로드·receipt 이전, 백업/복원, 사양 측정, 공개 가격 기준 비용 |
 | [WARP 방식 무중단 배포 명세](zero-downtime-deployment-plan.md) | 고정 WARP source 근거, 웹 blue/green, worker 단일 인계, schema/Next 호환성, 상태 전이·rollback, Z01–Z10 검사, 구현 PR 순서 |
 | [배포·복귀 컨트롤러](release-controller.md) | M3 호스트 상태 전이, 복구 경계, 격리 Docker 검사와 남은 운영 인수 항목 |
+| [배포 인수 검사](release-acceptance.md) | 30분 실제 관측, API 부하, 진행 요청 drain, 중단 복구와 운영 증거 경계 |
 | [AWS 배포 연결](cloud-release.md) | 전용 ECR/OIDC/SSM 선언, 설치 전제, 수동 실행 workflow와 권한 경계 |
 
 ## 채택한 방향
