@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # CI-only, no published app ports and no external network for app/proxy/browser containers.
-release_a="${GITHUB_SHA:?}"
-release_b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+# Last passing PR #7 source. Rebuild the real previous code, not this code with another ID.
+release_a=fbf325f3efc30b8913b6dd3989d93abba9af0a7c
+release_b="${GITHUB_SHA:?}"
 compat_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/marketing-compat.XXXXXX")"
 chmod 777 "$compat_dir"
 mkdir "$compat_dir/data" "$compat_dir/control" "$compat_dir/nginx"
@@ -17,13 +18,20 @@ cleanup() {
 }
 trap cleanup EXIT
 docker pull nginx:1.28-alpine
-docker build --build-arg MARKETING_BUILD_REVISION="$release_b" -t evn-marketing:compat-b .
+mkdir "$compat_dir/previous"
+git archive "$release_a" | tar -x -C "$compat_dir/previous"
+docker build --build-arg MARKETING_BUILD_REVISION="$release_a" -t evn-marketing:compat-a "$compat_dir/previous"
+# PR #7 predates packaged manifests: derive its contract from this exact pinned source for CI only.
+node scripts/schema-check.mjs manifest "$compat_dir/previous" "$release_a" "$compat_dir/previous-manifest.json"
+chmod 644 "$compat_dir/previous-manifest.json"
 docker network create --internal marketing-compat
 docker run --rm --network none -v "$PWD:/src:ro" -v "$compat_dir/data:/data" evn-marketing:ci node /src/tests/release-setup.mjs
+docker run --rm --network none -v "$compat_dir/data:/data" -v "$compat_dir/previous-manifest.json:/previous.json:ro" \
+  -e DATABASE_URL=file:/data/marketing.db evn-marketing:ci node schema-check.mjs check schema-manifest.json /previous.json
 for slot in blue green; do
-  image=evn-marketing:ci
+  image=evn-marketing:compat-a
   revision="$release_a"
-  if [ "$slot" = green ]; then image=evn-marketing:compat-b; revision="$release_b"; fi
+  if [ "$slot" = green ]; then image=evn-marketing:ci; revision="$release_b"; fi
   docker run -d --name "marketing-compat-$slot" --network marketing-compat --network-alias "$slot" \
     -v "$compat_dir/data:/data" \
     -e AUTH_SECRET=synthetic-compat-secret-at-least-32-characters \
@@ -70,6 +78,8 @@ done
 result="$(docker wait marketing-compat-test)"
 docker logs marketing-compat-test
 test "$result" = 0
+docker run --rm --network none -v "$compat_dir/data:/data" -v "$compat_dir/previous-manifest.json:/previous.json:ro" \
+  -e DATABASE_URL=file:/data/marketing.db evn-marketing:ci node schema-check.mjs check schema-manifest.json /previous.json
 docker rm -f marketing-compat-blue
 docker exec marketing-compat-proxy nginx -t
 docker restart marketing-compat-proxy

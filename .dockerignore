@@ -9,6 +9,8 @@
 !proxy.ts
 !prisma/
 !prisma/schema.prisma
+!prisma/migrations/
+!prisma/migrations/**
 !app/
 !app/**
 !components/
@@ -19,6 +21,7 @@
 !workers/**
 !scripts/
 !scripts/warp-delivery.ts
+!scripts/schema-check.mjs
 !types/
 !types/**
 app/generated/

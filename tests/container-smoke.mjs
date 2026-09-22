@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
+import { recordSyntheticMigrations } from './schema-fixture.mjs'
 
 const require = createRequire('/app/package.json')
 assert.notEqual(process.getuid(), 0)
@@ -41,6 +42,7 @@ try {
   for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
     db.exec(readFileSync(`/src/prisma/migrations/${migration}/migration.sql`, 'utf8'))
   }
+  recordSyntheticMigrations(db, '/src')
   db.prepare('INSERT INTO Team (id, name) VALUES (?, ?)').run('synthetic-team', 'Synthetic team')
   db.prepare('INSERT INTO User (id, name, email, password, role, teamId, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run('synthetic-user', 'Synthetic user', 'synthetic@example.invalid', '$2b$04$jE4nbrd/N17cKY7MeSCLm.JElVzGnH4VIqBbdq.M1R6qhLvQYdIjG', 'user', 'synthetic-team', new Date().toISOString())
@@ -51,6 +53,16 @@ try {
   db.close()
 }
 const beforeCli = readFileSync('/data/marketing.db')
+const schemaCli = (database) => spawnSync(process.execPath, ['/app/schema-check.mjs', 'check', '/app/schema-manifest.json', '/app/schema-manifest.json'], {
+  env: { DATABASE_URL: database }, encoding: 'utf8', timeout: 5000,
+})
+assert.equal(schemaCli('file:/data/marketing.db').status, 0, 'packaged schema gate reads its image manifest')
+const missingSchemaDb = schemaCli('file:/data/schema-must-not-create.db')
+assert.equal(missingSchemaDb.status, 1)
+assert.equal(missingSchemaDb.stderr, '')
+assert.equal(JSON.parse(missingSchemaDb.stdout).ok, false)
+assert.equal(existsSync('/data/schema-must-not-create.db'), false)
+assert.deepEqual(readFileSync('/data/marketing.db'), beforeCli, 'schema gate leaves data and ledger unchanged')
 for (const mode of ['check', 'pilot']) {
   for (const databaseUrl of [undefined, 'file:/data/marketing.db']) {
     const cli = spawnSync(process.execPath, ['/app/warp-delivery.mjs', mode], {

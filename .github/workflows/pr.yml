@@ -7,13 +7,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
+      - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
       - run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
       - name: Synthetic container smoke
         run: |

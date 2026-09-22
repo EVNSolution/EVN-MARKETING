@@ -174,6 +174,26 @@ try {
   assert.equal(JSON.parse(db.prepare('SELECT documentsJson FROM Customer WHERE id = ?').get('synthetic-quota').documentsJson).length, 1)
   assert.equal(db.prepare('SELECT memo FROM Customer WHERE id = ?').get('synthetic-parallel').memo, 'synthetic-11')
   assert.equal(db.pragma('integrity_check', { simple: true }), 'ok')
+  // Exercise the real previous API against data written by the current image.
+  // This is code rollback compatibility; the shared DB and files are never restored.
+  const latest = await authenticated.request.put(`${base}/api/customers/synthetic-parallel`, {
+    headers: requestHeaders(b), data: { memo: 'latest committed by current code', companyName: 'Preserve this newer value' },
+  })
+  assert.equal(latest.status(), 200)
+  assert.equal(latest.headers()['x-marketing-release'], b)
+  const olderRead = await authenticated.request.get(`${base}/api/customers/synthetic-parallel`, { headers: requestHeaders(a) })
+  assert.equal(olderRead.status(), 200)
+  assert.equal(olderRead.headers()['x-marketing-release'], a)
+  assert.equal((await olderRead.json()).memo, 'latest committed by current code')
+  const olderWrite = await authenticated.request.put(`${base}/api/customers/synthetic-parallel`, {
+    headers: requestHeaders(a), data: { memo: 'edited by previous code after current write' },
+  })
+  assert.equal(olderWrite.status(), 200)
+  const preserved = await olderWrite.json()
+  assert.equal(preserved.companyName, 'Preserve this newer value')
+  const oldDocuments = await authenticated.request.get(`${base}/api/customers/synthetic-quota`, { headers: requestHeaders(a) })
+  assert.equal(oldDocuments.status(), 200)
+  assert.equal(JSON.parse((await oldDocuments.json()).documentsJson).length, 1, 'previous code reads the committed upload metadata')
   const tooLarge = await authenticated.request.post(`${base}/api/customers/synthetic-edit/documents`, {
     headers: requestHeaders(b), multipart: { type: '사업자등록증', file: { ...file, buffer: Buffer.alloc(11 * 1024 * 1024) } },
   })
