@@ -181,7 +181,10 @@ try {
   })
   assert.equal(latest.status(), 200)
   assert.equal(latest.headers()['x-marketing-release'], b)
-  const olderRead = await authenticated.request.get(`${base}/api/customers/synthetic-parallel`, { headers: requestHeaders(a) })
+  // Ordinary GETs intentionally go to active. For rollback compatibility, read
+  // the private old slot directly with this synthetic session, never an RSC spoof.
+  const previousHeaders = { host: 'proxy:8080', cookie: (await authenticated.cookies(base)).map(cookie => `${cookie.name}=${cookie.value}`).join('; ') }
+  const olderRead = await authenticated.request.get('http://blue:3000/api/customers/synthetic-parallel', { headers: previousHeaders })
   assert.equal(olderRead.status(), 200)
   assert.equal(olderRead.headers()['x-marketing-release'], a)
   assert.equal((await olderRead.json()).memo, 'latest committed by current code')
@@ -189,10 +192,12 @@ try {
     headers: requestHeaders(a), data: { memo: 'edited by previous code after current write' },
   })
   assert.equal(olderWrite.status(), 200)
+  assert.equal(olderWrite.headers()['x-marketing-release'], a)
   const preserved = await olderWrite.json()
   assert.equal(preserved.companyName, 'Preserve this newer value')
-  const oldDocuments = await authenticated.request.get(`${base}/api/customers/synthetic-quota`, { headers: requestHeaders(a) })
+  const oldDocuments = await authenticated.request.get('http://blue:3000/api/customers/synthetic-quota', { headers: previousHeaders })
   assert.equal(oldDocuments.status(), 200)
+  assert.equal(oldDocuments.headers()['x-marketing-release'], a)
   assert.equal(JSON.parse((await oldDocuments.json()).documentsJson).length, 1, 'previous code reads the committed upload metadata')
   const tooLarge = await authenticated.request.post(`${base}/api/customers/synthetic-edit/documents`, {
     headers: requestHeaders(b), multipart: { type: '사업자등록증', file: { ...file, buffer: Buffer.alloc(11 * 1024 * 1024) } },
