@@ -5,12 +5,14 @@ import { createRequire } from 'node:module'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
 const require = createRequire('/app/package.json')
-const { encode } = await import(require.resolve('next-auth/jwt'))
+// Next standalone bundles auth internally; the fixture uses the installed test dependency.
+const { encode } = await import(createRequire('/src/package.json').resolve('next-auth/jwt'))
 const cookie = '__Secure-authjs.session-token'
 const token = await encode({ secret: 'synthetic-lab-secret-at-least-32-characters', salt: cookie,
   token: { sub: 'synthetic-user', id: 'synthetic-user', role: 'admin', email: 'synthetic@example.invalid' } })
 const headers = { Host: 'localhost:3443', Cookie: `${cookie}=${token}` }
 const counters = { reads: 0, saves: 0, uploads: 0, downloads: 0, errors: 0, maxRequestMs: 0 }
+let failedStatus = null
 
 function request(path, method = 'GET', body, extra = {}, hold = false) {
   return new Promise((resolve, reject) => {
@@ -22,7 +24,10 @@ function request(path, method = 'GET', body, extra = {}, hold = false) {
       response.on('error', reject)
       response.on('end', () => {
         counters.maxRequestMs = Math.max(counters.maxRequestMs, performance.now() - started)
-        if (response.statusCode !== 200) return reject(new Error('synthetic_http_failure'))
+        if (response.statusCode !== 200) {
+          failedStatus = response.statusCode
+          return reject(new Error('synthetic_http_failure'))
+        }
         resolve({ body: Buffer.concat(chunks), headers: response.headers })
       })
     })
@@ -94,7 +99,8 @@ try {
     db.close()
     writeFileSync('/control/traffic-result.json', JSON.stringify({ ...counters, cycles: cycle }))
   }
-} catch {
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, httpStatus: failedStatus, errorType: error.name }))
   writeFileSync('/control/traffic-failed', 'synthetic_traffic_failed\n')
   process.exitCode = 1
 }
