@@ -29,8 +29,15 @@ services:
     profiles: [collector]
     stop_grace_period: 210s
     command: ["node", "worker.mjs"]
+    healthcheck:
+      test: ["CMD", "node", "worker-health.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     environment:
       <<: *environment
+      MARKETING_WORKER_OWNER: ${MARKETING_WORKER_OWNER-}
       INQUIRY_COLLECTOR_ENABLED: ${INQUIRY_COLLECTOR_ENABLED:-false}
       MLEVERAGE_USERNAME: ${MLEVERAGE_USERNAME-}
       MLEVERAGE_PASSWORD: ${MLEVERAGE_PASSWORD-}

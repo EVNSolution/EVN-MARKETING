@@ -21,6 +21,7 @@ for (const path of [
   '/app/tests',
 ]) assert.equal(existsSync(path), false, `build-only path present: ${path}`)
 assert.equal(existsSync('/app/warp-delivery.mjs'), true, 'packaged WARP CLI is present')
+assert.equal(existsSync('/app/worker-health.mjs'), true, 'packaged worker health CLI is present')
 const Database = require('better-sqlite3')
 const { chromium } = require('playwright-core')
 mkdirSync('/data/uploads', { recursive: true })
@@ -124,7 +125,7 @@ const browser = await chromium.launch({ headless: true })
 await browser.close()
 // The CI container has no external network; dummy credentials can never reach the source.
 const worker = spawnSync(process.execPath, ['/app/worker.mjs'], {
-  env: { ...process.env, INQUIRY_COLLECTOR_ENABLED: 'true', DATABASE_URL: 'file:/data/marketing.db', MLEVERAGE_USERNAME: 'synthetic-user', MLEVERAGE_PASSWORD: 'synthetic-password', WARP_DELIVERY_ENABLED: 'false' },
+  env: { ...process.env, INQUIRY_COLLECTOR_ENABLED: 'true', MARKETING_WORKER_OWNER: '00000000-0000-4000-8000-000000000001', DATABASE_URL: 'file:/data/marketing.db', MLEVERAGE_USERNAME: 'synthetic-user', MLEVERAGE_PASSWORD: 'synthetic-password', WARP_DELIVERY_ENABLED: 'false' },
   encoding: 'utf8', timeout: 60_000,
 })
 assert.equal(worker.status, 1, 'worker must stop when the source is unreachable')
@@ -137,4 +138,52 @@ try {
 } finally {
   verified.close()
 }
-console.log('synthetic SQLite, Chromium, packaged CLI key guard, pilot/replay, busy lease, worker and lease cleanup passed')
+const healthEnv = {
+  NODE_ENV: 'production', DATABASE_URL: 'file:/data/marketing.db',
+  MARKETING_WORKER_OWNER: '00000000-0000-4000-8000-000000000001',
+  MARKETING_REVISION: 'a'.repeat(40), MARKETING_IMAGE_DIGEST: `sha256:${'b'.repeat(64)}`,
+}
+const health = (overrides = {}) => spawnSync(process.execPath, ['/app/worker-health.mjs'], {
+  env: { ...healthEnv, ...overrides }, encoding: 'utf8', timeout: 5_000,
+})
+const healthDb = new Database('/data/marketing.db')
+try {
+  const previous = healthDb.prepare('SELECT * FROM InquirySyncState').get()
+  const now = new Date()
+  const set = healthDb.prepare('UPDATE InquirySyncState SET workerOwner = ?, workerHeartbeatAt = ?, workerLeaseExpiresAt = ?, status = ?')
+  try {
+    set.run(healthEnv.MARKETING_WORKER_OWNER, now.toISOString(), new Date(now.getTime() + 180_000).toISOString(), 'ready')
+    const before = healthDb.prepare('SELECT * FROM InquirySyncState').get()
+    const ready = health()
+    assert.equal(ready.status, 0, 'packaged readonly health loads without development dependencies')
+    assert.equal(ready.stderr, '')
+    assert.equal(JSON.parse(ready.stdout).ok, true)
+    assert.equal(JSON.parse(ready.stdout).revision, healthEnv.MARKETING_REVISION)
+    assert.deepEqual(healthDb.prepare('SELECT * FROM InquirySyncState').get(), before, 'health leaves lease and schedule untouched')
+    for (const overrides of [
+      { MARKETING_WORKER_OWNER: '00000000-0000-4000-8000-000000000002' },
+      { MARKETING_WORKER_OWNER: '' },
+      { MARKETING_IMAGE_DIGEST: '' },
+      { DATABASE_URL: 'file:/data/must-not-create.db' },
+    ]) {
+      const rejected = health(overrides)
+      assert.equal(rejected.status, 1)
+      assert.equal(rejected.stderr, '')
+      assert.equal(JSON.parse(rejected.stdout).ok, false)
+    }
+    assert.equal(existsSync('/data/must-not-create.db'), false)
+    set.run(healthEnv.MARKETING_WORKER_OWNER, now.toISOString(), new Date(now.getTime() - 1).toISOString(), 'ready')
+    assert.deepEqual(JSON.parse(health().stdout), { ok: false, reason: 'lease' })
+    set.run(healthEnv.MARKETING_WORKER_OWNER, now.toISOString(), new Date(now.getTime() + 180_000).toISOString(), 'login_required')
+    assert.deepEqual(JSON.parse(health().stdout), { ok: false, reason: 'source' })
+  } finally {
+    set.run(previous.workerOwner, previous.workerHeartbeatAt, previous.workerLeaseExpiresAt, previous.status)
+  }
+} finally { healthDb.close() }
+const invalidWorker = spawnSync(process.execPath, ['/app/worker.mjs'], {
+  env: { NODE_ENV: 'production', INQUIRY_COLLECTOR_ENABLED: 'true', DATABASE_URL: 'file:/data/must-not-create.db' }, encoding: 'utf8', timeout: 5_000,
+})
+assert.equal(invalidWorker.status, 1, 'production worker needs a unique configured owner before any DB access')
+assert.equal(invalidWorker.stderr.trim(), 'invalid_worker_owner')
+assert.equal(existsSync('/data/must-not-create.db'), false)
+console.log('synthetic SQLite, Chromium, packaged pilot/replay, busy lease, worker cleanup and readonly worker health passed')

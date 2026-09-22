@@ -7,6 +7,7 @@ export const INQUIRY_HOMEPAGE_ID = '5c7a6115-a0a9-4e8d-bf65-efce52195fa4'
 export const INQUIRY_SCOPE_ID = `${INQUIRY_SOURCE}:${INQUIRY_COMPANY_ID}:${INQUIRY_HOMEPAGE_ID}`
 export const INQUIRY_START_DATE = '2000-01-01'
 export const INQUIRY_PAGE_SIZE = 200
+export const WORKER_LEASE_MS = 180_000
 const BLOCKING_STATUSES = ['login_required', 'credentials_invalid', 'credentials_missing', 'source_credentials_incomplete', 'source_credentials_missing', 'login_retry_exhausted']
 
 type Db = PrismaClient | Prisma.TransactionClient
@@ -111,7 +112,7 @@ export function inquirySyncStatus(
   activeStatus?: string,
   now = new Date(),
 ) {
-  if (!state?.workerHeartbeatAt || now.getTime() - state.workerHeartbeatAt.getTime() > 180_000) return 'offline'
+  if (!state?.workerHeartbeatAt || now.getTime() - state.workerHeartbeatAt.getTime() > WORKER_LEASE_MS) return 'offline'
   if (BLOCKING_STATUSES.includes(state.status)) return state.status
   return activeStatus ?? state.status
 }
@@ -156,8 +157,9 @@ export async function enqueueSync(db: PrismaClient, trigger: 'manual' | 'hourly'
 export async function claimWorker(db: PrismaClient, owner: string, now = new Date()) {
   await ensureSyncState(db)
   const claimed = await db.inquirySyncState.updateMany({
-    where: { id: INQUIRY_SCOPE_ID, OR: [{ workerOwner: null }, { workerOwner: owner }, { workerLeaseExpiresAt: { lt: now } }] },
-    data: { workerOwner: owner, workerHeartbeatAt: now, workerLeaseExpiresAt: new Date(now.getTime() + 180_000) },
+    // Acquisition never renews an existing owner: a duplicate process may share its configuration.
+    where: { id: INQUIRY_SCOPE_ID, OR: [{ workerOwner: null }, { workerLeaseExpiresAt: { lt: now } }] },
+    data: { status: 'starting', workerOwner: owner, workerHeartbeatAt: now, workerLeaseExpiresAt: new Date(now.getTime() + WORKER_LEASE_MS) },
   })
   return claimed.count === 1
 }
@@ -165,7 +167,7 @@ export async function claimWorker(db: PrismaClient, owner: string, now = new Dat
 export async function heartbeatWorker(db: PrismaClient, owner: string, now = new Date()) {
   const renewed = await db.inquirySyncState.updateMany({
     where: { id: INQUIRY_SCOPE_ID, workerOwner: owner, workerLeaseExpiresAt: { gt: now } },
-    data: { workerHeartbeatAt: now, workerLeaseExpiresAt: new Date(now.getTime() + 180_000) },
+    data: { workerHeartbeatAt: now, workerLeaseExpiresAt: new Date(now.getTime() + WORKER_LEASE_MS) },
   })
   if (renewed.count !== 1) throw new SyncError('lost_worker_lease')
 }
@@ -203,7 +205,7 @@ export async function claimNextRun(db: PrismaClient, now = new Date(), owner: st
         data: {
           workerOwner: owner,
           workerHeartbeatAt: now,
-          workerLeaseExpiresAt: new Date(now.getTime() + 180_000),
+          workerLeaseExpiresAt: new Date(now.getTime() + WORKER_LEASE_MS),
           lockOwner: owner,
           lockExpiresAt,
           status: 'running',

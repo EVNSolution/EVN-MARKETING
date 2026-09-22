@@ -41,6 +41,9 @@ type InquiryResponse = {
 }
 
 const statusText: Record<string, { label: string; className: string }> = {
+  starting: { label: '수집 연결 준비 중', className: 'bg-amber-100 text-amber-800' },
+  ready: { label: '정상 대기', className: 'bg-lime-100 text-lime-800' },
+  source_error: { label: '원본 연결 재시도 중', className: 'bg-orange-100 text-orange-800' },
   success: { label: '정상 대기', className: 'bg-lime-100 text-lime-800' },
   running: { label: '가져오는 중', className: 'bg-sky-100 text-sky-700' },
   pending: { label: '실행 대기', className: 'bg-amber-100 text-amber-800' },

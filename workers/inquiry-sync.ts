@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { collectorEnabled, runInquiryWorker, type WorkerDependencies } from './worker-runtime'
+import { configuredWorkerOwner } from '@/lib/worker-health'
 
 async function main() {
   const enabled = collectorEnabled()
@@ -7,6 +8,7 @@ async function main() {
     console.error('collector_disabled')
     return 0
   }
+  const owner = configuredWorkerOwner()
 
   const controller = new AbortController()
   const stop = () => controller.abort()
@@ -41,14 +43,14 @@ async function main() {
       readSourcePage: source.readSourcePage,
       koreaDate: sync.koreaDate,
     }
-    return await runInquiryWorker({ enabled, signal: controller.signal, dependencies })
+    return await runInquiryWorker({ enabled, signal: controller.signal, dependencies, owner })
   } finally {
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)
   }
 }
 
-main().then((code) => { process.exitCode = code }).catch(() => {
-  console.error('worker_error')
+main().then((code) => { process.exitCode = code }).catch((error) => {
+  console.error(error instanceof Error && error.message === 'invalid_worker_owner' ? 'invalid_worker_owner' : 'worker_error')
   process.exitCode = 1
 })

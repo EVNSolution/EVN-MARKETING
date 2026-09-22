@@ -50,7 +50,69 @@ async function main() {
   await testStopAfterEnqueue()
   await testLeaseFailureDuringDrain()
   await testCleanupFailures()
+  await testHealthTransitionsAndLeaseLoss()
+  await testLoginRedirectIsNotReadiness()
   console.log('worker runtime tests passed')
+}
+
+async function testLoginRedirectIsNotReadiness() {
+  await withWorkerDatabase(async (worker, inspect) => {
+    const controller = new AbortController()
+    let logins = 0
+    const waits: number[] = []
+    const deps = dependencies(worker, { prepare: async () => false, login: async () => {
+      if (++logins === 5) controller.abort()
+      return true
+    } })
+    const result = await runInquiryWorker({
+      enabled: true, signal: controller.signal, dependencies: deps, owner: 'redirect-only', log: () => {},
+      wait: async (ms) => {
+        waits.push(ms)
+        assert.equal((await inspect.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })).status, logins < 4 ? 'login_required' : 'login_retry_exhausted')
+        assert.equal(await inspect.inquirySyncRun.count(), 0, 'unverified login does not claim a collection')
+      },
+    })
+    assert.equal(result, 0)
+    assert.equal(logins, 5)
+    assert.deepEqual(waits, [1_000, 5_000, 15_000, ...Array(20).fill(15_000)], 'verification failures use bounded retries and five-minute cooldown')
+  })
+}
+
+async function testHealthTransitionsAndLeaseLoss() {
+  await withWorkerDatabase(async (worker, inspect) => {
+    await ensureSyncState(inspect)
+    const nextRunAt = new Date(Date.now() + 3_600_000)
+    await inspect.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { status: 'success', nextRunAt } })
+    const state = () => inspect.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })
+    let prepares = 0
+    let claims = 0
+    let waits = 0
+    const logs: string[] = []
+    const deps = dependencies(worker, {
+      open: async () => { assert.equal((await state()).status, 'starting', 'new owner must not inherit old readiness') },
+      prepare: async () => {
+        if (++prepares === 1) throw new SyncError('page_error')
+        return true
+      },
+      read: async () => { throw new Error('scheduled collection must not run yet') },
+    })
+    deps.claimWorker = async (...args) => { claims++; return claimWorker(...args) }
+    const result = await runInquiryWorker({
+      enabled: true, signal: new AbortController().signal, dependencies: deps, owner: 'health-transitions', log: code => logs.push(code),
+      wait: async () => {
+        if (++waits === 1) assert.equal((await state()).status, 'source_error', 'source error invalidates prior readiness')
+        else {
+          assert.equal((await state()).status, 'ready', 'protected page recovery restores readiness')
+          await inspect.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { workerOwner: 'replacement', status: 'starting' } })
+        }
+      },
+    })
+    assert.equal(result, 1)
+    assert.equal(claims, 1, 'a fenced worker exits instead of trying to acquire again')
+    assert.equal((await state()).workerOwner, 'replacement', 'former owner cannot release the replacement')
+    assert.equal((await state()).nextRunAt?.getTime(), nextRunAt.getTime())
+    assert.deepEqual(logs, ['page_error', 'lost_worker_lease'])
+  })
 }
 
 function deferred<T = void>() {
