@@ -182,6 +182,9 @@ export async function restore(bundle, destination, expected, manifest) {
   const files = JSON.parse(await readFile(path.join(bundle, 'inventory.json'), 'utf8')).files
   await copyFile(path.join(bundle, 'marketing.db'), path.join(destination, 'marketing.db'), constants.COPYFILE_EXCL)
   await chmod(path.join(destination, 'marketing.db'), 0o600)
+  // The immutable bundle is standalone; the new runtime copy must satisfy readiness before app queries.
+  const restored = new Database(path.join(destination, 'marketing.db'), { fileMustExist: true })
+  try { if (restored.pragma('journal_mode = WAL', { simple: true }) !== 'wal') fail() } finally { restored.close() }
   const fd = await open(path.join(destination, 'marketing.db'), 'r')
   try { await fd.sync() } finally { await fd.close() }
   await copyUploads(path.join(bundle, 'uploads'), path.join(destination, 'uploads'), files)

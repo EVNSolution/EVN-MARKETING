@@ -34,6 +34,7 @@ try {
   const restored = await restore(bundle, target, result.summarySha256, manifest)
   assert.ok(restored.restoreSeconds >= 0)
   const copy = new Database(path.join(target,'marketing.db'),{readonly:true})
+  assert.equal(copy.pragma('journal_mode', { simple: true }), 'wal', 'restored data must pass runtime readiness before any app query')
   assert.equal(copy.prepare('SELECT name FROM Customer').get().name,'Synthetic')
   assert.equal(copy.prepare('SELECT warpActivityId FROM Inquiry').get().warpActivityId,'receipt')
   assert.equal(copy.prepare('SELECT password FROM User').get().password,'synthetic-hash')
