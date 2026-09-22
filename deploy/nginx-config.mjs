@@ -14,6 +14,7 @@ events { worker_connections 256; }
 http {
   access_log off;
   server_tokens off;
+  map_hash_bucket_size 128;
   ${releases.map(({ slot }) => `upstream ${slot} { server ${slot}:3000; }`).join('\n  ')}
   map "$arg_dpl:$http_x_deployment_id" $marketing_id {
     default invalid;
