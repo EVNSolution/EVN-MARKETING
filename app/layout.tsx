@@ -5,7 +5,7 @@ import ReleaseNotice from '@/components/ReleaseNotice'
 
 const notoSansKR = localFont({
   src: './fonts/NotoSansKR-variable.woff2',
-  weight: '100 900',
+  weight: '400 900',
   style: 'normal',
   display: 'swap',
   variable: '--font-korean',
@@ -13,7 +13,7 @@ const notoSansKR = localFont({
 
 const jost = localFont({
   src: './fonts/Jost-variable.woff2',
-  weight: '100 900',
+  weight: '400 800',
   style: 'normal',
   display: 'swap',
   variable: '--font-latin',

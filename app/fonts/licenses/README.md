@@ -28,7 +28,9 @@ and license notices.
 Converted full TTF files to WOFF2 using Python 3.12, FontTools 4.65.0 and Brotli
 1.2.0 in temporary tooling outside the application. No glyph subsetting, weight
 instancing, outline editing, or font renaming was performed. Both normal-style
-fonts retain their `wght` axis from 100 through 900. Existing CSS variables
+fonts retain their `wght` axis from 100 through 900. The app declares 400–900 for
+Noto Sans KR and 400–800 for Jost, retaining the former maximum used for the bold
+Latin logo. Existing CSS variables
 `--font-korean` and `--font-latin`, the Jost-first font stack, and `display: swap`
 are preserved. The original application used normal fonts; no italic asset is
 added.

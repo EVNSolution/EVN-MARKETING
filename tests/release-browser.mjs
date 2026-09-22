@@ -236,7 +236,7 @@ try {
   const rejectedSave = oldLogin.waitForResponse(response => response.url().endsWith('/api/customers/synthetic-edit') && response.request().method() === 'PUT')
   await oldLogin.getByRole('button', { name: '저장하기', exact: true }).click()
   assert.equal((await rejectedSave).status(), 409)
-  await oldLogin.getByRole('alert').waitFor()
+  await oldLogin.getByRole('alert').filter({ hasText: '새 버전이 준비되었습니다' }).waitFor()
   assert.equal(await oldLogin.locator('textarea[rows="4"]').inputValue(), 'keep unsaved after expiry')
   assert.equal(db.prepare('SELECT memo FROM Customer WHERE id = ?').get('synthetic-edit').memo, lastSavedMemo)
   assert.equal(writes.length, beforeExpireWrites + 1, 'expired write was attempted once, never automatically replayed')
