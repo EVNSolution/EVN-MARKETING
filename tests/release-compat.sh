@@ -8,6 +8,10 @@ chmod 777 "$compat_dir"
 mkdir "$compat_dir/data" "$compat_dir/control" "$compat_dir/nginx"
 chmod 777 "$compat_dir/data" "$compat_dir/control"
 cleanup() {
+  if [ "$?" -ne 0 ]; then
+    for slot in blue green proxy; do docker logs --tail 40 "marketing-compat-$slot" 2>&1 || true; done
+    docker exec marketing-compat-blue node -e "fetch('http://127.0.0.1:3000/api/readyz').then(async r => console.log('direct readiness:', r.status, await r.text())).catch(e => console.log(e.message))" || true
+  fi
   docker rm -f marketing-compat-test marketing-compat-proxy marketing-compat-blue marketing-compat-green >/dev/null 2>&1 || true
   docker network rm marketing-compat >/dev/null 2>&1 || true
 }
@@ -36,6 +40,7 @@ writeFileSync(`${process.argv[2]}/nginx/nginx.conf`, renderNginx({ active: { id:
 NODE
 docker run -d --name marketing-compat-proxy --network marketing-compat --network-alias proxy \
   -v "$compat_dir/nginx:/etc/nginx:ro" nginx:1.28-alpine nginx -g 'daemon off;'
+docker exec marketing-compat-proxy nginx -t
 docker run -d --name marketing-compat-test --network marketing-compat \
   -v "$PWD:/src:ro" -v "$compat_dir/data:/data" -v "$compat_dir/control:/control" \
   -e RELEASE_A="$release_a" -e RELEASE_B="$release_b" evn-marketing:ci node /src/tests/release-browser.mjs

@@ -22,11 +22,12 @@ const contexts = []
 const deadline = setTimeout(() => { throw new Error('compatibility browser test timed out') }, 150_000)
 
 async function until(check) {
+  let lastError
   for (let n = 0; n < 300; n++) {
-    try { if (await check()) return } catch { /* service may still be starting */ }
+    try { if (await check()) return } catch (error) { lastError = error }
     await delay(100)
   }
-  throw new Error('compatibility condition timed out')
+  throw new Error('compatibility condition timed out', { cause: lastError })
 }
 
 async function context(options = {}) {
