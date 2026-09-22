@@ -34,7 +34,7 @@ const browser = await chromium.launch({ headless: true })
 await browser.close()
 // The CI container has no external network; dummy credentials can never reach the source.
 const worker = spawnSync(process.execPath, ['/app/worker.mjs'], {
-  env: { ...process.env, DATABASE_URL: 'file:/data/marketing.db', MLEVERAGE_USERNAME: 'synthetic-user', MLEVERAGE_PASSWORD: 'synthetic-password', WARP_DELIVERY_ENABLED: 'false' },
+  env: { ...process.env, INQUIRY_COLLECTOR_ENABLED: 'true', DATABASE_URL: 'file:/data/marketing.db', MLEVERAGE_USERNAME: 'synthetic-user', MLEVERAGE_PASSWORD: 'synthetic-password', WARP_DELIVERY_ENABLED: 'false' },
   encoding: 'utf8', timeout: 60_000,
 })
 assert.equal(worker.status, 1, 'worker must stop when the source is unreachable')

@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import CustomerDetailClient from './CustomerDetailClient'
+import { safeReturnTo } from '@/lib/customer-security'
 
 export default async function CustomerDetailPage({
   params,
@@ -18,5 +19,5 @@ export default async function CustomerDetailPage({
     },
   })
   if (!customer) notFound()
-  return <CustomerDetailClient customer={JSON.parse(JSON.stringify(customer))} returnTo={returnTo} />
+  return <CustomerDetailClient customer={JSON.parse(JSON.stringify(customer))} returnTo={safeReturnTo(returnTo)} />
 }

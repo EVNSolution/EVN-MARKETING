@@ -27,6 +27,7 @@ services:
     command: ["node", "worker.mjs"]
     environment:
       <<: *environment
+      INQUIRY_COLLECTOR_ENABLED: ${INQUIRY_COLLECTOR_ENABLED:-false}
       MLEVERAGE_USERNAME: ${MLEVERAGE_USERNAME-}
       MLEVERAGE_PASSWORD: ${MLEVERAGE_PASSWORD-}
       INQUIRY_BROWSER_HEADLESS: ${INQUIRY_BROWSER_HEADLESS-}

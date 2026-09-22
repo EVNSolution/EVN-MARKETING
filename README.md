@@ -17,7 +17,7 @@ WARP에서 분리한 사내용 고객 관계 관리(CRM) 애플리케이션입�
 Node.js와 npm이 필요합니다.
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
 npx prisma generate
 npm run dev
@@ -64,7 +64,7 @@ npm run lint
 | `landingUrl` | 문자열 | 아니요 | 고객 메모 또는 재접수 활동 내용 |
 | `submittedAt` | 날짜 문자열 | 아니요 | 수집일 또는 활동일. 없으면 수신 시각 사용 |
 
-새 전화번호이면 B2C 잠재고객을 만들고 `201`과 `{ "ok": true, "customerId": "...", "created": true }`를 반환합니다. 같은 전화번호가 이미 있으면 고객을 중복 생성하지 않고 재접수 활동을 추가한 뒤 `200`과 `created: false`를 반환합니다.
+현재 구현은 새 전화번호이면 B2C 잠재고객을 만들고 `201`과 `{ "ok": true, "customerId": "...", "created": true }`를 반환하며, 일치하는 고객을 찾으면 재접수 활동을 추가합니다. 다만 정규화·동시 요청·기존 복수 고객 충돌 처리가 아직 보완되지 않았으므로 **운영에서는 `LEADS_INTAKE_API_KEY`를 비워 이 API를 비활성으로 유지합니다**. 이 제한은 별도로 검증된 WARP 문의 발신 기능과 구분합니다.
 
 - API 키 누락·불일치: `401`
 - 올바르지 않은 JSON 또는 필수값 누락: `400`
@@ -79,6 +79,6 @@ npm run lint
 
 격리된 검증 환경에서는 `docker compose up -d --build web`로 웹만 127.0.0.1:3100에 바인딩할 수 있습니다. 운영에서는 서버에서 빌드하지 않고 승인된 경로에서 만든 이미지 digest를 `MARKETING_IMAGE`로 주입해 `--no-build`로 실행합니다. 인증 비밀값과 공개 `AUTH_URL` 등은 실행 환경에서 주입하며 Compose용 `.env` 파일에 비밀값을 저장하지 마세요. 데이터베이스 URL은 `file:/data/marketing.db`, 업로드 경로는 `/data/uploads`입니다. 기존 SQLite 파일 전체(사용자, 문의, WARP 전송 기록 포함)와 업로드 파일을 같은 영구 볼륨에 이관한 후 실행해야 합니다. 컨테이너 시작 시 migration이나 seed는 실행하지 않습니다.
 
-기존 Mac 수집기를 중지하고 데이터 이관을 확인한 뒤에만 `MLEVERAGE_USERNAME`과 `MLEVERAGE_PASSWORD`를 실행 환경에 함께 주입하고 `docker compose --profile collector up -d worker`로 서버 수집기를 켜세요. 서버에서는 Chromium이 기본적으로 headless입니다. `INQUIRY_BROWSER_HEADLESS`는 `true` 또는 `false`만 지정할 수 있습니다. WARP 전송은 기본적으로 꺼져 있으며, 승인된 점검 후 `WARP_DELIVERY_ENABLED=true`로 활성화합니다.
+기존 Mac 수집기를 중지하고 데이터 이관을 확인한 뒤에만 `MLEVERAGE_USERNAME`과 `MLEVERAGE_PASSWORD`를 실행 환경에 함께 주입하고, 그 실행 위치에서 `INQUIRY_COLLECTOR_ENABLED=true`를 지정해 `docker compose --profile collector up -d worker`로 서버 수집기를 켜세요. 명시적 활성화가 없으면 수집기는 DB·브라우저·자격증명에 접근하기 전에 종료합니다. 서버에서는 Chromium이 기본적으로 headless입니다. `INQUIRY_BROWSER_HEADLESS`는 `true` 또는 `false`만 지정할 수 있습니다. WARP 전송은 기본적으로 꺼져 있으며, 승인된 점검 후 `WARP_DELIVERY_ENABLED=true`로 활성화합니다.
 
 현재 이 구성은 운영 배포 완료를 의미하지 않습니다. 배포 대상은 **WARP와 자원을 공유하지 않는 Marketing 전용 신규 서버**입니다. [배포 계획 안내](docs/production-deployment.md), [전용 서버·자료 이관 계획](docs/dedicated-server-plan.md), [WARP 방식 무중단 배포 명세](docs/zero-downtime-deployment-plan.md), [PR #1 검토 결과](docs/pr-1-review.md)를 확인하세요. 일반 배포는 웹 blue/green과 수집기 단일 인계를 목표로 하며, 현재 Compose에 이 절차가 구현되었다는 뜻은 아닙니다.

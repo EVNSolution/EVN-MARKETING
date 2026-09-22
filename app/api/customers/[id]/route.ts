@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { mergeContacts, requireMetadataUpdate } from '@/lib/upload-security'
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -33,9 +34,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       }
     }
 
-    const customer = await prisma.customer.update({
-      where: { id },
-      data: {
+    const current = b.contactsJson !== undefined
+      ? await prisma.customer.findUnique({ where: { id }, select: { contactsJson: true } })
+      : null
+    if (b.contactsJson !== undefined && !current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const contactsJson = current ? mergeContacts(current.contactsJson, b.contactsJson) : undefined
+
+    const data = {
         /* ── 기본 정보 ── */
         ...(b.name             !== undefined && { name:             b.name }),
         ...(b.phone            !== undefined && { phone:            n(b.phone) }),
@@ -73,7 +78,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         ...(b.companyAddress   !== undefined && { companyAddress:   n(b.companyAddress) }),
         ...(b.companyPhone     !== undefined && { companyPhone:     n(b.companyPhone) }),
         ...(b.employeeCount    !== undefined && { employeeCount:    b.employeeCount ?? null }),
-        ...(b.contactsJson     !== undefined && { contactsJson:     n(b.contactsJson) }),
+        ...(b.contactsJson     !== undefined && { contactsJson }),
 
         /* ── B2B 법인 매출 ── */
         ...(b.b2bRevenue1      !== undefined && { b2bRevenue1:      n(b.b2bRevenue1) }),
@@ -102,14 +107,33 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         ...(b.workShift        !== undefined && { workShift:        n(b.workShift) }),
         ...(b.monthlyIncome    !== undefined && { monthlyIncome:    n(b.monthlyIncome) }),
         ...(b.cargoNote        !== undefined && { cargoNote:        n(b.cargoNote) }),
-      },
-    })
+    }
+    let customer
+    if (current) {
+      const result = await prisma.customer.updateMany({
+        where: { id, contactsJson: current.contactsJson },
+        data,
+      })
+      try { requireMetadataUpdate(result.count) } catch {
+        return NextResponse.json({ error: '관계자 정보가 다른 요청에서 변경되었습니다. 새로고침 후 다시 시도해 주세요.' }, { status: 409 })
+      }
+      customer = await prisma.customer.findUniqueOrThrow({ where: { id } })
+    } else {
+      customer = await prisma.customer.update({ where: { id }, data })
+    }
     // libSQL Boolean 호환: isAgent는 raw SQL로 별도 업데이트
     if (b.isAgent !== undefined) {
       await prisma.$executeRaw`UPDATE "Customer" SET "isAgent" = ${b.isAgent ? 1 : 0} WHERE id = ${id}`
     }
     return NextResponse.json(customer)
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (message === 'invalid_contacts_metadata') {
+      return NextResponse.json({ error: '관계자 정보가 손상되어 저장하지 않았습니다.' }, { status: 400 })
+    }
+    if (message === 'contact_card_must_be_deleted_first') {
+      return NextResponse.json({ error: '명함을 먼저 삭제한 뒤 관계자를 삭제해 주세요.' }, { status: 409 })
+    }
     return NextResponse.json({ error: '수정 실패' }, { status: 500 })
   }
 }

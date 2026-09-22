@@ -13,14 +13,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: npm run test:server-runtime && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck
+      - run: npm run test:server-runtime && npm run test:worker-runtime && npm run test:upload-security && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
       - run: docker build -t evn-marketing:ci .
       - name: Synthetic container smoke
         run: |
           mkdir -p "$RUNNER_TEMP/marketing-smoke"
           chmod 777 "$RUNNER_TEMP/marketing-smoke"
           docker run --rm --network none -v "$PWD:/src:ro" -v "$RUNNER_TEMP/marketing-smoke:/data" evn-marketing:ci node /src/tests/container-smoke.mjs
-          if docker run --rm --network none -v "$RUNNER_TEMP/marketing-smoke:/data" -e DATABASE_URL=file:/data/marketing.db evn-marketing:ci node worker.mjs; then exit 1; fi
+          docker run --rm --network none evn-marketing:ci node worker.mjs
           docker run -d --name marketing-smoke --network none -v "$RUNNER_TEMP/marketing-smoke:/data" \
             -e AUTH_SECRET=synthetic-ci-only-secret-at-least-32-characters \
             -e AUTH_TRUST_HOST=true -e AUTH_URL=http://127.0.0.1:3100 \

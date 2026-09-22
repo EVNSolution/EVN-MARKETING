@@ -7,6 +7,7 @@ export const INQUIRY_HOMEPAGE_ID = '5c7a6115-a0a9-4e8d-bf65-efce52195fa4'
 export const INQUIRY_SCOPE_ID = `${INQUIRY_SOURCE}:${INQUIRY_COMPANY_ID}:${INQUIRY_HOMEPAGE_ID}`
 export const INQUIRY_START_DATE = '2000-01-01'
 export const INQUIRY_PAGE_SIZE = 200
+const BLOCKING_STATUSES = ['login_required', 'credentials_invalid', 'credentials_missing', 'source_credentials_incomplete', 'source_credentials_missing', 'login_retry_exhausted']
 
 type Db = PrismaClient | Prisma.TransactionClient
 
@@ -111,7 +112,7 @@ export function inquirySyncStatus(
   now = new Date(),
 ) {
   if (!state?.workerHeartbeatAt || now.getTime() - state.workerHeartbeatAt.getTime() > 180_000) return 'offline'
-  if (state.status === 'login_required') return 'login_required'
+  if (BLOCKING_STATUSES.includes(state.status)) return state.status
   return activeStatus ?? state.status
 }
 
@@ -133,7 +134,7 @@ export async function enqueueSync(db: PrismaClient, trigger: 'manual' | 'hourly'
   return db.$transaction(async (tx) => {
     await ensureSyncState(tx)
     const state = await tx.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { updatedAt: new Date() } })
-    if (state.status === 'login_required') return null
+    if (BLOCKING_STATUSES.includes(state.status)) return null
     const active = await tx.inquirySyncRun.findFirst({
       where: { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID, status: { in: ['pending', 'running'] } },
       select: { id: true },
@@ -169,10 +170,10 @@ export async function heartbeatWorker(db: PrismaClient, owner: string, now = new
   if (renewed.count !== 1) throw new SyncError('lost_worker_lease')
 }
 
-export async function releaseWorker(db: PrismaClient, owner: string, now = new Date()) {
+export async function releaseWorker(db: PrismaClient, owner: string, now = new Date(), status = 'offline') {
   await db.inquirySyncState.updateMany({
     where: { id: INQUIRY_SCOPE_ID, workerOwner: owner },
-    data: { status: 'offline', workerHeartbeatAt: now, workerOwner: null, workerLeaseExpiresAt: null },
+    data: { status, workerHeartbeatAt: now, workerOwner: null, workerLeaseExpiresAt: null },
   })
 }
 
@@ -190,6 +191,7 @@ export async function claimNextRun(db: PrismaClient, now = new Date(), owner: st
   const locked = await db.inquirySyncState.updateMany({
     where: {
       id: INQUIRY_SCOPE_ID,
+      status: { notIn: BLOCKING_STATUSES },
       AND: [
         { OR: [{ workerOwner: null }, { workerOwner: owner }, { workerLeaseExpiresAt: { lt: now } }] },
         { OR: [{ lockExpiresAt: null }, { lockExpiresAt: { lt: now } }] },

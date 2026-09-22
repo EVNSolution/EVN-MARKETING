@@ -1,75 +1,134 @@
 import { NextRequest, NextResponse } from 'next/server'
+import path from 'node:path'
 import { prisma } from '@/lib/db'
-import path from 'path'
-import fs from 'fs/promises'
+import {
+  commitNewUpload,
+  deleteOwnedUpload,
+  parseContacts,
+  removeOwnedUpload,
+  requireMetadataUpdate,
+  validateMultipartLength,
+  writeCustomerUpload,
+} from '@/lib/upload-security'
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR ?? path.join(process.cwd(), 'uploads')
 
-type Contact = { id: string; name: string; phone: string; title: string; role: string; email: string; note: string; cardUrl: string | null }
-
-function getContacts(customer: { contactsJson: string | null }): Contact[] {
-  if (!customer.contactsJson) return []
-  try { return JSON.parse(customer.contactsJson) } catch { return [] }
+function failure(error: unknown) {
+  const allowed: Record<string, number> = {
+    invalid_upload_size: 413, customer_upload_quota_exceeded: 413, invalid_upload_type: 415,
+    invalid_contacts_metadata: 409, invalid_upload_path: 409, invalid_customer_path: 409,
+    upload_metadata_changed: 409, upload_length_required: 411,
+    old_upload_cleanup_failed: 500, delete_rollback_failed: 500,
+    database_update_failed_and_new_upload_cleanup_failed: 500,
+    partial_upload_cleanup_failed: 500, upload_write_failed: 500,
+  }
+  const message = error instanceof Error ? error.message : ''
+  const code = Object.hasOwn(allowed, message) ? message : 'upload_failed'
+  const status = allowed[code] ?? 500
+  const description = status === 413 ? '파일은 10MB 이하, 고객별 첨부파일은 총 50MB 이하로 올려주세요.'
+    : status === 415 ? '명함은 지원되는 이미지 파일로 올려주세요.'
+      : status === 409 ? '첨부파일 정보가 변경되었거나 올바르지 않습니다. 새로고침 후 확인해 주세요.'
+        : status === 411 ? '파일 전송 정보를 확인하지 못했습니다. 파일을 다시 선택해 주세요.'
+          : '파일 처리를 완료하지 못했습니다. 다시 확인하고 문제가 계속되면 관리자에게 알려주세요.'
+  return NextResponse.json({ error: description, code }, { status })
 }
 
-async function unlinkByPath(filePath: string) {
-  const relPath = filePath.startsWith('/api/uploads/') ? filePath.slice('/api/uploads/'.length) : null
-  const absPath = relPath
-    ? path.join(/* turbopackIgnore: true */ UPLOADS_DIR, relPath)
-    : path.join(process.cwd(), 'public', filePath)
-  await fs.unlink(absPath).catch(() => {})
+async function cleanupOld(customerId: string, url: string | null) {
+  if (!url) return undefined
+  try {
+    await removeOwnedUpload(UPLOADS_DIR, customerId, url)
+  } catch {
+    return 'old_upload_cleanup_failed'
+  }
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  try {
+    validateMultipartLength(req)
+    const customer = await prisma.customer.findUnique({ where: { id } })
+    if (!customer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const customer = await prisma.customer.findUnique({ where: { id } })
-  if (!customer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const contacts = parseContacts(customer.contactsJson)
+    const form = await req.formData()
+    const file = form.get('file')
+    const contactId = form.get('contactId')
+    if (!(file instanceof File) || (contactId !== null && typeof contactId !== 'string')) {
+      return NextResponse.json({ error: 'Missing file' }, { status: 400 })
+    }
+    const target = typeof contactId === 'string' ? contacts.find(contact => contact.id === contactId) : undefined
+    if (typeof contactId === 'string' && !target) return NextResponse.json({ error: 'Contact not found' }, { status: 404 })
 
-  const form      = await req.formData()
-  const file      = form.get('file') as File | null
-  const contactId = form.get('contactId') as string | null // 없으면 대표 거래처 담당자 명함
-  if (!file) return NextResponse.json({ error: 'Missing file' }, { status: 400 })
+    const written = await writeCustomerUpload(UPLOADS_DIR, id, file, 'image', 'contacts')
+    await commitNewUpload(written.filename, async () => {
+      if (typeof contactId === 'string') {
+        const updated = contacts.map(contact => contact.id === contactId ? { ...contact, cardUrl: written.url } : contact)
+        const result = await prisma.customer.updateMany({
+          where: { id, contactsJson: customer.contactsJson },
+          data: { contactsJson: JSON.stringify(updated) },
+        })
+        requireMetadataUpdate(result.count)
+      } else {
+        const result = await prisma.customer.updateMany({
+          where: { id, mainContactCardUrl: customer.mainContactCardUrl },
+          data: { mainContactCardUrl: written.url },
+        })
+        requireMetadataUpdate(result.count)
+      }
+    })
 
-  const uploadDir = path.join(UPLOADS_DIR, 'customers', id, 'contacts')
-  await fs.mkdir(uploadDir, { recursive: true })
-
-  const safeName = `${Date.now()}_${file.name.replace(/[^\w.\-]/g, '_')}`
-  const absPath  = path.join(uploadDir, safeName)
-  await fs.writeFile(absPath, Buffer.from(await file.arrayBuffer()))
-  const url = `/api/uploads/customers/${id}/contacts/${safeName}`
-
-  if (contactId) {
-    const contacts = getContacts(customer)
-    const target = contacts.find(c => c.id === contactId)
-    if (target?.cardUrl) await unlinkByPath(target.cardUrl)
-    const updated = contacts.map(c => c.id === contactId ? { ...c, cardUrl: url } : c)
-    await prisma.customer.update({ where: { id }, data: { contactsJson: JSON.stringify(updated) } })
-  } else {
-    if (customer.mainContactCardUrl) await unlinkByPath(customer.mainContactCardUrl)
-    await prisma.customer.update({ where: { id }, data: { mainContactCardUrl: url } })
+    const cleanupWarning = await cleanupOld(id, target?.cardUrl ?? (contactId === null ? customer.mainContactCardUrl : null))
+    return NextResponse.json({ url: written.url, ...(cleanupWarning && { cleanupWarning }) })
+  } catch (error) {
+    return failure(error)
   }
-
-  return NextResponse.json({ url })
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const contactId = req.nextUrl.searchParams.get('contactId')
+  try {
+    const contactId = req.nextUrl.searchParams.get('contactId')
+    const customer = await prisma.customer.findUnique({ where: { id } })
+    if (!customer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const customer = await prisma.customer.findUnique({ where: { id } })
-  if (!customer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    let oldUrl: string | null
+    let nextContactsJson: string | undefined
+    if (contactId) {
+      const contacts = parseContacts(customer.contactsJson)
+      const target = contacts.find(contact => contact.id === contactId)
+      if (!target) return NextResponse.json({ error: 'Contact not found' }, { status: 404 })
+      oldUrl = target.cardUrl
+      const updated = contacts.map(contact => contact.id === contactId ? { ...contact, cardUrl: null } : contact)
+      nextContactsJson = JSON.stringify(updated)
+    } else {
+      oldUrl = customer.mainContactCardUrl
+    }
 
-  if (contactId) {
-    const contacts = getContacts(customer)
-    const target = contacts.find(c => c.id === contactId)
-    if (target?.cardUrl) await unlinkByPath(target.cardUrl)
-    const updated = contacts.map(c => c.id === contactId ? { ...c, cardUrl: null } : c)
-    await prisma.customer.update({ where: { id }, data: { contactsJson: JSON.stringify(updated) } })
-  } else {
-    if (customer.mainContactCardUrl) await unlinkByPath(customer.mainContactCardUrl)
-    await prisma.customer.update({ where: { id }, data: { mainContactCardUrl: null } })
+    await deleteOwnedUpload(UPLOADS_DIR, id, oldUrl, async () => {
+      const result = contactId
+        ? await prisma.customer.updateMany({
+            where: { id, contactsJson: customer.contactsJson },
+            data: { contactsJson: nextContactsJson },
+          })
+        : await prisma.customer.updateMany({
+            where: { id, mainContactCardUrl: customer.mainContactCardUrl },
+            data: { mainContactCardUrl: null },
+          })
+      requireMetadataUpdate(result.count)
+    }, async () => {
+      const restored = contactId
+        ? await prisma.customer.updateMany({
+            where: { id, contactsJson: nextContactsJson },
+            data: { contactsJson: customer.contactsJson },
+          })
+        : await prisma.customer.updateMany({
+            where: { id, mainContactCardUrl: null },
+            data: { mainContactCardUrl: customer.mainContactCardUrl },
+          })
+      requireMetadataUpdate(restored.count)
+    })
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    return failure(error)
   }
-
-  return NextResponse.json({ ok: true })
 }

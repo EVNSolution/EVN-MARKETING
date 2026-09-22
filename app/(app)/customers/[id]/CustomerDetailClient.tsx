@@ -165,13 +165,17 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
       fd.append('type', docType)
       const res = await fetch(`/api/customers/${customer.id}/documents`, { method: 'POST', body: fd })
       const data = await res.json()
+      if (!res.ok) { alert(data.error || '파일 업로드에 실패했습니다'); return }
       setDocs(prev => [...prev.filter(d => d.type !== docType), data.doc])
+      if (data.cleanupWarning) alert('새 파일은 저장되었지만 이전 파일 정리에 실패했습니다. 관리자에게 알려주세요.')
     } finally { setUploading(null) }
   }
 
   const handleDocDelete = async (docType: string) => {
     if (!confirm(`"${docType}" 파일을 삭제할까요?`)) return
-    await fetch(`/api/customers/${customer.id}/documents?type=${encodeURIComponent(docType)}`, { method: 'DELETE' })
+    const res = await fetch(`/api/customers/${customer.id}/documents?type=${encodeURIComponent(docType)}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(data.error || '파일 삭제에 실패했습니다'); return }
     setDocs(prev => prev.filter(d => d.type !== docType))
   }
 
@@ -200,12 +204,16 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
       fd.append('file', file)
       const res = await fetch(`/api/customers/${customer.id}/contact-card`, { method: 'POST', body: fd })
       const data = await res.json()
+      if (!res.ok) { alert(data.error || '명함 업로드에 실패했습니다'); return }
       setMainCardUrl(data.url)
+      if (data.cleanupWarning) alert('새 명함은 저장되었지만 이전 파일 정리에 실패했습니다. 관리자에게 알려주세요.')
     } finally { setMainCardUploading(false) }
   }
   const handleMainCardDelete = async () => {
     if (!confirm('명함 이미지를 삭제할까요?')) return
-    await fetch(`/api/customers/${customer.id}/contact-card`, { method: 'DELETE' })
+    const res = await fetch(`/api/customers/${customer.id}/contact-card`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(data.error || '명함 삭제에 실패했습니다'); return }
     setMainCardUrl(null)
   }
 
@@ -231,7 +239,9 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
   const removeContact = async (id: string) => {
     const target = contacts.find(c => c.id === id)
     if (target?.cardUrl) {
-      await fetch(`/api/customers/${customer.id}/contact-card?contactId=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
+      const res = await fetch(`/api/customers/${customer.id}/contact-card?contactId=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { alert(data.error || '명함 삭제에 실패했습니다'); return }
     }
     setContacts(prev => prev.filter(c => c.id !== id))
     setSaved(false)
@@ -244,12 +254,16 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
       fd.append('contactId', contactId)
       const res = await fetch(`/api/customers/${customer.id}/contact-card`, { method: 'POST', body: fd })
       const data = await res.json()
+      if (!res.ok) { alert(data.error || '명함 업로드에 실패했습니다'); return }
       setContacts(prev => prev.map(c => c.id === contactId ? { ...c, cardUrl: data.url } : c))
+      if (data.cleanupWarning) alert('새 명함은 저장되었지만 이전 파일 정리에 실패했습니다. 관리자에게 알려주세요.')
     } finally { setContactUploading(null) }
   }
   const handleContactCardDelete = async (contactId: string) => {
     if (!confirm('명함 이미지를 삭제할까요?')) return
-    await fetch(`/api/customers/${customer.id}/contact-card?contactId=${encodeURIComponent(contactId)}`, { method: 'DELETE' })
+    const res = await fetch(`/api/customers/${customer.id}/contact-card?contactId=${encodeURIComponent(contactId)}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(data.error || '명함 삭제에 실패했습니다'); return }
     setContacts(prev => prev.map(c => c.id === contactId ? { ...c, cardUrl: null } : c))
   }
 
