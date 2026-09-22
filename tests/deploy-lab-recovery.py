@@ -31,7 +31,8 @@ def _entry(action):
         action()
     except BaseException as error:
         # Never print exception arguments, subprocess output, environment or rows.
-        print(json.dumps({'ok': False, 'recoveryChildError': type(error).__name__}), flush=True)
+        reason = str(error) if str(error) in ('readiness', 'command_failed', 'proxy_identity', 'worker_readiness', 'lease_not_clear') else 'recovery_failed'
+        print(json.dumps({'ok': False, 'recoveryChildError': type(error).__name__, 'reason': reason}), flush=True)
         os._exit(1)
 
 
@@ -328,12 +329,9 @@ def run_recovery(controller_class, root, releases):
         _check(started.is_set(), 'lease_start_guard_not_exercised')
         done('killed_worker_natural_lease_expiry')
     except BaseException:
-        # Recovery is bounded even on failure; the caller owns container/volume teardown.
-        try:
-            _run(recover, 'failure_cleanup', timeout=420)
-            stable()
-        except BaseException:
-            print(json.dumps({'ok': False, 'recoveryCleanup': 'unverified'}), flush=True)
+        # Preserve the failed state for the caller's diagnostic logs and teardown.
+        # Retrying recovery here only hides the first failure behind another wait.
+        print(json.dumps({'ok': False, 'recoveryCleanup': 'caller_teardown'}), flush=True)
         raise
 
     summary = {'ok': True, 'recoveryScenarios': len(completed), 'phases': list(PHASES),
