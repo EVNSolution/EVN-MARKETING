@@ -132,10 +132,12 @@ try {
   assert.ok(downloaded.headers()['cache-control'].includes('no-store'))
   assert.equal((await downloaded.body()).toString(), file.buffer.toString())
 
+  // A fresh query distinguishes a real post-switch RSC request from an already prefetched cache entry.
+  await edit.locator('a[href="/inquiries"]').evaluate(anchor => { anchor.href = '/inquiries?compat-window=1' })
   const navigation = edit.waitForResponse(response => new URL(response.url()).pathname === '/inquiries' && response.request().headers().rsc === '1')
   await edit.getByRole('link', { name: '문의 내역', exact: true }).click()
   assert.equal((await navigation).headers()['x-marketing-release'], a, 'old-tab RSC/lazy navigation stays on old image')
-  await edit.waitForURL('**/inquiries')
+  await edit.waitForURL(url => url.pathname === '/inquiries')
   await edit.waitForLoadState('networkidle')
   const fresh = await authenticated.newPage()
   await fresh.goto(`${base}/customers/synthetic-edit`)

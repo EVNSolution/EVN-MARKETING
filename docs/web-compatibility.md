@@ -6,6 +6,8 @@ M2의 웹 호환성·파일 용량 경쟁을 구현하고 검사합니다. 운�
 
 Docker 빌드에 `--build-arg MARKETING_BUILD_REVISION=<40자리 소스 SHA>`를 지정합니다. `deploymentId`, 브라우저 상수와 `X-Marketing-Release` 응답 헤더에 같은 값을 고정하며 런타임 환경이나 쿠키로 바꾸지 않습니다. 동일 릴리스는 한 번 만든 이미지를 공유하고, 서로 다른 빌드의 Server Action 암호키를 공유하지 않습니다.
 
+현재 Next 16.3.5의 Turbopack에서 deploymentId를 설정하면 Google font 내부 query 해석이 실패하는 것을 Linux 빌드에서 확인했습니다. 지원되는 `next build --webpack`을 사용하여 글꼴·버전 표시를 함께 빌드하며 프레임워크 코드를 수정하지 않습니다.
+
 Next의 [deploymentId](https://nextjs.org/docs/app/api-reference/config/next-config-js/deploymentId)는 asset의 `dpl` 및 클라이언트 요청의 버전 header를 제공하지만 프록시 라우팅을 대신하지 않습니다. 로그인·로그아웃은 React [useActionState의 permalink](https://react.dev/reference/react/useActionState#parameters)를 사용해 JS 로드 전/비활성 상태에도 form POST URL에 렌더링된 ID를 넣습니다. React의 SSR action 필드와 인코딩을 유지합니다. 로그인 성공은 서버 redirect로 처리하여 JS 없이도 고객 목록으로 이동합니다.
 
 `deploy/nginx-config.mjs`는 active 및 유효한 previous ID만 고정 blue/green upstream에 매핑합니다. 임의 입력은 호스트명·파일 경로가 될 수 없습니다. URL/header 충돌·중복·미등록 ID, 버전 없는 action은 409로 거부합니다. asset/RSC/action, 고객·문의 쓰기와 `/api/release`는 버전을 구분하고, 일반 문서는 active로 갑니다. `/api/readyz`는 항상 active를 확인합니다.
