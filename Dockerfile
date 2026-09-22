@@ -24,6 +24,7 @@ ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0
 WORKDIR /app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/app/fonts/licenses ./licenses/fonts
 COPY --from=build /app/worker.mjs ./worker.mjs
 COPY --from=build /app/worker-health.mjs ./worker-health.mjs
 COPY --from=build /app/warp-delivery.mjs ./warp-delivery.mjs

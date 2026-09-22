@@ -1,17 +1,21 @@
 import type { Metadata } from 'next'
-import { Noto_Sans_KR, Jost } from 'next/font/google'
+import localFont from 'next/font/local'
 import './globals.css'
 import ReleaseNotice from '@/components/ReleaseNotice'
 
-const notoSansKR = Noto_Sans_KR({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '900'],
+const notoSansKR = localFont({
+  src: './fonts/NotoSansKR-variable.woff2',
+  weight: '100 900',
+  style: 'normal',
+  display: 'swap',
   variable: '--font-korean',
 })
 
-const jost = Jost({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+const jost = localFont({
+  src: './fonts/Jost-variable.woff2',
+  weight: '100 900',
+  style: 'normal',
+  display: 'swap',
   variable: '--font-latin',
 })
 

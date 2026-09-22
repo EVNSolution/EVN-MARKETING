@@ -80,6 +80,12 @@ try {
   const oldLogout = await authenticated.newPage()
   await oldLogout.goto(`${base}/customers`)
   await oldLogout.waitForLoadState('networkidle')
+  const logoutRaceContext = await context()
+  const logoutRace = await loginPage(logoutRaceContext)
+  await login(logoutRace)
+  await logoutRace.goto(`${base}/customers/synthetic-edit`)
+  await logoutRace.waitForLoadState('networkidle')
+  await logoutRace.locator('textarea[rows="4"]').fill('keep draft after rejected logout action')
   const jsContext = await context()
   const oldLogin = await loginPage(jsContext)
   const nativeContext = await context({ javaScriptEnabled: false })
@@ -195,6 +201,19 @@ try {
   const beforeExpireWrites = writes.length
   const beforeRaceUrl = oldLogin.url()
   const beforeRacePrompts = unloadPrompts
+  let releaseLogout
+  const heldLogout = new Promise(resolve => { releaseLogout = resolve })
+  let capturedLogout
+  const logoutCaptured = new Promise(resolve => { capturedLogout = resolve })
+  await logoutRace.route('**/customers/synthetic-edit', async route => {
+    if (route.request().headers()['next-action']) {
+      capturedLogout()
+      await heldLogout
+    }
+    await route.continue()
+  })
+  await logoutRace.getByRole('button', { name: '로그아웃', exact: true }).click()
+  await logoutCaptured
   await oldLogin.locator('a[href="/inquiries"]').evaluate(anchor => { anchor.href = '/inquiries?compat-race=1' })
   await oldLogin.route('**/inquiries?compat-race=1*', async route => {
     if (route.request().headers().rsc === '1') {
@@ -205,6 +224,10 @@ try {
   })
   await oldLogin.getByRole('link', { name: '문의 내역', exact: true }).click()
   await until(() => unloadPrompts > beforeRacePrompts)
+  releaseLogout()
+  await logoutRace.getByRole('alert').filter({ hasText: '로그아웃을 완료하지 못했습니다' }).waitFor()
+  assert.equal(await logoutRace.locator('textarea[rows="4"]').inputValue(), 'keep draft after rejected logout action', 'action failure is isolated from the customer editor')
+  assert.equal((await logoutRaceContext.request.get(`${base}/api/customers/synthetic-edit`)).status(), 200, 'rejected logout action preserves its session')
   assert.equal(oldLogin.url(), beforeRaceUrl, 'post-probe expiry fallback cannot silently discard a draft')
   assert.equal(await oldLogin.locator('textarea[rows="4"]').inputValue(), 'keep unsaved after expiry')
   const rejectedSave = oldLogin.waitForResponse(response => response.url().endsWith('/api/customers/synthetic-edit') && response.request().method() === 'PUT')
