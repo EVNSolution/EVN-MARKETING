@@ -14,7 +14,7 @@
     "test:server-runtime": "tsx tests/server-runtime.test.ts",
     "test:upload-security": "tsx tests/upload-security.test.ts",
     "test:worker-runtime": "tsx tests/worker-runtime.test.ts",
-    "test:warp-delivery": "tsx tests/warp-delivery.test.ts",
+    "test:warp-delivery": "tsx tests/warp-delivery.test.ts && tsx tests/warp-delivery-cli.test.ts",
     "test:integration-contract": "node scripts/verify-direct-integration-contract.mjs evn-marketing",
     "worker:inquiries": "tsx workers/inquiry-sync.ts",
     "preview:inquiries": "tsx tests/setup-inquiry-preview.ts",

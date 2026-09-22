@@ -17,6 +17,8 @@
 !lib/**
 !workers/
 !workers/**
+!scripts/
+!scripts/warp-delivery.ts
 !types/
 !types/**
 app/generated/

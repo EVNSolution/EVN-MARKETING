@@ -11,7 +11,7 @@ type InquiryPayload = typeof scope & { sourceId: string; inquiryDate: string; in
 type Receipt = { customerId: string; activityId: string; created: boolean; duplicate: boolean }
 type Delivery = { receipt?: Receipt; error: string }
 
-function keyConfigured(env: Env) {
+export function keyConfigured(env: Env = process.env) {
   const key = env.WARP_MARKETING_API_KEY
   return Boolean(key && key.length >= 32 && !/\s/u.test(key))
 }
