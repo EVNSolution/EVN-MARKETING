@@ -13,8 +13,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
-      - run: docker build -t evn-marketing:ci .
+      - run: npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
+      - run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
       - name: Synthetic container smoke
         run: |
           mkdir -p "$RUNNER_TEMP/marketing-smoke"
@@ -37,3 +37,6 @@ jobs:
           done
           test "$started" = true
           docker exec marketing-smoke node /src/tests/readiness-http.mjs
+      - name: Two-image browser and concurrent upload compatibility
+        timeout-minutes: 12
+        run: bash tests/release-compat.sh

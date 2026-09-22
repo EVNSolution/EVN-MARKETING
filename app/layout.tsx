@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Noto_Sans_KR, Jost } from 'next/font/google'
 import './globals.css'
+import ReleaseNotice from '@/components/ReleaseNotice'
 
 const notoSansKR = Noto_Sans_KR({
   subsets: ['latin'],
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko" className="h-full">
-      <body className={`${notoSansKR.variable} ${jost.variable} h-full bg-gray-50`}>{children}</body>
+      <body className={`${notoSansKR.variable} ${jost.variable} h-full bg-gray-50`}>{children}<ReleaseNotice /></body>
     </html>
   )
 }

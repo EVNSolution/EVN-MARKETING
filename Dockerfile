@@ -13,7 +13,8 @@ COPY workers workers
 COPY scripts/warp-delivery.ts scripts/warp-delivery.ts
 COPY types types
 COPY auth.ts proxy.ts ./
-RUN npx prisma generate && DATABASE_URL=file:/tmp/evn-build-placeholder.db npm run build \
+ARG MARKETING_BUILD_REVISION
+RUN test -n "$MARKETING_BUILD_REVISION" && npx prisma generate && DATABASE_URL=file:/tmp/evn-build-placeholder.db npm run build \
     && ./node_modules/.bin/esbuild workers/inquiry-sync.ts --bundle --platform=node --format=esm --packages=external --outfile=worker.mjs \
     && ./node_modules/.bin/esbuild scripts/warp-delivery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-delivery.mjs \
     && ./node_modules/.bin/esbuild workers/health.ts --bundle --platform=node --format=esm --packages=external --outfile=worker-health.mjs

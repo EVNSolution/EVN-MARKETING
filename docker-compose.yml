@@ -1,6 +1,9 @@
 x-runtime: &runtime
   image: ${MARKETING_IMAGE:-evn-marketing:local}
-  build: .
+  build:
+    context: .
+    args:
+      MARKETING_BUILD_REVISION: ${MARKETING_REVISION:?Set the source SHA before building}
   init: true
   restart: unless-stopped
   environment: &environment

@@ -13,6 +13,8 @@
     "test:inquiries": "tsx tests/inquiry-sync.test.ts && tsx tests/mleverage-source.test.ts",
     "test:server-runtime": "tsx tests/server-runtime.test.ts && tsx tests/readiness.test.ts",
     "test:upload-security": "tsx tests/upload-security.test.ts",
+    "test:upload-processes": "tsx tests/upload-processes.test.ts",
+    "test:release-routing": "node tests/release-routing.test.mjs",
     "test:worker-runtime": "tsx tests/worker-runtime.test.ts",
     "test:worker-health": "tsx tests/worker-health.test.ts",
     "test:worker-processes": "tsx tests/worker-processes.test.ts",
