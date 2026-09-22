@@ -42,10 +42,11 @@ export default function ReleaseNotice() {
     }
   }, [router])
   if (!message) return null
-  return <aside role="alert" className="fixed bottom-4 left-4 right-4 z-50 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-slate-900 shadow-lg">
+  return <aside role="alert" className="fixed bottom-4 right-4 z-50 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-slate-900 shadow-lg">
     <p>{message}</p>
     <button className="mt-2 underline font-semibold" onClick={() => {
       if (window.confirm('아직 저장하지 않은 입력 내용이 사라질 수 있습니다. 새로고침할까요?')) window.location.reload()
     }}>새로고침</button>
+    <button className="ml-4 underline" onClick={() => setMessage('')}>닫기</button>
   </aside>
 }
