@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
 const require = createRequire('/app/package.json')
 const Database = require('better-sqlite3')
-const bcrypt = require('bcryptjs')
+const bcrypt = createRequire('/src/package.json')('bcryptjs')
 const db = new Database('/data/marketing.db')
 for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
   db.exec(readFileSync(`/src/prisma/migrations/${migration}/migration.sql`, 'utf8'))

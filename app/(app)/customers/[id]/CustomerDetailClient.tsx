@@ -1,6 +1,6 @@
 'use client'
 
-import { apiFetch } from '@/lib/release-client'
+import { apiFetch, checkRelease } from '@/lib/release-client'
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -468,7 +468,7 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
               : '영업 리드 페이지에서 이동했습니다. 차량/화주 정보 입력 후 돌아가세요.'}
           </span>
           <button
-            onClick={() => router.push(returnTo)}
+            onClick={async () => { if (await checkRelease()) router.push(returnTo) }}
             className="text-xs font-semibold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap">
             ← 리드로 돌아가기
           </button>

@@ -182,8 +182,9 @@ try {
   assert.equal((await authenticated.request.get(base + document.path, { maxRedirects: 0 })).status(), 307, 'saved upload becomes inaccessible after logout')
 
   // This other context still has the session created by its old login action.
-  await oldLogin.locator('a[href="/customers/synthetic-edit"]').click()
-  await oldLogin.waitForURL('**/customers/synthetic-edit')
+  await oldLogin.locator('a[href="/customers/synthetic-edit"]').evaluate(anchor => { anchor.href = '/customers/synthetic-edit?returnTo=%2Finquiries' })
+  await oldLogin.locator('a[href^="/customers/synthetic-edit?"]').click()
+  await oldLogin.waitForURL(url => url.pathname === '/customers/synthetic-edit')
   await oldLogin.waitForLoadState('networkidle')
   assert.equal(await oldLogin.locator('html').getAttribute('data-dpl-id'), a)
   await oldLogin.locator('textarea[rows="4"]').fill('keep unsaved after expiry')
@@ -218,6 +219,10 @@ try {
   assert.equal((await rejectedNavigation).status(), 409)
   assert.equal(oldLogin.url(), currentUrl, 'expired navigation does not discard the editing page')
   assert.equal(await oldLogin.locator('textarea[rows="4"]').inputValue(), 'keep unsaved after expiry')
+  const rejectedReturn = oldLogin.waitForResponse(response => response.url().endsWith('/api/release'))
+  await oldLogin.getByRole('button', { name: '← 리드로 돌아가기', exact: true }).click()
+  assert.equal((await rejectedReturn).status(), 409)
+  assert.equal(oldLogin.url(), currentUrl, 'return button also preserves the expired editor')
   const beforeLogout = actions.length
   const rejectedLogout = oldLogin.waitForResponse(response => response.url().endsWith('/api/release'))
   await oldLogin.getByRole('button', { name: '로그아웃', exact: true }).click()
