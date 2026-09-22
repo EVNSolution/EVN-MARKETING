@@ -14,7 +14,7 @@
 | [배포·복귀 컨트롤러](release-controller.md) | M3 호스트 상태 전이, 복구 경계, 격리 Docker 검사와 남은 운영 인수 항목 |
 | [배포 인수 검사](release-acceptance.md) | 30분 실제 관측, API 부하, 진행 요청 drain, 중단 복구와 운영 증거 경계 |
 | [백업·복원과 전송 이력 복구](backup-recovery.md) | M4 일관된 자료 복원, 승인한 문의 재확인, 별도 migration 이미지와 합성 이전·메모리 측정 |
-| [AWS 배포 연결](cloud-release.md) | 전용 ECR/OIDC/SSM 선언, 설치 전제, 수동 실행 workflow와 권한 경계 |
+| [AWS 배포 연결](cloud-release.md) | 전용 서버 생성 구성, 실계정 사전 확인·요금제 제약, ECR/OIDC/SSM 선언과 설치 전제 |
 
 ## 채택한 방향
 
