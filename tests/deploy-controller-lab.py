@@ -9,6 +9,7 @@ import tempfile
 import time
 import threading
 import ssl
+import sys
 import urllib.request
 import uuid
 
@@ -29,7 +30,6 @@ class Lab(m.Controller):
     def __init__(self, root):
         super().__init__(root)
         self.clock = time.time()
-        self.fail_public = False
         self.probes = 0
 
     def now(self):
@@ -40,7 +40,8 @@ class Lab(m.Controller):
 
     def wait(self, seconds):
         self.clock += seconds
-        time.sleep(0.01)
+        # Accelerate observation only; real processes still need real startup/drain time.
+        time.sleep(0.01 if self.state['phase'] == 'observing' else seconds)
 
     def secrets(self, worker):
         return {'AUTH_SECRET': 'synthetic-lab-secret-at-least-32-characters'}
@@ -51,9 +52,6 @@ class Lab(m.Controller):
         self.check_schema(release, other)
 
     def probe(self, release, public=False):
-        if public and self.fail_public and release['slot'] == 'green':
-            self.fail_public = False
-            raise m.Blocked('synthetic_public_failure')
         result = super().probe(release, public)
         if public:
             self.probes += 1
@@ -124,9 +122,12 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         initial = controller.docker('run', '--rm', '-i', '--network', 'none', '-v', str(root/'deploy/nginx-config.mjs') + ':/renderer.mjs:ro', controller.image(a), 'node', '/renderer.mjs', '/dev/stdin', stdin=json.dumps({'active':{'id':a['revision'],'slot':'blue'},'publicUrl':config['publicUrl']}))
         (root/'nginx/nginx.conf').write_text(initial)
         docker('run', '-d', '--name', 'evn-marketing-proxy', '--network', 'evn-marketing', '-v', str(root/'nginx') + ':/etc/nginx:ro', 'nginx:1.28-alpine')
-        tls = 'events {}\nhttp { access_log off; server { listen 443 ssl; ssl_certificate /tls/cert.pem; ssl_certificate_key /tls/key.pem; location / { proxy_set_header Host $http_host; proxy_pass http://evn-marketing-proxy:8080; } } }'
+        # Internal bridges allow host -> container IP, not portable published-port access.
+        # The TLS front runs like the planned host edge and listens on loopback only.
+        proxy_ip = json.loads(docker('inspect', 'evn-marketing-proxy'))[0]['NetworkSettings']['Networks']['evn-marketing']['IPAddress']
+        tls = 'events {}\nhttp { access_log off; server { listen 127.0.0.1:3443 ssl; ssl_certificate /tls/cert.pem; ssl_certificate_key /tls/key.pem; location / { proxy_set_header Host $http_host; proxy_pass http://' + proxy_ip + ':8080; } } }'
         (root/'tls/nginx.conf').write_text(tls)
-        docker('run', '-d', '--name', 'marketing-lab-tls', '--network', 'evn-marketing', '-p', '127.0.0.1:3443:443', '-v', str(root/'tls') + ':/tls:ro', '-v', str(root/'tls/nginx.conf') + ':/etc/nginx/nginx.conf:ro', 'nginx:1.28-alpine')
+        docker('run', '-d', '--name', 'marketing-lab-tls', '--network', 'host', '-v', str(root/'tls') + ':/tls:ro', '-v', str(root/'tls/nginx.conf') + ':/etc/nginx/nginx.conf:ro', 'nginx:1.28-alpine')
         controller.healthy_web(a, public=True)
         observer = threading.Thread(target=observe, daemon=True)
         observer.start()
@@ -139,9 +140,10 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         # Actual worker failure after the public switch must restore the old pair.
         original = controller.worker_ready
         def fail_worker(release, retry=True):
+            result = original(release, retry)
             if release['slot'] == 'green':
                 raise m.Blocked('synthetic_source_login_failure')
-            return original(release, retry)
+            return result
         controller.worker_ready = fail_worker
         try:
             controller.release(b['revision'], b['digest'])
@@ -158,6 +160,10 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         print('controller Docker lab passed: actual digest/TLS/schema/worker handoff, accelerated A-B-A observation, expiry/drain, failed worker rollback and latest data preservation')
     finally:
         stopped.set()
+        if sys.exc_info()[0] is not None:
+            # These are isolated synthetic containers; never inspect env or production logs.
+            for name in names[:-1]:
+                subprocess.run(['docker','logs','--tail','15',name], check=False)
         for name in names:
             subprocess.run(['docker','rm','-f',name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(['docker','network','rm','evn-marketing'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

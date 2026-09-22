@@ -41,9 +41,9 @@ jobs:
           done
           test "$started" = true
           docker exec marketing-smoke node /src/tests/readiness-http.mjs
-      - name: Two-image browser and concurrent upload compatibility
-        timeout-minutes: 12
-        run: bash tests/release-compat.sh
       - name: Isolated release controller Docker lab
         timeout-minutes: 15
         run: python3 tests/deploy-controller-lab.py
+      - name: Two-image browser and concurrent upload compatibility
+        timeout-minutes: 12
+        run: bash tests/release-compat.sh
