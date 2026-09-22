@@ -174,6 +174,11 @@ assert "LifecyclePolicy" not in resources["Images"]["Properties"]
 assert not any(r["Type"] in ("AWS::EC2::Instance", "AWS::SSM::Parameter") for r in resources.values())
 
 release_role = resources["ReleaseRole"]["Properties"]
+assert template["Parameters"]["EnableGitHubRelease"]["Default"] == "false"
+assert template["Parameters"]["EnableGitHubRelease"]["AllowedValues"] == ["false", "true"]
+assert template["Conditions"]["GitHubReleaseEnabled"] == {"Fn::Equals": [{"Ref": "EnableGitHubRelease"}, "true"]}
+assert resources["ReleaseRole"]["Condition"] == template["Outputs"]["ReleaseRoleArn"]["Condition"] == "GitHubReleaseEnabled"
+assert "Condition" not in resources["HostRole"] and "Condition" not in resources["ReleaseDocument"]
 trust = release_role["AssumeRolePolicyDocument"]["Statement"][0]
 assert trust["Condition"]["StringEquals"] == {
     "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",

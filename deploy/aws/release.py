@@ -1,4 +1,4 @@
-"""Bounded CI helpers. No AWS operation runs on import or in local tests."""
+"""Bounded CI/manual helpers. External administrator approval is not proven here."""
 import hashlib
 import json
 import os
@@ -22,12 +22,14 @@ def checked(value, pattern, name):
     return value
 
 
-def source(env, head, main):
+def source(env, head, main, *, manual=False):
     revision = checked(env.get("SOURCE_SHA"), r"[0-9a-f]{40}", "source SHA")
-    if (env.get("GITHUB_REPOSITORY") != REPOSITORY
+    if revision != head or revision != main:
+        raise ValueError("source must be the checked-out, current main SHA")
+    if not manual and (env.get("GITHUB_REPOSITORY") != REPOSITORY
             or env.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
             or env.get("GITHUB_REF") != "refs/heads/main"
-            or revision != env.get("GITHUB_SHA") or revision != head or revision != main):
+            or revision != env.get("GITHUB_SHA")):
         raise ValueError("source must be the dispatched, checked-out, current main SHA")
     checked(env.get("RELEASE_ACTION"), r"release|rollback", "action")
     return revision
@@ -90,8 +92,8 @@ def command_request(env, bundle, digest):
     }
 
 
-def output(args):
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
+def output(args, *, env=None):
+    result = subprocess.run(args, capture_output=True, text=True, check=False, env=env)
     if result.returncode:
         # Never echo arbitrary CLI output, controller logs or credentials.
         raise RuntimeError("external command failed: " + args[0])
@@ -99,12 +101,33 @@ def output(args):
 
 
 def aws(*args):
-    return json.loads(output(["aws", *args, "--region", REGION, "--output", "json", "--no-cli-pager"]))
+    command = ["aws", *args, "--region", REGION, "--output", "json", "--no-cli-pager"]
+    if args[:2] == ("ssm", "send-command"):
+        return json.loads(output(command, env={**os.environ, "AWS_MAX_ATTEMPTS": "1"}))
+    return json.loads(output(command))
 
 
-def check_source():
+def check_source(*, manual=False):
+    git = ["git", "-C", str(ROOT)] if manual else ["git"]
+    if manual and output([*git, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"]):
+        raise ValueError("manual release requires a clean checkout")
     main = output(["gh", "api", f"repos/{REPOSITORY}/git/ref/heads/main", "--jq", ".object.sha"])
-    return source(os.environ, output(["git", "rev-parse", "HEAD"]), main)
+    return source(os.environ, output([*git, "rev-parse", "HEAD"]), main, manual=manual)
+
+
+def check_manual_target():
+    cfg = config(os.environ)
+    expected = checked(os.environ.get("MARKETING_DEPLOYER_ARN"),
+                       rf"arn:aws:(iam|sts)::{cfg['account']}:[A-Za-z0-9+=,.@_/-]+", "deployer ARN")
+    caller = aws("sts", "get-caller-identity")
+    if caller.get("Account") != cfg["account"] or caller.get("Arn") != expected:
+        raise ValueError("AWS account or deployer mismatch")
+    target = aws("ec2", "describe-instances", "--instance-ids", cfg["instance"])
+    instances = [instance for reservation in target.get("Reservations", [])
+                 for instance in reservation.get("Instances", [])]
+    if (len(instances) != 1 or instances[0].get("InstanceId") != cfg["instance"]
+            or {tag["Key"]: tag["Value"] for tag in instances[0].get("Tags", [])}.get("Service") != "evn-marketing"):
+        raise ValueError("target must be the configured Marketing instance")
 
 
 def scan(digest):
@@ -118,24 +141,45 @@ def scan(digest):
     raise RuntimeError("image scan timed out; nothing dispatched")
 
 
-def dispatch(digest):
+def prepare_request(digest, *, manual=False):
+    if manual:
+        check_source(manual=True)
     request = command_request(os.environ, bundle_hash(ROOT), digest)
+    if manual:
+        check_manual_target()
     if os.environ["RELEASE_ACTION"] == "release":
+        if manual:
+            repositories = aws("ecr", "describe-repositories", "--repository-names", "evn-marketing")["repositories"]
+            if len(repositories) != 1 or repositories[0].get("imageTagMutability") != "IMMUTABLE":
+                raise ValueError("Marketing image tags must be immutable")
         actual = aws("ecr", "describe-images", "--repository-name", "evn-marketing",
                      "--image-ids", "imageTag=" + os.environ["SOURCE_SHA"])["imageDetails"]
         if len(actual) != 1 or actual[0]["imageDigest"] != digest:
             raise ValueError("source tag no longer matches digest")
         scan(digest)
-    # Recheck main after the build, scan and approval delay, immediately before dispatch.
-    check_source()
+    # Recheck identity/target after the scan delay, then main immediately before dispatch.
+    if manual:
+        check_manual_target()
+        check_source(manual=True)
+    else:
+        check_source()
+    return request
+
+
+def dispatch(digest, *, manual=False):
+    request = prepare_request(digest, manual=manual)
     # No send retry: a lost response can mean the command is already running.
     command = aws("ssm", "send-command", "--cli-input-json", json.dumps(request))["Command"]["CommandId"]
     checked(command, r"[0-9a-f-]{36}", "command ID")
     print("SSM command " + command, flush=True)
-    with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
-        summary.write(f"Action: {os.environ['RELEASE_ACTION']}\n\nSource: {os.environ['SOURCE_SHA']}\n\n"
-                      f"Image: {digest}\n\nController bundle: {request['Parameters']['BundleSha256'][0]}\n\n"
-                      f"SSM command: {command}\n")
+    if manual:
+        print(json.dumps({name: values[0] for name, values in request["Parameters"].items()}
+                         | {"CommandId": command}), flush=True)
+    else:
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+            summary.write(f"Action: {os.environ['RELEASE_ACTION']}\n\nSource: {os.environ['SOURCE_SHA']}\n\n"
+                          f"Image: {digest}\n\nController bundle: {request['Parameters']['BundleSha256'][0]}\n\n"
+                          f"SSM command: {command}\n")
     # Only status/code are requested. Remote stdout/stderr never enter CI logs/artifacts.
     for _ in range(390):
         result = subprocess.run([
@@ -167,6 +211,11 @@ def main():
         print(bundle_hash(ROOT))
     elif action == "dispatch":
         dispatch(sys.argv[2])
+    elif action == "manual-validate":
+        request = prepare_request(sys.argv[2], manual=True)
+        print(json.dumps({name: values[0] for name, values in request["Parameters"].items()}))
+    elif action == "manual-dispatch":
+        dispatch(sys.argv[2], manual=True)
     else:
         raise ValueError("unsupported helper action")
 
