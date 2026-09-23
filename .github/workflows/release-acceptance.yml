@@ -1,0 +1,29 @@
+name: Release acceptance (30 minutes)
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    if: github.event.label.name == 'release-acceptance' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
+      - name: One real 1800-second observation with concurrent API traffic and request drain
+        timeout-minutes: 40
+        run: python3 tests/deploy-controller-lab.py --real-time --report "$RUNNER_TEMP/marketing-acceptance.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: marketing-acceptance-${{ github.sha }}
+          path: ${{ runner.temp }}/marketing-acceptance.json
+          if-no-files-found: error
+          retention-days: 7
