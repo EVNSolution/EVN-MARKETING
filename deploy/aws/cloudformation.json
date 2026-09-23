@@ -2,6 +2,12 @@
   "AWSTemplateFormatVersion": "2010-09-09",
   "Description": "Marketing release declarations only. No instance, secrets, bootstrap or deployment. Apply only in ap-northeast-2 after review.",
   "Parameters": {
+    "EnableGitHubRelease": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": ["false", "true"],
+      "Description": "Enable the GitHub OIDC release role only after private environment approval protections are verified. Leave false for administrator deployment."
+    },
     "MarketingDataVolumeId": {
       "Type": "String",
       "AllowedPattern": "vol-([0-9a-f]{8}|[0-9a-f]{17})",
@@ -22,6 +28,11 @@
       "Default": "repo:EVNSolution/EVN-MARKETING:environment:production",
       "AllowedPattern": "repo:EVNSolution(@[0-9]+)?/EVN-MARKETING(@[0-9]+)?:environment:production",
       "Description": "Exact verified GitHub subject; use owner/repository IDs if immutable subject claims are enabled."
+    }
+  },
+  "Conditions": {
+    "GitHubReleaseEnabled": {
+      "Fn::Equals": [{"Ref": "EnableGitHubRelease"}, "true"]
     }
   },
   "Resources": {
@@ -156,6 +167,7 @@
     },
     "ReleaseRole": {
       "Type": "AWS::IAM::Role",
+      "Condition": "GitHubReleaseEnabled",
       "Properties": {
         "RoleName": "EVN-Marketing-Release",
         "MaxSessionDuration": 7200,
@@ -437,6 +449,7 @@
   },
   "Outputs": {
     "ReleaseRoleArn": {
+      "Condition": "GitHubReleaseEnabled",
       "Value": {
         "Fn::GetAtt": [
           "ReleaseRole",

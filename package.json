@@ -57,6 +57,14 @@
     "tsx": "^4.23.6",
     "typescript": "^5"
   },
+  "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2"
+    },
+    "prisma": {
+      "mysql2": "3.24.4"
+    }
+  },
   "allowScripts": {
     "@prisma/engines@7.9.1": true,
     "esbuild@0.28.2": true,
