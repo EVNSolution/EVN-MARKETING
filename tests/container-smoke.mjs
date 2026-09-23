@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
+import { recordSyntheticMigrations } from './schema-fixture.mjs'
 
 const require = createRequire('/app/package.json')
 assert.notEqual(process.getuid(), 0)
@@ -21,8 +22,12 @@ for (const path of [
   '/app/tests',
 ]) assert.equal(existsSync(path), false, `build-only path present: ${path}`)
 assert.equal(existsSync('/app/warp-delivery.mjs'), true, 'packaged WARP CLI is present')
+assert.equal(existsSync('/app/warp-recovery.mjs'), true, 'packaged recovery CLI is present')
+assert.equal(existsSync('/app/worker-health.mjs'), true, 'packaged worker health CLI is present')
 const Database = require('better-sqlite3')
 const { chromium } = require('playwright-core')
+mkdirSync('/data/uploads', { recursive: true })
+writeFileSync('/data/.marketing-volume-id', 'synthetic-volume-ci\n', { flag: 'wx', mode: 0o600 })
 const inquiry = {
   source: 'mleverage-admin',
   companyScopeId: '55f9a8bb-73f9-4316-bcd7-7dcdce0bdcc3',
@@ -38,6 +43,7 @@ try {
   for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
     db.exec(readFileSync(`/src/prisma/migrations/${migration}/migration.sql`, 'utf8'))
   }
+  recordSyntheticMigrations(db, '/src')
   db.prepare('INSERT INTO Team (id, name) VALUES (?, ?)').run('synthetic-team', 'Synthetic team')
   db.prepare('INSERT INTO User (id, name, email, password, role, teamId, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run('synthetic-user', 'Synthetic user', 'synthetic@example.invalid', '$2b$04$jE4nbrd/N17cKY7MeSCLm.JElVzGnH4VIqBbdq.M1R6qhLvQYdIjG', 'user', 'synthetic-team', new Date().toISOString())
@@ -48,6 +54,23 @@ try {
   db.close()
 }
 const beforeCli = readFileSync('/data/marketing.db')
+const recoveryRejected = spawnSync(process.execPath, ['/app/warp-recovery.mjs', 'apply', '/missing', '--approve-sha256', 'a'.repeat(64)], {
+  env: { DATABASE_URL: 'file:/data/must-not-create.db' }, encoding: 'utf8', timeout: 10_000,
+})
+assert.equal(recoveryRejected.status, 1)
+assert.equal(recoveryRejected.stderr, '')
+assert.deepEqual(JSON.parse(recoveryRejected.stdout), { status: 'warp_key_required' })
+assert.equal(existsSync('/data/must-not-create.db'), false)
+const schemaCli = (database) => spawnSync(process.execPath, ['/app/schema-check.mjs', 'check', '/app/schema-manifest.json', '/app/schema-manifest.json'], {
+  env: { DATABASE_URL: database }, encoding: 'utf8', timeout: 5000,
+})
+assert.equal(schemaCli('file:/data/marketing.db').status, 0, 'packaged schema gate reads its image manifest')
+const missingSchemaDb = schemaCli('file:/data/schema-must-not-create.db')
+assert.equal(missingSchemaDb.status, 1)
+assert.equal(missingSchemaDb.stderr, '')
+assert.equal(JSON.parse(missingSchemaDb.stdout).ok, false)
+assert.equal(existsSync('/data/schema-must-not-create.db'), false)
+assert.deepEqual(readFileSync('/data/marketing.db'), beforeCli, 'schema gate leaves data and ledger unchanged')
 for (const mode of ['check', 'pilot']) {
   for (const databaseUrl of [undefined, 'file:/data/marketing.db']) {
     const cli = spawnSync(process.execPath, ['/app/warp-delivery.mjs', mode], {
@@ -119,10 +142,21 @@ try {
   pilotDb.close()
 }
 const browser = await chromium.launch({ headless: true })
+mkdirSync('/data/recovery', { mode: 0o700 })
+writeFileSync('/data/recovery/ids.json', JSON.stringify([inquiry.sourceId]), { mode: 0o600, flag: 'wx' })
+const recoveryPlan = spawnSync(process.execPath, ['/app/warp-recovery.mjs', 'plan', '/data/recovery/ids.json', '/data/recovery/plan.json'], {
+  env: { DATABASE_URL: 'file:/data/marketing.db' }, encoding: 'utf8', timeout: 10_000,
+})
+assert.equal(recoveryPlan.status, 0, 'packaged offline planning loads runtime dependencies without a key')
+assert.equal(recoveryPlan.stderr, '')
+const planResult = JSON.parse(recoveryPlan.stdout)
+assert.equal(planResult.comparison, 'local-only')
+assert.equal(planResult.selected, 1)
+assert.equal(planResult.sha256, createHash('sha256').update(readFileSync('/data/recovery/plan.json')).digest('hex'))
 await browser.close()
 // The CI container has no external network; dummy credentials can never reach the source.
 const worker = spawnSync(process.execPath, ['/app/worker.mjs'], {
-  env: { ...process.env, INQUIRY_COLLECTOR_ENABLED: 'true', DATABASE_URL: 'file:/data/marketing.db', MLEVERAGE_USERNAME: 'synthetic-user', MLEVERAGE_PASSWORD: 'synthetic-password', WARP_DELIVERY_ENABLED: 'false' },
+  env: { ...process.env, INQUIRY_COLLECTOR_ENABLED: 'true', MARKETING_WORKER_OWNER: '00000000-0000-4000-8000-000000000001', DATABASE_URL: 'file:/data/marketing.db', MLEVERAGE_USERNAME: 'synthetic-user', MLEVERAGE_PASSWORD: 'synthetic-password', WARP_DELIVERY_ENABLED: 'false' },
   encoding: 'utf8', timeout: 60_000,
 })
 assert.equal(worker.status, 1, 'worker must stop when the source is unreachable')
@@ -135,4 +169,52 @@ try {
 } finally {
   verified.close()
 }
-console.log('synthetic SQLite, Chromium, packaged CLI key guard, pilot/replay, busy lease, worker and lease cleanup passed')
+const healthEnv = {
+  NODE_ENV: 'production', DATABASE_URL: 'file:/data/marketing.db',
+  MARKETING_WORKER_OWNER: '00000000-0000-4000-8000-000000000001',
+  MARKETING_REVISION: 'a'.repeat(40), MARKETING_IMAGE_DIGEST: `sha256:${'b'.repeat(64)}`,
+}
+const health = (overrides = {}) => spawnSync(process.execPath, ['/app/worker-health.mjs'], {
+  env: { ...healthEnv, ...overrides }, encoding: 'utf8', timeout: 5_000,
+})
+const healthDb = new Database('/data/marketing.db')
+try {
+  const previous = healthDb.prepare('SELECT * FROM InquirySyncState').get()
+  const now = new Date()
+  const set = healthDb.prepare('UPDATE InquirySyncState SET workerOwner = ?, workerHeartbeatAt = ?, workerLeaseExpiresAt = ?, status = ?')
+  try {
+    set.run(healthEnv.MARKETING_WORKER_OWNER, now.toISOString(), new Date(now.getTime() + 180_000).toISOString(), 'ready')
+    const before = healthDb.prepare('SELECT * FROM InquirySyncState').get()
+    const ready = health()
+    assert.equal(ready.status, 0, 'packaged readonly health loads without development dependencies')
+    assert.equal(ready.stderr, '')
+    assert.equal(JSON.parse(ready.stdout).ok, true)
+    assert.equal(JSON.parse(ready.stdout).revision, healthEnv.MARKETING_REVISION)
+    assert.deepEqual(healthDb.prepare('SELECT * FROM InquirySyncState').get(), before, 'health leaves lease and schedule untouched')
+    for (const overrides of [
+      { MARKETING_WORKER_OWNER: '00000000-0000-4000-8000-000000000002' },
+      { MARKETING_WORKER_OWNER: '' },
+      { MARKETING_IMAGE_DIGEST: '' },
+      { DATABASE_URL: 'file:/data/must-not-create.db' },
+    ]) {
+      const rejected = health(overrides)
+      assert.equal(rejected.status, 1)
+      assert.equal(rejected.stderr, '')
+      assert.equal(JSON.parse(rejected.stdout).ok, false)
+    }
+    assert.equal(existsSync('/data/must-not-create.db'), false)
+    set.run(healthEnv.MARKETING_WORKER_OWNER, now.toISOString(), new Date(now.getTime() - 1).toISOString(), 'ready')
+    assert.deepEqual(JSON.parse(health().stdout), { ok: false, reason: 'lease' })
+    set.run(healthEnv.MARKETING_WORKER_OWNER, now.toISOString(), new Date(now.getTime() + 180_000).toISOString(), 'login_required')
+    assert.deepEqual(JSON.parse(health().stdout), { ok: false, reason: 'source' })
+  } finally {
+    set.run(previous.workerOwner, previous.workerHeartbeatAt, previous.workerLeaseExpiresAt, previous.status)
+  }
+} finally { healthDb.close() }
+const invalidWorker = spawnSync(process.execPath, ['/app/worker.mjs'], {
+  env: { NODE_ENV: 'production', INQUIRY_COLLECTOR_ENABLED: 'true', DATABASE_URL: 'file:/data/must-not-create.db' }, encoding: 'utf8', timeout: 5_000,
+})
+assert.equal(invalidWorker.status, 1, 'production worker needs a unique configured owner before any DB access')
+assert.equal(invalidWorker.stderr.trim(), 'invalid_worker_owner')
+assert.equal(existsSync('/data/must-not-create.db'), false)
+console.log('synthetic SQLite, Chromium, packaged pilot/replay, busy lease, worker cleanup and readonly worker health passed')

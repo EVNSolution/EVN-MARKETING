@@ -14,13 +14,13 @@ export async function loginAction(
       password: formData.get('password') as string,
       redirect: false,
     })
-    return { success: true as const }
   } catch (error) {
     if (error instanceof AuthError) {
       return { error: '이메일 또는 비밀번호가 올바르지 않습니다.' }
     }
     throw error
   }
+  redirect('/customers')
 }
 
 export async function logoutAction() {
