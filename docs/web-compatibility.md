@@ -36,7 +36,7 @@ SQLite는 모든 writer를 직렬화하므로 다른 고객 저장도 잠깐 기
 
 - `test:upload-security` / `test:upload-processes`: 소유권·rollback·실제 프로세스 경쟁, 잠금 중 강제 종료, 남은 파일 용량 산정, 만료 트랜잭션의 파일 쓰기 차단.
 - `test:release-routing`: 허용된 릴리스/슬롯과 정확한 만료 경계.
-- Linux `tests/release-compat.sh`: 두 독립 이미지, 실제 Nginx/Chromium, 공유 합성 DB/업로드를 사용합니다. 컨테이너는 외부 통신 없는 internal network에서 실행하고 운영 데이터·로그인·키를 사용하지 않습니다.
+- Linux `tests/release-compat.sh`: 두 독립 이미지, 실제 Nginx/Chromium, 공유 합성 DB/업로드를 사용합니다. 고정 PR #7의 앱 소스/lockfile은 유지하고 Docker 빌드 단계에만 Python/make/g++를 추가하여 SQLite 사전 빌드 바이너리를 받지 못해도 소스 빌드가 가능합니다. 현재 이미지도 같은 빌드 도구를 갖추며 실행 이미지에는 추가하지 않습니다. 컨테이너는 외부 통신 없는 internal network에서 실행하고 운영 데이터·로그인·키를 사용하지 않습니다.
 - hydrated/native/JS 비활성/JS 로드 차단 로그인·로그아웃, 여러 탭/쿠키 변경, 이전 탭 저장·업로드·RSC/lazy asset, 세션, 만료 후 입력 보존·재전송 없음·readyz active 고정을 검사합니다.
 - 두 이미지가 남은 용량을 동시에 사용하도록 HTTP 업로드하여 정확히 하나가 성공하는지, 50 MiB 한도·기존 파일·metadata·병렬 고객 저장·DB 무결성을 확인합니다.
 

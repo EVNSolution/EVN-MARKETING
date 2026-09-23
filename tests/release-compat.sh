@@ -20,12 +20,36 @@ trap cleanup EXIT
 docker pull nginx:1.28-alpine
 mkdir "$compat_dir/previous"
 git archive "$release_a" | tar -x -C "$compat_dir/previous"
+# Only add native build tools to the historical recipe; its app source/lockfile stay pinned.
+node --input-type=module - "$compat_dir/previous/Dockerfile" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = process.argv[2], original = readFileSync(file, 'utf8');
+const line = 'apt-get install -y --no-install-recommends openssl ca-certificates';
+if (original.split(line).length !== 2) throw new Error('unexpected historical build recipe');
+writeFileSync(file, original.replace(line, `${line} python3 make g++`));
+NODE
 docker build --build-arg MARKETING_BUILD_REVISION="$release_a" -t evn-marketing:compat-a "$compat_dir/previous"
 # PR #7 predates packaged manifests: derive its contract from this exact pinned source for CI only.
 node scripts/schema-check.mjs manifest "$compat_dir/previous" "$release_a" "$compat_dir/previous-manifest.json"
 chmod 644 "$compat_dir/previous-manifest.json"
 docker network create --internal marketing-compat
 docker run --rm --network none -v "$PWD:/src:ro" -v "$compat_dir/data:/data" evn-marketing:ci node /src/tests/release-setup.mjs
+# Restore a coherent offline bundle before all existing real browser checks.
+mkdir "$compat_dir/rehearsal" "$compat_dir/restored"
+chmod 777 "$compat_dir/rehearsal" "$compat_dir/restored"
+docker run --rm --network none -v "$compat_dir/data:/data" -v "$compat_dir/rehearsal:/rehearsal" \
+  evn-marketing:ci node data-backup.mjs snapshot /data /rehearsal/backup > "$compat_dir/rehearsal/snapshot-result.json"
+summary_hash="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).summarySha256)' "$compat_dir/rehearsal/snapshot-result.json")"
+docker run --rm --network none -v "$compat_dir/rehearsal/backup:/backup:ro" -v "$compat_dir/restored:/restore" \
+  evn-marketing:ci node data-backup.mjs restore /backup /restore "$summary_hash" > "$compat_dir/rehearsal/restore-result.json"
+docker run --rm --network none -v "$compat_dir/restored:/data" evn-marketing:ci node data-backup.mjs audit /data > "$compat_dir/rehearsal/before.json"
+docker run --rm --network none -v "$compat_dir/restored:/data" -e DATABASE_URL=file:/data/marketing.db \
+  evn-marketing:ops npx --no-install prisma migrate deploy
+docker run --rm --network none -v "$compat_dir/restored:/data" evn-marketing:ci node data-backup.mjs audit /data > "$compat_dir/rehearsal/after.json"
+cmp "$compat_dir/rehearsal/before.json" "$compat_dir/rehearsal/after.json"
+cp "$compat_dir/data/.marketing-volume-id" "$compat_dir/restored/.marketing-volume-id"
+mv "$compat_dir/data" "$compat_dir/original"
+mv "$compat_dir/restored" "$compat_dir/data"
 docker run --rm --network none -v "$compat_dir/data:/data" -v "$compat_dir/previous-manifest.json:/previous.json:ro" \
   -e DATABASE_URL=file:/data/marketing.db evn-marketing:ci node schema-check.mjs check schema-manifest.json /previous.json
 for slot in blue green; do
@@ -78,6 +102,27 @@ done
 result="$(docker wait marketing-compat-test)"
 docker logs marketing-compat-test
 test "$result" = 0
+python3 - "$compat_dir" <<'PY'
+import json, os, pathlib, subprocess
+directory = pathlib.Path(os.sys.argv[1])
+peaks = json.loads((directory/'control/browser-memory.json').read_text())
+for slot in ('blue','green'):
+    name = 'marketing-compat-' + slot
+    peaks[slot] = int(subprocess.check_output(['docker','exec',name,'cat','/sys/fs/cgroup/memory.peak'],text=True))
+for name in ('marketing-compat-blue','marketing-compat-green','marketing-compat-test'):
+    state = json.loads(subprocess.check_output(['docker','inspect',name],text=True))[0]['State']
+    assert not state['OOMKilled']
+assert all(value > 0 for value in peaks.values())
+summary = {'ok':True,'synthetic':True,'sourceSha':os.environ['GITHUB_SHA'],
+           'restore':json.loads((directory/'rehearsal/restore-result.json').read_text()),
+           'migrationUnchanged':True,'restoredBrowserChecks':True,
+           'componentPeakBytes':peaks,'sumOfComponentPeaksBytes':sum(peaks.values()),
+           'measurement':'cgroup-v2 high-water sum; not simultaneous usage or production sizing',
+           'runtimeImage':subprocess.check_output(['docker','image','inspect','evn-marketing:ci','--format','{{.Id}}'],text=True).strip(),
+           'opsImage':subprocess.check_output(['docker','image','inspect','evn-marketing:ops','--format','{{.Id}}'],text=True).strip()}
+(pathlib.Path(os.environ['RUNNER_TEMP'])/'marketing-recovery-summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+print(json.dumps(summary))
+PY
 docker run --rm --network none -v "$compat_dir/data:/data" -v "$compat_dir/previous-manifest.json:/previous.json:ro" \
   -e DATABASE_URL=file:/data/marketing.db evn-marketing:ci node schema-check.mjs check schema-manifest.json /previous.json
 docker rm -f marketing-compat-blue

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const require = createRequire('/app/package.json')
@@ -305,6 +305,7 @@ try {
   console.log('two-image browser compatibility passed: hydrated/native/no-JS/unloaded login/logout, multi-tab cookies, old save/upload/RSC/assets, 50MiB quota race, expiry input/session preservation and no write replay')
 } finally {
   clearTimeout(deadline)
+  writeFileSync('/control/browser-memory.json', JSON.stringify({ chromium: Number(readFileSync('/sys/fs/cgroup/memory.peak','utf8')) }))
   await browser.close()
   db.close()
 }

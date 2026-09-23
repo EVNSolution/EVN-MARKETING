@@ -21,7 +21,9 @@
 !workers/**
 !scripts/
 !scripts/warp-delivery.ts
+!scripts/warp-recovery.ts
 !scripts/schema-check.mjs
+!scripts/data-backup.mjs
 !types/
 !types/**
 app/generated/

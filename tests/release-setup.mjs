@@ -17,6 +17,19 @@ for (const id of ['synthetic-edit', 'synthetic-quota', 'synthetic-parallel']) {
   db.prepare('INSERT INTO Customer (id, name, customerSegment, companyName, updatedAt) VALUES (?, ?, ?, ?, ?)')
     .run(id, 'Synthetic customer', 'B2B', 'Synthetic company', new Date().toISOString())
 }
+db.prepare('INSERT INTO Team(id,name) VALUES(?,?)').run('synthetic-team', 'Synthetic team')
+db.prepare('UPDATE User SET teamId=?').run('synthetic-team')
+const timestamp = '2026-09-23T00:00:00.000Z'
+for (let index = 1; index <= 2; index++) {
+  db.prepare('INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,phone,lastSeenAt,warpCustomerId,warpActivityId,warpDeliveredAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(`synthetic-inquiry-${index}`, 'synthetic', 'company', 'homepage', `00000000-0000-4000-8000-00000000000${index}`,
+      '2026-09-23', '09:00', '010-0000-0000', timestamp, index === 1 ? 'synthetic-customer' : null,
+      index === 1 ? 'synthetic-receipt' : null, index === 1 ? timestamp : null)
+}
+db.prepare('INSERT INTO InquirySyncRun(id,source,companyScopeId,homepageScopeId,trigger,status,rangeStart,rangeEnd,completedAt,readCount,createdCount,pagesRead) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+  .run('synthetic-run', 'synthetic', 'company', 'homepage', 'schedule', 'success', '2026-09-22', '2026-09-23', timestamp, 2, 2, 1)
+db.prepare('INSERT INTO InquirySyncState(id,source,companyScopeId,homepageScopeId,lastSuccessfulAt,lastRunId,nextRunAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)')
+  .run('synthetic-state', 'synthetic', 'company', 'homepage', timestamp, 'synthetic-run', '2026-09-23T01:00:00.000Z', timestamp)
 db.close()
 mkdirSync('/data/uploads/customers/synthetic-quota', { recursive: true })
 for (let index = 0; index < 5; index++) {
