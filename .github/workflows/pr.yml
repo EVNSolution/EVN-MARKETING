@@ -14,6 +14,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
       - name: Release controller and cloud declaration checks
         run: python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py
