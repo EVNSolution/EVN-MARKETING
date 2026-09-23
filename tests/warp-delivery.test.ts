@@ -8,6 +8,7 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, releaseWorker, INQUIRY_SOURCE, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID } from '@/lib/inquiry-sync'
 import { checkWarpConnection, dispatchPendingWarp, pilotPendingWarp, warpActivityId, warpConfigured } from '@/lib/warp-delivery'
+import { withWorkerDatabase } from './worker-runtime-helper'
 
 const keyOnly = { WARP_MARKETING_API_KEY: 'synthetic-test-key-never-used-in-production' }
 const env = { ...keyOnly, WARP_DELIVERY_ENABLED: 'true' }
@@ -16,6 +17,7 @@ const scope = { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, home
 const sourceId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
 async function main() {
+  await testStopDuringHeartbeat()
   const temp = await mkdtemp(path.join(tmpdir(), 'evn-warp-delivery-test-'))
   const url = `file:${path.join(temp, 'test.db')}`
   const sql = createClient({ url })
@@ -184,4 +186,44 @@ async function main() {
   }
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1 })
+async function testStopDuringHeartbeat() {
+  await withWorkerDatabase(async (db, inspect) => {
+    for (const index of [1, 2]) await db.inquiry.create({ data: {
+      ...scope, sourceId: sourceId(index), inquiryDate: '2026-09-22', inquiryTime: '09:00',
+      phone: '010-0000-0000', lastSeenAt: new Date(),
+    } })
+    await claimWorker(db, owner)
+    const controller = new AbortController()
+    let heartbeats = 0
+    let release!: () => void
+    let entered!: () => void
+    const reached = new Promise<void>((resolve) => { entered = resolve })
+    const pause = new Promise<void>((resolve) => { release = resolve })
+    const delayed = db.$extends({ query: { inquirySyncState: {
+      async updateMany({ args, query }) {
+        const result = await query(args)
+        // First row: heartbeat, send, acknowledgment heartbeat. Pause before the next send.
+        if (++heartbeats === 3) { entered(); await pause }
+        return result
+      },
+    } } })
+    let calls = 0
+    const sending = dispatchPendingWarp(delayed as PrismaClient, owner, async (_url, init) => {
+      calls++
+      const body = JSON.parse(String(init?.body))
+      return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(body.sourceId), created: true, duplicate: false })
+    }, env, undefined, controller.signal)
+    await reached
+    controller.abort()
+    release()
+    assert.deepEqual(await sending, { configured: true, delivered: 1, failed: 0 })
+    assert.equal(calls, 1, 'stop during an asynchronous heartbeat prevents the next transmission')
+    const rows = await inspect.inquiry.findMany({ orderBy: { sourceId: 'asc' } })
+    assert.ok(rows[0].warpDeliveredAt)
+    assert.equal(rows[1].warpAttemptedAt, null)
+    await releaseWorker(db, owner)
+  })
+}
+
+const timeout = setTimeout(() => { throw new Error('warp-delivery tests timed out') }, 60_000)
+main().catch((error) => { console.error(error); process.exitCode = 1 }).finally(() => clearTimeout(timeout))

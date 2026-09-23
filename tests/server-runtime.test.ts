@@ -23,10 +23,16 @@ async function main() {
   assert.match(compose, /profiles: \[collector\]/)
   assert.match(compose, /WARP_DELIVERY_ENABLED: \$\{WARP_DELIVERY_ENABLED:-false\}/)
   assert.match(dockerfile, /--format=esm --packages=external --outfile=worker\.mjs/)
+  assert.match(dockerfile, /COPY scripts\/warp-delivery\.ts scripts\/warp-delivery\.ts/)
+  assert.match(dockerfile, /esbuild scripts\/warp-delivery\.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-delivery\.mjs/)
+  assert.match(dockerfile, /COPY --from=build \/app\/warp-delivery\.mjs \.\/warp-delivery\.mjs/)
   assert.match(dockerfile, /USER node/)
   assert.doesNotMatch(dockerfile, /COPY --from=build \/app\/node_modules \.\/node_modules/)
   assert.match(dockerignore, /^\*\*\s*$/m)
   assert.match(dockerignore, /^\*\*\/\.env\*$/m)
+  assert.match(dockerignore, /^!scripts\/$/m)
+  assert.match(dockerignore, /^!scripts\/warp-delivery\.ts$/m)
+  assert.doesNotMatch(dockerignore, /^!scripts\/\*\*$/m)
   console.log('server runtime checks passed')
 }
 

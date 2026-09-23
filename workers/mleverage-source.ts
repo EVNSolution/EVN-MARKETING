@@ -60,8 +60,10 @@ export async function openLogin(page: Page) {
 }
 
 export async function automaticLogin(page: Page, credentials: { username: string, password: string }) {
+  let submitted = false
   try {
-    if (!credentials.username || !credentials.password || !isExactLoginUrl(page.url())) return false
+    if (!credentials.username || !credentials.password) throw new SyncError('source_credentials_incomplete')
+    if (!isExactLoginUrl(page.url())) throw new SyncError('page_error')
     const username = page.getByRole('textbox', { name: '아이디', exact: true })
       .and(page.getByPlaceholder('아이디(이메일 또는 5자 이상)', { exact: true }))
     const password = page.locator('input[type="password"][placeholder="비밀번호(8~32자, 공백 불가)"]')
@@ -71,15 +73,29 @@ export async function automaticLogin(page: Page, credentials: { username: string
       password.waitFor({ state: 'visible', timeout: 10_000 }),
       submit.waitFor({ state: 'visible', timeout: 10_000 }),
     ])
-    if (await username.count() !== 1 || await password.count() !== 1 || await submit.count() !== 1) return false
-    if (!isExactLoginUrl(page.url())) return false
+    if (await username.count() !== 1 || await password.count() !== 1 || await submit.count() !== 1) throw new SyncError('page_error')
+    if (!isExactLoginUrl(page.url())) throw new SyncError('page_error')
     await username.fill(credentials.username)
-    if (!isExactLoginUrl(page.url())) return false
+    if (!isExactLoginUrl(page.url())) throw new SyncError('page_error')
     await password.fill(credentials.password)
-    if (!isExactLoginUrl(page.url())) return false
+    if (!isExactLoginUrl(page.url())) throw new SyncError('page_error')
     await submit.click()
+    submitted = true
     await page.waitForURL((url) => url.origin === SOURCE_HOST && url.pathname !== '/login', { timeout: 30_000 })
     return true
+  } catch (error) {
+    if (error instanceof SyncError) throw error
+    const networkError = safeNetworkErrorType(error)
+    if (networkError) throw new SyncError(networkError)
+    if (submitted && isExactLoginUrl(page.url()) && await hasExplicitLoginRejection(page)) return false
+    throw new SyncError('page_error')
+  }
+}
+
+async function hasExplicitLoginRejection(page: Page) {
+  try {
+    const messages = await page.locator('[role="alert"], [data-sonner-toast]').allTextContents()
+    return messages.some((message) => /아이디|비밀번호/.test(message) && /일치|확인|잘못|실패|없/.test(message))
   } catch {
     return false
   }

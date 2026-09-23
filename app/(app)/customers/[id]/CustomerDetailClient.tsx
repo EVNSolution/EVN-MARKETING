@@ -1,5 +1,7 @@
 'use client'
 
+import { apiFetch, checkRelease } from '@/lib/release-client'
+
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import AssigneePicker from '@/components/AssigneePicker'
@@ -163,15 +165,19 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
       const fd = new FormData()
       fd.append('file', file)
       fd.append('type', docType)
-      const res = await fetch(`/api/customers/${customer.id}/documents`, { method: 'POST', body: fd })
+      const res = await apiFetch(`/api/customers/${customer.id}/documents`, { method: 'POST', body: fd })
       const data = await res.json()
+      if (!res.ok) { alert(data.error || '파일 업로드에 실패했습니다'); return }
       setDocs(prev => [...prev.filter(d => d.type !== docType), data.doc])
+      if (data.cleanupWarning) alert('새 파일은 저장되었지만 이전 파일 정리에 실패했습니다. 관리자에게 알려주세요.')
     } finally { setUploading(null) }
   }
 
   const handleDocDelete = async (docType: string) => {
     if (!confirm(`"${docType}" 파일을 삭제할까요?`)) return
-    await fetch(`/api/customers/${customer.id}/documents?type=${encodeURIComponent(docType)}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/customers/${customer.id}/documents?type=${encodeURIComponent(docType)}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(data.error || '파일 삭제에 실패했습니다'); return }
     setDocs(prev => prev.filter(d => d.type !== docType))
   }
 
@@ -198,14 +204,18 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await fetch(`/api/customers/${customer.id}/contact-card`, { method: 'POST', body: fd })
+      const res = await apiFetch(`/api/customers/${customer.id}/contact-card`, { method: 'POST', body: fd })
       const data = await res.json()
+      if (!res.ok) { alert(data.error || '명함 업로드에 실패했습니다'); return }
       setMainCardUrl(data.url)
+      if (data.cleanupWarning) alert('새 명함은 저장되었지만 이전 파일 정리에 실패했습니다. 관리자에게 알려주세요.')
     } finally { setMainCardUploading(false) }
   }
   const handleMainCardDelete = async () => {
     if (!confirm('명함 이미지를 삭제할까요?')) return
-    await fetch(`/api/customers/${customer.id}/contact-card`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/customers/${customer.id}/contact-card`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(data.error || '명함 삭제에 실패했습니다'); return }
     setMainCardUrl(null)
   }
 
@@ -231,7 +241,9 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
   const removeContact = async (id: string) => {
     const target = contacts.find(c => c.id === id)
     if (target?.cardUrl) {
-      await fetch(`/api/customers/${customer.id}/contact-card?contactId=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
+      const res = await apiFetch(`/api/customers/${customer.id}/contact-card?contactId=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { alert(data.error || '명함 삭제에 실패했습니다'); return }
     }
     setContacts(prev => prev.filter(c => c.id !== id))
     setSaved(false)
@@ -242,14 +254,18 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
       const fd = new FormData()
       fd.append('file', file)
       fd.append('contactId', contactId)
-      const res = await fetch(`/api/customers/${customer.id}/contact-card`, { method: 'POST', body: fd })
+      const res = await apiFetch(`/api/customers/${customer.id}/contact-card`, { method: 'POST', body: fd })
       const data = await res.json()
+      if (!res.ok) { alert(data.error || '명함 업로드에 실패했습니다'); return }
       setContacts(prev => prev.map(c => c.id === contactId ? { ...c, cardUrl: data.url } : c))
+      if (data.cleanupWarning) alert('새 명함은 저장되었지만 이전 파일 정리에 실패했습니다. 관리자에게 알려주세요.')
     } finally { setContactUploading(null) }
   }
   const handleContactCardDelete = async (contactId: string) => {
     if (!confirm('명함 이미지를 삭제할까요?')) return
-    await fetch(`/api/customers/${customer.id}/contact-card?contactId=${encodeURIComponent(contactId)}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/customers/${customer.id}/contact-card?contactId=${encodeURIComponent(contactId)}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(data.error || '명함 삭제에 실패했습니다'); return }
     setContacts(prev => prev.map(c => c.id === contactId ? { ...c, cardUrl: null } : c))
   }
 
@@ -312,7 +328,7 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
   const handleSave = async () => {
     setSaving(true)
     try {
-      const res = await fetch(`/api/customers/${customer.id}`, {
+      const res = await apiFetch(`/api/customers/${customer.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.assign({}, f, {
@@ -387,11 +403,12 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
   const handleSaveActivity = async () => {
     setSavingAct(true)
     try {
-      const res = await fetch(`/api/customers/${customer.id}/activities`, {
+      const res = await apiFetch(`/api/customers/${customer.id}/activities`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(act),
       })
+      if (!res.ok) { alert('활동을 저장하지 못했습니다. 입력 내용을 확인해 주세요.'); return }
       const saved = await res.json()
       setActivities(prev => [saved, ...prev])
       setAct({ type: '통화', date: new Date().toISOString().slice(0, 16), content: '', result: '', nextAction: '', assignee: '' })
@@ -402,7 +419,8 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
   }
 
   const handleDeleteActivity = async (id: string) => {
-    await fetch(`/api/customers/${customer.id}/activities?activityId=${id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/customers/${customer.id}/activities?activityId=${id}`, { method: 'DELETE' })
+    if (!res.ok) return
     setActivities(prev => prev.filter(a => a.id !== id))
   }
 
@@ -450,7 +468,7 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
               : '영업 리드 페이지에서 이동했습니다. 차량/화주 정보 입력 후 돌아가세요.'}
           </span>
           <button
-            onClick={() => router.push(returnTo)}
+            onClick={async () => { if (await checkRelease()) router.push(returnTo) }}
             className="text-xs font-semibold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap">
             ← 리드로 돌아가기
           </button>
@@ -487,7 +505,8 @@ export default function CustomerDetailClient({ customer, returnTo }: { customer:
           <button
             onClick={async () => {
               if (!confirm(`"${f.name || '이름 미입력'}" 고객을 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return
-              await fetch(`/api/customers/${customer.id}`, { method: 'DELETE' })
+              const res = await apiFetch(`/api/customers/${customer.id}`, { method: 'DELETE' })
+              if (!res.ok) return
               router.push('/customers')
             }}
             className="px-3 py-2 text-sm font-bold rounded-xl border border-red-200 text-red-400 hover:bg-red-50 hover:text-red-600 transition">

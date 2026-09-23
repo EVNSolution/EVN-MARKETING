@@ -1,11 +1,17 @@
 x-runtime: &runtime
   image: ${MARKETING_IMAGE:-evn-marketing:local}
-  build: .
+  build:
+    context: .
+    args:
+      MARKETING_BUILD_REVISION: ${MARKETING_REVISION:?Set the source SHA before building}
   init: true
   restart: unless-stopped
   environment: &environment
     DATABASE_URL: file:/data/marketing.db
     UPLOADS_DIR: /data/uploads
+    MARKETING_REVISION: ${MARKETING_REVISION-}
+    MARKETING_IMAGE_DIGEST: ${MARKETING_IMAGE_DIGEST-}
+    MARKETING_VOLUME_ID: ${MARKETING_VOLUME_ID-}
     AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in the deployment environment}
     AUTH_TRUST_HOST: "true"
     AUTH_URL: ${AUTH_URL:?Set the public AUTH_URL}
@@ -24,9 +30,18 @@ services:
   worker:
     <<: *runtime
     profiles: [collector]
+    stop_grace_period: 210s
     command: ["node", "worker.mjs"]
+    healthcheck:
+      test: ["CMD", "node", "worker-health.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     environment:
       <<: *environment
+      MARKETING_WORKER_OWNER: ${MARKETING_WORKER_OWNER-}
+      INQUIRY_COLLECTOR_ENABLED: ${INQUIRY_COLLECTOR_ENABLED:-false}
       MLEVERAGE_USERNAME: ${MLEVERAGE_USERNAME-}
       MLEVERAGE_PASSWORD: ${MLEVERAGE_PASSWORD-}
       INQUIRY_BROWSER_HEADLESS: ${INQUIRY_BROWSER_HEADLESS-}

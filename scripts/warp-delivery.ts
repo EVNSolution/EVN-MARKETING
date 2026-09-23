@@ -1,10 +1,13 @@
 import 'dotenv/config'
 import { randomUUID } from 'node:crypto'
-import { checkWarpConnection, pilotPendingWarp } from '@/lib/warp-delivery'
+import { checkWarpConnection, keyConfigured, pilotPendingWarp } from '@/lib/warp-delivery'
 
 async function main() {
   const mode = process.argv[2]
-  if (process.argv.length !== 3 || (mode !== 'check' && mode !== 'pilot')) return 'usage: npm run warp:delivery -- check|pilot'
+  if (process.argv.length !== 3 || (mode !== 'check' && mode !== 'pilot')) {
+    return 'usage: node warp-delivery.mjs check|pilot\nusage: npm run warp:delivery -- check|pilot'
+  }
+  if (!keyConfigured()) return 'warp_key_required'
   if (mode === 'check') return checkWarpConnection()
 
   const { createPrisma } = await import('@/lib/db')
@@ -17,13 +20,16 @@ async function main() {
     if (!claimed) return 'worker_already_running'
     return await pilotPendingWarp(db, owner)
   } finally {
-    if (claimed) await releaseWorker(db, owner)
-    await db.$disconnect()
+    try {
+      if (claimed) await releaseWorker(db, owner)
+    } finally {
+      await db.$disconnect()
+    }
   }
 }
 
 main().then((result) => {
-  console.log(result === 'ok_recovered_duplicate' ? 'ok_recovered_duplicate: matching duplicate receipts acknowledged' : result)
+  console.log(result)
   if (result !== 'ok' && result !== 'ok_recovered_duplicate') process.exitCode = 1
 }).catch(() => {
   console.error('warp_delivery_command_failed')
