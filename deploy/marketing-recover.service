@@ -1,0 +1,22 @@
+[Unit]
+Description=Reconcile Marketing's recorded release after host restart
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/evn-marketing-runtime
+ExecStart=/usr/bin/python3 -I /opt/evn-marketing-runtime/deploy/controller.py recover
+Environment=AWS_ECR_DISABLE_CACHE=true AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_CONFIG_FILE=/dev/null
+Environment=DOCKER_CONFIG=/root/.docker AWS_ECR_CACHE_DIR=/run/evn-marketing-ecr
+Environment=AWS_REGION=ap-northeast-2 AWS_DEFAULT_REGION=ap-northeast-2
+SuccessExitStatus=75
+TimeoutStartSec=900
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,21 +1,14 @@
 'use client'
 
-import { useActionState, useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useActionState, useState } from 'react'
 import { loginAction } from '@/app/actions/auth'
+import { releaseUrl } from '@/lib/release'
+import VersionedForm from '@/components/VersionedForm'
 
 export default function LoginPage() {
-  const [state, formAction, isPending] = useActionState(loginAction, undefined)
+  const [state, formAction, isPending] = useActionState(loginAction, undefined, releaseUrl('/login'))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const router = useRouter()
-
-  useEffect(() => {
-    if (state?.success) {
-      router.push('/')
-      router.refresh()
-    }
-  }, [state, router])
 
   return (
     <div className="w-full max-w-sm">
@@ -33,7 +26,7 @@ export default function LoginPage() {
       </div>
 
       {/* 로그인 카드 */}
-      <form action={formAction} className="rounded-2xl p-8 space-y-5" style={{ backgroundColor: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+      <VersionedForm action={formAction} className="rounded-2xl p-8 space-y-5" style={{ backgroundColor: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)' }}>
         <h2 className="text-lg font-bold text-white mb-6">로그인</h2>
 
         <div className="space-y-1">
@@ -82,13 +75,13 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          disabled={isPending || !!state?.success}
+          disabled={isPending}
           className="w-full py-3 rounded-lg text-sm font-bold text-black transition-opacity disabled:opacity-50"
           style={{ backgroundColor: '#C5D42A' }}
         >
-          {isPending || state?.success ? '로그인 중…' : '로그인'}
+          {isPending ? '로그인 중…' : '로그인'}
         </button>
-      </form>
+      </VersionedForm>
 
       <p className="text-center text-xs mt-6" style={{ color: '#555' }}>
         계정 문의: 시스템 관리자에게 연락하세요

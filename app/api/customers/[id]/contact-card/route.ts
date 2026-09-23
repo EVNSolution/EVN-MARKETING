@@ -59,7 +59,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const target = typeof contactId === 'string' ? contacts.find(contact => contact.id === contactId) : undefined
     if (typeof contactId === 'string' && !target) return NextResponse.json({ error: 'Contact not found' }, { status: 404 })
 
-    const written = await writeCustomerUpload(UPLOADS_DIR, id, file, 'image', 'contacts')
+    const written = await writeCustomerUpload(prisma, UPLOADS_DIR, id, file, 'image', 'contacts')
     await commitNewUpload(written.filename, async () => {
       if (typeof contactId === 'string') {
         const updated = contacts.map(contact => contact.id === contactId ? { ...contact, cardUrl: written.url } : contact)
