@@ -1,6 +1,6 @@
 """Bounded recovery acceptance for the already provisioned, synthetic Docker lab.
 
-Call run_recovery(Lab, root, releases) with the continuous availability observer
+Call run_recovery(Lab, root, releases, fixture_lease_ms) with the continuous availability observer
 stopped: these scenarios deliberately interrupt service. No host reboot, Docker
 daemon restart, SSM disconnect, real source login, or real delivery is tested.
 """
@@ -140,7 +140,7 @@ def _runtime(controller):
     return result
 
 
-def run_recovery(controller_class, root, releases):
+def run_recovery(controller_class, root, releases, fixture_lease_ms):
     """Return/print only scenario counts; leave a fresh, stable known release.
 
     Lab keeps its accelerated observation clock, but startup/drain/lease waiting
@@ -152,6 +152,7 @@ def run_recovery(controller_class, root, releases):
            and root.name.startswith('marketing-controller-lab-'), 'synthetic_ci_lab_required')
     _check(len(releases) == 2 and {r['revision'] for r in releases} == {'a' * 40, 'b' * 40},
            'synthetic_releases_required')
+    _check(1000 <= fixture_lease_ms <= 180000, 'synthetic_lease_required')
     # importlib's lab loader need not register its module in sys.modules.
     namespace = controller_class.recover.__globals__
     host_lock, Blocked = namespace['host_lock'], namespace['Blocked']
@@ -304,7 +305,7 @@ def run_recovery(controller_class, root, releases):
         _check(not dead['Running'] and dead['ExitCode'] != 0 and not dead['OOMKilled'],
                'worker_process_death_not_observed')
         stale = _node(controller, LEASE_SCRIPT)
-        _check(0 < stale['remainingMs'] <= 180000
+        _check(0 < stale['remainingMs'] <= fixture_lease_ms
                and [r['workerOwner'] for r in stale['rows'] if r['workerOwner']] == [origin['owner']],
                'real_unexpired_lease_required')
         started = CTX.Event()
@@ -338,6 +339,7 @@ def run_recovery(controller_class, root, releases):
                'scenarios': completed, 'controllerProcessDeaths': len(PHASES),
                'hostLockContentions': 1, 'stoppedRuntimeRecoveries': 1, 'naturalLeaseExpiryRecoveries': 1,
                'leaseRecoverySeconds': round(lease_seconds, 1),
+               'fixtureLeaseMs': fixture_lease_ms,
                'preserved': {key: expected_data[key] for key in ('customers', 'uploads', 'receipts')},
                'recoveryRecordsAdded': len(records), 'finalPhase': 'stable',
                'hostReboot': False, 'ssmDisconnect': False,

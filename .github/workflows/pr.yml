@@ -1,10 +1,20 @@
 name: PR checks
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -17,12 +27,14 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
       - name: Release controller and cloud declaration checks
-        run: python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py
+        run: python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/deploy-controller-lab.py --self-test
       - name: Offline backup and bounded receipt recovery
         run: npm run test:backup && npm run test:warp-recovery
       - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
-      - run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
-      - run: docker build --target operations --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ops .
+      - name: Build runtime image
+        run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
+      - name: Build operations image
+        run: docker build --target operations --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ops .
       - name: Synthetic container smoke
         run: |
           mkdir -p "$RUNNER_TEMP/marketing-smoke"

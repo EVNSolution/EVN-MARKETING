@@ -86,3 +86,7 @@ npm run lint
 현재 이 구성은 운영 배포 완료를 의미하지 않습니다. 배포 대상은 **WARP와 자원을 공유하지 않는 Marketing 전용 신규 서버**입니다. [배포 계획 안내](docs/production-deployment.md), [전용 서버·자료 이관 계획](docs/dedicated-server-plan.md), [WARP 방식 무중단 배포 명세](docs/zero-downtime-deployment-plan.md), [PR #1 검토 결과](docs/pr-1-review.md)를 확인하세요. 일반 배포는 웹 blue/green과 수집기 단일 인계를 목표로 하며, 현재 Compose에 이 절차가 구현되었다는 뜻은 아닙니다.
 
 구버전 화면과 두 웹 서버의 업로드 검사는 [웹 호환성 안내](docs/web-compatibility.md)에 정리합니다. Docker 직접 빌드에도 `--build-arg MARKETING_BUILD_REVISION=<소스 SHA>`가 필요합니다.
+
+## 원격 브랜치 관리
+
+`main`을 정본으로 두고 목적별 단기 브랜치·PR로 작업합니다. PR이 merge 또는 close되면 열린 PR 참조와 고유 commit을 확인한 뒤 해당 원격 head를 정리합니다. 자세한 규칙은 [AGENTS.md](AGENTS.md)를 참고하세요.

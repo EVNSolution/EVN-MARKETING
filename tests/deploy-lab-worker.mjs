@@ -6,13 +6,18 @@ const Database = require('better-sqlite3')
 const db = new Database('/data/marketing.db')
 const id = 'mleverage-admin:55f9a8bb-73f9-4316-bcd7-7dcdce0bdcc3:5c7a6115-a0a9-4e8d-bf65-efce52195fa4'
 const owner = process.env.MARKETING_WORKER_OWNER
+const leaseInput = process.env.MARKETING_TEST_LEASE_MS ?? '180000'
+const leaseMs = Number(leaseInput)
+if (!/^[0-9]+$/.test(leaseInput) || !Number.isSafeInteger(leaseMs) || leaseMs < 1000 || leaseMs > 180000) {
+  throw new Error('invalid synthetic lease duration')
+}
 const at = () => new Date().toISOString()
 db.prepare('INSERT OR IGNORE INTO InquirySyncState(id,source,companyScopeId,homepageScopeId,updatedAt) VALUES(?,?,?,?,?)')
   .run(id,'mleverage-admin','55f9a8bb-73f9-4316-bcd7-7dcdce0bdcc3','5c7a6115-a0a9-4e8d-bf65-efce52195fa4',at())
 const claim = db.prepare('UPDATE InquirySyncState SET workerOwner=?,workerHeartbeatAt=?,workerLeaseExpiresAt=?,status=? WHERE id=? AND (workerOwner IS NULL OR workerLeaseExpiresAt < ?)')
-if (claim.run(owner,at(),new Date(Date.now()+180000).toISOString(),'ready',id,at()).changes !== 1) process.exit(1)
+if (claim.run(owner,at(),new Date(Date.now()+leaseMs).toISOString(),'ready',id,at()).changes !== 1) process.exit(1)
 const timer = setInterval(() => {
-  db.prepare('UPDATE InquirySyncState SET workerHeartbeatAt=?,workerLeaseExpiresAt=? WHERE id=? AND workerOwner=?').run(at(),new Date(Date.now()+180000).toISOString(),id,owner)
+  db.prepare('UPDATE InquirySyncState SET workerHeartbeatAt=?,workerLeaseExpiresAt=? WHERE id=? AND workerOwner=?').run(at(),new Date(Date.now()+leaseMs).toISOString(),id,owner)
   if (existsSync(process.env.MARKETING_WORKER_GATE)) {
     db.prepare('UPDATE Customer SET memo=? WHERE id=?').run('synthetic worker committed after activation','synthetic-parallel')
   }
