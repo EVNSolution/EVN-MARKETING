@@ -22,6 +22,7 @@ for (const path of [
   '/app/tests',
 ]) assert.equal(existsSync(path), false, `build-only path present: ${path}`)
 assert.equal(existsSync('/app/warp-delivery.mjs'), true, 'packaged WARP CLI is present')
+assert.equal(existsSync('/app/warp-recovery.mjs'), true, 'packaged recovery CLI is present')
 assert.equal(existsSync('/app/worker-health.mjs'), true, 'packaged worker health CLI is present')
 const Database = require('better-sqlite3')
 const { chromium } = require('playwright-core')
@@ -53,6 +54,13 @@ try {
   db.close()
 }
 const beforeCli = readFileSync('/data/marketing.db')
+const recoveryRejected = spawnSync(process.execPath, ['/app/warp-recovery.mjs', 'apply', '/missing', '--approve-sha256', 'a'.repeat(64)], {
+  env: { DATABASE_URL: 'file:/data/must-not-create.db' }, encoding: 'utf8', timeout: 10_000,
+})
+assert.equal(recoveryRejected.status, 1)
+assert.equal(recoveryRejected.stderr, '')
+assert.deepEqual(JSON.parse(recoveryRejected.stdout), { status: 'warp_key_required' })
+assert.equal(existsSync('/data/must-not-create.db'), false)
 const schemaCli = (database) => spawnSync(process.execPath, ['/app/schema-check.mjs', 'check', '/app/schema-manifest.json', '/app/schema-manifest.json'], {
   env: { DATABASE_URL: database }, encoding: 'utf8', timeout: 5000,
 })
@@ -134,6 +142,17 @@ try {
   pilotDb.close()
 }
 const browser = await chromium.launch({ headless: true })
+mkdirSync('/data/recovery', { mode: 0o700 })
+writeFileSync('/data/recovery/ids.json', JSON.stringify([inquiry.sourceId]), { mode: 0o600, flag: 'wx' })
+const recoveryPlan = spawnSync(process.execPath, ['/app/warp-recovery.mjs', 'plan', '/data/recovery/ids.json', '/data/recovery/plan.json'], {
+  env: { DATABASE_URL: 'file:/data/marketing.db' }, encoding: 'utf8', timeout: 10_000,
+})
+assert.equal(recoveryPlan.status, 0, 'packaged offline planning loads runtime dependencies without a key')
+assert.equal(recoveryPlan.stderr, '')
+const planResult = JSON.parse(recoveryPlan.stdout)
+assert.equal(planResult.comparison, 'local-only')
+assert.equal(planResult.selected, 1)
+assert.equal(planResult.sha256, createHash('sha256').update(readFileSync('/data/recovery/plan.json')).digest('hex'))
 await browser.close()
 // The CI container has no external network; dummy credentials can never reach the source.
 const worker = spawnSync(process.execPath, ['/app/worker.mjs'], {

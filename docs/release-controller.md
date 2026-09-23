@@ -49,4 +49,4 @@ npm run test:release-routing
 
 CI의 `tests/deploy-controller-lab.py`는 외부 통신이 차단된 Docker 네트워크에서 실제 Nginx·TLS·SQLite·RepoDigest를 사용합니다. 현재 이미지로 만든 두 합성 revision과 합성 worker로 A→B→A, 전환 중 지속 HTTPS probe, 이전 매핑 만료/drain, 새 worker 준비 실패 후 복귀, 최신 데이터 보존을 검사합니다. 기본 관측 clock은 가속합니다. 실제 서로 다른 소스 버전의 브라우저·동시 업로드 검사는 기존 `tests/release-compat.sh`가 별도로 유지합니다.
 
-추가한 실제 시간·요청 drain·프로세스 중단 검사의 실행 방법과 증거 경계는 [배포 인수 검사](release-acceptance.md)를 따릅니다. 실제 호스트 재부팅·SSM 중단 복구, 전체 Z01–Z09 조합 검사, M4 일관된 backup/restore·receipt 리허설 및 용량 측정은 별도 gate입니다. AWS bootstrap과 운영 공개는 이 증거와 운영 환경 구성이 마련된 다음 단계입니다.
+추가한 실제 시간·요청 drain·프로세스 중단 검사의 실행 방법과 증거 경계는 [배포 인수 검사](release-acceptance.md)를 따릅니다. M4의 일관된 backup/restore·receipt 리허설과 합성 부하 메모리 측정은 [백업·복원 절차](backup-recovery.md)로 이어집니다. 실제 호스트 재부팅·SSM 중단 복구, 암호화 snapshot 복원과 운영 자료의 시간·용량 검증은 별도 gate입니다. AWS bootstrap과 운영 공개는 이 증거와 운영 환경 구성이 마련된 다음 단계입니다.

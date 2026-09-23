@@ -174,6 +174,11 @@ assert "LifecyclePolicy" not in resources["Images"]["Properties"]
 assert not any(r["Type"] in ("AWS::EC2::Instance", "AWS::SSM::Parameter") for r in resources.values())
 
 release_role = resources["ReleaseRole"]["Properties"]
+assert template["Parameters"]["EnableGitHubRelease"]["Default"] == "false"
+assert template["Parameters"]["EnableGitHubRelease"]["AllowedValues"] == ["false", "true"]
+assert template["Conditions"]["GitHubReleaseEnabled"] == {"Fn::Equals": [{"Ref": "EnableGitHubRelease"}, "true"]}
+assert resources["ReleaseRole"]["Condition"] == template["Outputs"]["ReleaseRoleArn"]["Condition"] == "GitHubReleaseEnabled"
+assert "Condition" not in resources["HostRole"] and "Condition" not in resources["ReleaseDocument"]
 trust = release_role["AssumeRolePolicyDocument"]["Statement"][0]
 assert trust["Condition"]["StringEquals"] == {
     "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
@@ -198,6 +203,14 @@ assert [item["Fn::Sub"].split("production/")[1] for item in secrets] == [
 decrypt = next(s for s in host_policy if "kms:Decrypt" in s["Action"])
 assert decrypt["Condition"]["StringEquals"]["kms:EncryptionContext:PARAMETER_ARN"] == secrets
 assert any("ec2:DescribeSnapshots" in s["Action"] for s in host_policy)
+assert any("ec2:DescribeVolumes" in s["Action"] for s in host_policy)
+snapshot_policies = [s for s in host_policy if 'ec2:CreateSnapshot' in s['Action']]
+assert len(snapshot_policies) == 2
+assert snapshot_policies[0]['Resource']['Fn::Sub'].endswith('volume/${MarketingDataVolumeId}')
+assert snapshot_policies[1]['Condition']['StringEquals']['aws:RequestTag/Service'] == 'evn-marketing'
+tag_policy = next(s for s in host_policy if 'ec2:CreateTags' in s['Action'])
+assert tag_policy['Condition']['StringEquals']['ec2:CreateAction'] == 'CreateSnapshot'
+assert not any(action in ('ec2:DeleteSnapshot','ec2:CreateVolume','ec2:AttachVolume') for s in host_policy for action in s['Action'])
 
 workflow = (ROOT / ".github/workflows/release.yml").read_text()
 assert "workflow_dispatch:" in workflow and "pull_request" not in workflow and "\n  push:" not in workflow

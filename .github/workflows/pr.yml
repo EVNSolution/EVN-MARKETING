@@ -14,11 +14,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
       - name: Release controller and cloud declaration checks
-        run: python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py
+        run: python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py
+      - name: Offline backup and bounded receipt recovery
+        run: npm run test:backup && npm run test:warp-recovery
       - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
       - run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
+      - run: docker build --target operations --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ops .
       - name: Synthetic container smoke
         run: |
           mkdir -p "$RUNNER_TEMP/marketing-smoke"
@@ -41,9 +45,15 @@ jobs:
           done
           test "$started" = true
           docker exec marketing-smoke node /src/tests/readiness-http.mjs
-      - name: Isolated release controller Docker lab
-        timeout-minutes: 25
-        run: python3 tests/deploy-controller-lab.py
       - name: Two-image browser and concurrent upload compatibility
         timeout-minutes: 12
         run: bash tests/release-compat.sh
+      - name: Isolated release controller Docker lab
+        timeout-minutes: 25
+        run: python3 tests/deploy-controller-lab.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: marketing-recovery-${{ github.sha }}
+          path: ${{ runner.temp }}/marketing-recovery-summary.json
+          if-no-files-found: error
+          retention-days: 7
