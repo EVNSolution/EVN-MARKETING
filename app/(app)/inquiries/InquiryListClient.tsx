@@ -1,5 +1,7 @@
 'use client'
 
+import { apiFetch } from '@/lib/release-client'
+
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react'
@@ -41,13 +43,30 @@ type InquiryResponse = {
 }
 
 const statusText: Record<string, { label: string; className: string }> = {
+  starting: { label: '수집 연결 준비 중', className: 'bg-amber-100 text-amber-800' },
+  ready: { label: '정상 대기', className: 'bg-lime-100 text-lime-800' },
+  source_error: { label: '원본 연결 재시도 중', className: 'bg-orange-100 text-orange-800' },
   success: { label: '정상 대기', className: 'bg-lime-100 text-lime-800' },
   running: { label: '가져오는 중', className: 'bg-sky-100 text-sky-700' },
   pending: { label: '실행 대기', className: 'bg-amber-100 text-amber-800' },
   offline: { label: '수집 연결 끊김', className: 'bg-slate-200 text-slate-700' },
   partial: { label: '일부 수집', className: 'bg-orange-100 text-orange-800' },
   login_required: { label: '원본 서비스 로그인이 필요해요', className: 'bg-red-100 text-red-700' },
+  credentials_invalid: { label: '원본 계정 확인 필요', className: 'bg-red-100 text-red-700' },
+  credentials_missing: { label: '원본 계정 설정 필요', className: 'bg-red-100 text-red-700' },
+  source_credentials_incomplete: { label: '원본 계정 설정 불완전', className: 'bg-red-100 text-red-700' },
+  source_credentials_missing: { label: '원본 계정 설정 필요', className: 'bg-red-100 text-red-700' },
+  login_retry_exhausted: { label: '원본 로그인 재시도 대기', className: 'bg-red-100 text-red-700' },
   failed: { label: '조회 실패', className: 'bg-red-100 text-red-700' },
+}
+
+const blockedStatusHelp: Record<string, string> = {
+  login_required: '원본 서비스 세션이 만료되었습니다. 수집기가 자동 로그인을 다시 시도합니다.',
+  credentials_invalid: '원본 계정이 거부되었습니다. 계정 정보를 확인한 뒤 수집기를 재시작해 주세요.',
+  credentials_missing: 'Mac 수집 브라우저에서 직접 로그인하거나, 원본 계정 정보를 설정한 뒤 수집기를 재시작해 주세요.',
+  source_credentials_incomplete: '원본 계정 아이디와 비밀번호를 모두 설정한 뒤 수집기를 재시작해 주세요.',
+  source_credentials_missing: 'Mac 수집 브라우저에서 직접 로그인하거나, 원본 계정 정보를 설정한 뒤 수집기를 재시작해 주세요.',
+  login_retry_exhausted: '일시 오류 재시도 한도를 넘었습니다. 5분 뒤 자동으로 다시 시도합니다.',
 }
 
 function kst(value: string | null) {
@@ -81,7 +100,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
     request.current = { id, controller }
     setLoading(true)
     try {
-      const response = await fetch(`/api/inquiries${queryString ? `?${queryString}` : ''}`, { signal: controller.signal, cache: 'no-store' })
+      const response = await apiFetch(`/api/inquiries${queryString ? `?${queryString}` : ''}`, { signal: controller.signal, cache: 'no-store' })
       if (!response.ok) throw new Error()
       const next = await response.json() as InquiryResponse
       if (request.current?.id !== id) return
@@ -130,7 +149,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
     setSyncing(true)
     setSyncMessage('')
     try {
-      const response = await fetch('/api/inquiries/sync', { method: 'POST' })
+      const response = await apiFetch('/api/inquiries/sync', { method: 'POST' })
       const result = await response.json() as { queued?: boolean; error?: string }
       if (!response.ok) throw new Error(result.error)
       setSyncMessage(result.queued ? '가져오기 요청을 등록했습니다.' : '이미 실행 중이거나 원본 로그인이 필요합니다.')
@@ -154,8 +173,8 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
           <div className="mt-2 flex items-center gap-2">
             <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${state.className}`}>{state.label}</span>
           </div>
-          {sync?.currentStatus === 'login_required' && (
-            <p className="mt-2 text-[11px] text-red-600">별도 수집 브라우저에서 원본 서비스에 로그인해 주세요.</p>
+          {sync && blockedStatusHelp[sync.currentStatus] && (
+            <p className="mt-2 text-[11px] text-red-600">{blockedStatusHelp[sync.currentStatus]}</p>
           )}
           {sync?.nextRunAt && <p className="mt-2 text-[11px] text-slate-400">다음 예정 {kst(sync.nextRunAt)}</p>}
         </div>

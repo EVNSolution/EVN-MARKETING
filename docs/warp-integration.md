@@ -51,6 +51,8 @@
 
 ## 활성화 순서
 
+개발 checkout에서는 아래 `npm run warp:delivery -- check|pilot` 명령을 사용합니다. 최종 컨테이너의 `/app`에서는 같은 기능을 `node warp-delivery.mjs check` 또는 `node warp-delivery.mjs pilot`으로 실행합니다. 이미지에는 점검용 JS 번들을 포함하며 `tsx`나 Prisma CLI를 설치하지 않습니다. 실행 환경에는 승인된 전용 키를 주입하고, `pilot`에는 이전·검증된 DB를 연결해야 합니다. 키가 없거나 형식이 맞지 않으면 두 모드 모두 DB를 열거나 worker lease를 잡기 전에 `warp_key_required`로 실패합니다.
+
 1. 전용 키를 승인된 보안 경로로 전달받아 실행 프로세스의 환경변수로 주입한다. 키는 채팅, 명령 인자, `.env`, Git, 문서, 로그, 브라우저에 넣지 않는다. 자동 전송은 계속 비활성으로 둔다.
 2. `npm run warp:delivery -- check`를 실행한다. 인증된 빈 요청이 HTTP 400 `bad_payload`를 반환하면 `ok`다. CRM에는 쓰지 않는다.
 3. 실행 중인 수집 worker를 정상 종료한 뒤 `npm run warp:delivery -- pilot`을 실행한다. 같은 worker lease로 보호하며, 대기 문의 1건과 동일 문의의 재전송만 검사한다. 첫 응답은 `created=true, duplicate=false`, 재전송은 `created=false, duplicate=true`여야 하고 고객·활동 ID가 같아야 한다.

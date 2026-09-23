@@ -61,7 +61,7 @@ function fakePage(finalTotal: 0 | 1, startsLoading = false) {
   }
 }
 
-function fakeLoginPage(initialUrl = 'https://app.mleverage-admin.co.kr/login', authenticates = true, redirectsAfterUsername = false) {
+function fakeLoginPage(initialUrl = 'https://app.mleverage-admin.co.kr/login', authenticates = true, redirectsAfterUsername = false, explicitRejection = !authenticates) {
   let url = initialUrl
   const fills: string[] = []
   let clicks = 0
@@ -91,7 +91,9 @@ function fakeLoginPage(initialUrl = 'https://app.mleverage-admin.co.kr/login', a
         ? field
         : { waitFor, count: async () => ready ? 1 : 0, click: async () => { clicks++; if (authenticates) url = 'https://app.mleverage-admin.co.kr/' } },
       getByPlaceholder: () => field,
-      locator: () => field,
+      locator: (selector: string) => selector.includes('[role="alert"]')
+        ? { allTextContents: async () => explicitRejection ? ['아이디 또는 비밀번호가 일치하지 않습니다'] : [] }
+        : field,
       waitForURL: async (matches: (url: URL) => boolean) => {
         if (!matches(new URL(url))) throw new Error('synthetic authentication failure')
       },
@@ -113,13 +115,19 @@ async function main() {
   assert.equal(await automaticLogin(rejected.page as never, { username: 'synthetic-user', password: 'wrong-synthetic-password' }), false)
   assert.equal(rejected.clicks(), 1)
 
+  const ambiguousTimeout = fakeLoginPage(undefined, false, false, false)
+  await assert.rejects(
+    automaticLogin(ambiguousTimeout.page as never, { username: 'synthetic-user', password: 'synthetic-password' }),
+    /page_error/,
+  )
+
   const untrusted = fakeLoginPage('https://example.invalid/login')
-  assert.equal(await automaticLogin(untrusted.page as never, { username: 'must-not-fill', password: 'must-not-fill' }), false)
+  await assert.rejects(automaticLogin(untrusted.page as never, { username: 'must-not-fill', password: 'must-not-fill' }), /page_error/)
   assert.deepEqual(untrusted.fills, [])
   assert.equal(untrusted.clicks(), 0)
 
   const redirected = fakeLoginPage(undefined, true, true)
-  assert.equal(await automaticLogin(redirected.page as never, { username: 'synthetic-user', password: 'must-not-fill' }), false)
+  await assert.rejects(automaticLogin(redirected.page as never, { username: 'synthetic-user', password: 'must-not-fill' }), /page_error/)
   assert.deepEqual(redirected.fills, ['synthetic-user'])
   assert.equal(redirected.clicks(), 0)
 

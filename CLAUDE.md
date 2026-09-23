@@ -4,13 +4,13 @@
 
 ## Project Snapshot
 
-- Next.js 16 (App Router) + TypeScript, NextAuth v5(beta, Credentials provider, JWT 세션), Prisma 7 + `@prisma/adapter-libsql`(SQLite 기반, 로컬은 `dev.db` 파일).
+- Next.js 16 (App Router) + TypeScript, NextAuth v5(beta, Credentials provider, JWT 세션), Prisma 7 + `@prisma/adapter-better-sqlite3`(SQLite WAL, 로컬은 `dev.db` 파일).
 - `User.role`은 `"admin" | "user"` 값을 가지지만, 현재 `proxy.ts` 미들웨어는 로그인 여부만 검사하고 개별 API route(`app/api/**/route.ts`)에도 role 기반 인가 코드가 확인되지 않는다. role 검사가 없는 상태를 "의도된 설계"로 단정하지 말고, admin 전용이어야 할 기능을 다룰 때는 이 문서의 §Authentication & Authorization을 따른다.
 - `Customer` 모델에 실제 고객 PII/사업자 정보(이름, 전화번호, 생년, 주소, 결혼여부, 자녀수, 사업자등록번호, 차량번호, 담당자 명함/서류 업로드 등)가 저장된다. 이 데이터는 §Database & User Data 기준으로 다룬다.
 - 업로드 파일은 `UPLOADS_DIR` 환경변수가 가리키는 로컬 파일시스템에 저장되고 `app/api/uploads/[...path]/route.ts`가 서빙한다. 이 route는 이미 `..` path traversal을 차단하는 검사를 포함하므로, 관련 코드를 수정할 때 이 방어 로직을 제거하거나 약화시키지 않는다.
-- 저장소에 lockfile(`package-lock.json`/`pnpm-lock.yaml`/`yarn.lock`)이 없다. 어떤 패키지 매니저를 쓸지 임의로 확정하지 말고, 필요하면 사용자에게 확인한다.
-- `.github/` 워크플로우, `Dockerfile`, AWS/클라우드 관련 설정은 저장소에서 확인되지 않았다. 존재하지 않는 CI나 클라우드 인프라를 가정하고 지침을 작성하지 않는다.
-- 이 디렉터리는 현재 Git 저장소로 초기화되어 있지 않다(`.git` 없음). 아래 Git 관련 규칙은 Git이 초기화된 이후부터 적용된다.
+- npm과 `package-lock.json`을 사용한다. 격리 검증 환경은 `npm ci`로 설치한다.
+- `.github/workflows/pr.yml`, `Dockerfile`, 개발 검증용 Compose가 존재한다. 합성 CI 성공과 실제 운영 배포를 구분하며, 전용 서버 배포 계획은 `docs/production-deployment.md`를 따른다.
+- Git 저장소이며 변경은 작업 브랜치와 PR로 관리한다. 운영 데이터가 있는 기존 checkout과 격리 worktree를 혼동하지 않는다.
 
 ## Before Making Changes
 
@@ -36,7 +36,7 @@
 
 ## Git & Filesystem Safety
 
-- Git이 초기화되어 있지 않은 현재 상태에서 `git init` 및 최초 커밋 범위(무엇을 커밋할지)는 사용자와 먼저 확인한다.
+- 기존 Git 저장소를 재초기화하거나 운영 데이터가 포함된 이전 이력을 무심코 게시하지 않는다.
 - Git 초기화 이후: `git reset --hard`, `git clean -fd`/`-fdx`, `git push --force`(-with-lease 포함), 브랜치 강제 삭제, stash/reflog 삭제 등 파괴적 작업은 사용자의 명시적 허가 없이 실행하지 않는다.
 - `main`/`master`/`production` 브랜치에 직접 push하지 않는다. 저장소에 PR 워크플로우가 생기면 그것을 따른다.
 - `dev.db`, `dev.db-journal`, `uploads/` 등 `.gitignore`로 보호되는 로컬 데이터 파일을 임의로 삭제하지 않는다 — `.gitignore`에 이미 "실제 사용자 데이터 포함, 절대 커밋 금지" 주석이 달려 있을 만큼 민감하다.
@@ -45,13 +45,13 @@
 ## Dependencies & Supply Chain
 
 - 명확한 필요 없이 새 dependency를 추가하지 않는다. 먼저 기존 의존성(Next.js, Prisma, NextAuth, bcryptjs 등)과 표준 라이브러리로 해결 가능한지 확인한다.
-- 저장소에 lockfile이 없으므로, 임의로 npm/pnpm/yarn 중 하나를 확정해 lockfile을 새로 만들지 않는다 — 어떤 패키지 매니저를 쓸지 애매하면 진행 전에 사용자에게 확인한다.
+- 기존 npm lockfile을 유지한다. 패키지 매니저 변경은 별도 요청이 없는 한 하지 않는다.
 - 여러 패키지 매니저의 lockfile을 동시에 만들지 않는다.
 - 저장소에 security audit/vulnerability scan 워크플로우가 생기면 그것을 실행하고 결과를 그대로 보고한다. 통과시키기 위해 취약점 경고를 임의로 suppress하지 않는다.
 
 ## Database & User Data
 
-- `prisma/schema.prisma` 변경은 Prisma migration으로 관리한다(현재 `prisma/migrations`가 존재하지 않으므로, 첫 migration을 만들 때 그 사실을 사용자에게 알린다).
+- `prisma/schema.prisma` 변경은 기존 `prisma/migrations`의 이력과 일치하는 Prisma migration으로 관리한다. 기존 DB에 기준선 SQL을 다시 실행하지 않는다.
 - `Customer`/`CustomerActivity`/`User` 테이블에는 실제 이름·전화번호·생년·주소·사업자등록번호·차량번호 등 민감한 개인/사업자 정보가 들어갈 수 있다. 실제 프로덕션 데이터를 로컬 개발환경으로 복사하지 않는다. 테스트/시드 데이터(`prisma/seed.ts`)는 synthetic 데이터만 사용한다.
 - destructive migration(컬럼/테이블 삭제, NOT NULL 강제 등)을 적용하기 전에는 영향 범위와 롤백 방법을 먼저 확인하고 사용자 승인을 받는다.
 - 운영 DB(`DATABASE_URL`이 로컬 `dev.db`가 아닌 값)에 대한 직접 수정, 대량 데이터 삭제/수정은 사용자의 명시적 허가 없이 실행하지 않는다.
@@ -59,7 +59,7 @@
 
 ## Production & Deployment
 
-- 이 저장소에는 확인된 CI/CD 파이프라인이나 배포 설정이 없다. 존재하지 않는 배포 명령이나 서비스를 지어내지 않는다.
+- PR CI와 컨테이너 구성이 있지만 실제 release/배포 경로의 구현 여부는 매 작업에서 확인한다. 계획 문서에 적힌 명령이나 AWS 자원이 이미 존재한다고 가정하지 않는다.
 - 배포, 버전 릴리스, 실제 운영 환경 변경은 사용자의 명시적 허가 없이 실행하지 않는다.
 - 배포/빌드 명령이 성공했다는 것과 실제 기능이 정상 동작하는 것은 다른 문제다. "배포 성공" 메시지만으로 작업 완료를 선언하지 않는다.
 
@@ -71,7 +71,7 @@
 ## Verification
 
 - 코드 수정 후 "완료"라고 단순 선언하지 않는다. 현재 저장소에서 실행 가능한 검증(`npm run lint`/`typecheck`/`build` 등, 사용자가 확정한 패키지 매니저 기준)을 수행하고, 실행한 검증과 실행하지 못한 검증을 구분해서 보고한다.
-- 이 저장소에는 자동화된 test 스크립트가 없다. 테스트를 실행한 것처럼 표현하지 않는다.
+- `package.json`의 합성 DB/수집/전송/계약 및 보안 회귀 test 스크립트를 사용한다. 실제 서비스 로그인이나 운영 검증까지 수행한 것처럼 표현하지 않는다.
 - UI/기능 변경은 가능하면 실제로 `npm run dev`(또는 확정된 패키지 매니저의 동일 스크립트)로 띄워 확인하고, 확인하지 못했다면 그 사실을 명시한다.
 
 ## Failure & Recovery
