@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { access, mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import type { PrismaClient } from '@/app/generated/prisma/client'
 import { safeReturnTo } from '@/lib/customer-security'
+import { withWorkerDatabase } from './worker-runtime-helper'
 import {
   MAX_MULTIPART_BYTES,
   MAX_UPLOAD_BYTES,
@@ -11,7 +13,9 @@ import {
   mergeContacts,
   parseDocuments,
   removeOwnedUpload,
+  restoreStagedUpload,
   requireMetadataUpdate,
+  stageOwnedUpload,
   uploadResponse,
   validateMultipartLength,
   validateUpload,
@@ -26,13 +30,27 @@ async function missing(filename: string) {
 }
 
 async function main() {
+  await withWorkerDatabase(async (db, other) => {
+    await db.$queryRaw`PRAGMA journal_mode = WAL`
+    for (const id of ['customer-a', 'customer-alias', 'quota', 'ordering', 'same-client', 'other-client']) {
+      await db.customer.create({ data: { id, name: 'Synthetic upload customer' } })
+    }
+    const before = await db.customer.findMany({ orderBy: { id: 'asc' } })
+    await testUploads(db, other)
+    assert.deepEqual(await db.customer.findMany({ orderBy: { id: 'asc' } }), before, 'quota locking does not alter customer metadata or updatedAt')
+  })
+}
+
+async function testUploads(db: PrismaClient, other: PrismaClient) {
   const base = await mkdtemp(path.join(tmpdir(), 'evn-upload-security-'))
   const root = path.join(base, 'uploads')
   const outside = path.join(base, 'sentinel.txt')
   await writeFile(outside, 'keep')
 
   try {
-    const first = await writeCustomerUpload(root, 'customer-a', image(), 'image', 'contacts')
+    await assert.rejects(writeCustomerUpload(db, root, 'missing-customer', image(), 'image'), /upload_metadata_changed/)
+    await missing(path.join(root, 'customers', 'missing-customer'))
+    const first = await writeCustomerUpload(db, root, 'customer-a', image(), 'image', 'contacts')
     assert.equal(await readFile(first.filename, 'hex'), Buffer.from(png).toString('hex'))
 
     const denied = await uploadResponse(root, first.url.slice('/api/uploads/'.length).split('/'), false)
@@ -46,7 +64,7 @@ async function main() {
     assert.match(served.headers.get('content-disposition') ?? '', /^inline;/)
     assert.deepEqual(new Uint8Array(await served.arrayBuffer()), png)
 
-    const pdf = await writeCustomerUpload(root, 'customer-a', new File(['%PDF-1.7'], 'record.pdf', { type: 'application/pdf' }), 'document')
+    const pdf = await writeCustomerUpload(db, root, 'customer-a', new File(['%PDF-1.7'], 'record.pdf', { type: 'application/pdf' }), 'document')
     const pdfResponse = await uploadResponse(root, pdf.url.slice('/api/uploads/'.length).split('/'), true)
     assert.match(pdfResponse.headers.get('content-disposition') ?? '', /^attachment;/)
 
@@ -63,7 +81,7 @@ async function main() {
 
     await mkdir(path.join(root, 'customers', 'customer-b'))
     await symlink(path.join(root, 'customers', 'customer-b'), path.join(root, 'customers', 'customer-alias'))
-    await assert.rejects(writeCustomerUpload(root, 'customer-alias', image(), 'image'), /invalid_customer_path/)
+    await assert.rejects(writeCustomerUpload(db, root, 'customer-alias', image(), 'image'), /invalid_customer_path/)
 
     assert.throws(() => parseDocuments('{bad json'), /invalid_documents_metadata/)
     assert.throws(() => parseDocuments('{}'), /invalid_documents_metadata/)
@@ -88,10 +106,13 @@ async function main() {
     await mkdir(quotaCustomer)
     await writeFile(path.join(quotaCustomer, 'existing.bin'), '')
     await truncate(path.join(quotaCustomer, 'existing.bin'), 50 * 1024 * 1024)
-    await assert.rejects(writeCustomerUpload(root, 'quota', image(), 'image'), /customer_upload_quota_exceeded/)
+    await assert.rejects(writeCustomerUpload(db, root, 'quota', image(), 'image'), /customer_upload_quota_exceeded/)
+    const staged = await stageOwnedUpload(root, 'quota', '/api/uploads/customers/quota/existing.bin')
+    await assert.rejects(writeCustomerUpload(db, root, 'quota', image(), 'image'), /customer_upload_quota_exceeded/, 'staged deletions still count toward quota')
+    await restoreStagedUpload(staged)
 
-    const old = await writeCustomerUpload(root, 'ordering', image('old.png'), 'image')
-    const replacement = await writeCustomerUpload(root, 'ordering', image('new.png'), 'image')
+    const old = await writeCustomerUpload(db, root, 'ordering', image('old.png'), 'image')
+    const replacement = await writeCustomerUpload(db, root, 'ordering', image('new.png'), 'image')
     await assert.rejects(commitNewUpload(replacement.filename, async () => requireMetadataUpdate(0)), /upload_metadata_changed/)
     await access(old.filename)
     await missing(replacement.filename)
@@ -106,9 +127,27 @@ async function main() {
     assert.equal(metadata, old.url)
     await access(old.filename)
 
-    const removable = await writeCustomerUpload(root, 'ordering', image('remove.png'), 'image')
+    const removable = await writeCustomerUpload(db, root, 'ordering', image('remove.png'), 'image')
     await deleteOwnedUpload(root, 'ordering', removable.url, async () => {}, async () => {})
     await missing(removable.filename)
+
+    const payload = new Uint8Array(4 * 1024 * 1024)
+    payload.set(png)
+    for (const [id, client] of [['same-client', db], ['other-client', other]] as const) {
+      const directory = path.join(root, 'customers', id)
+      await mkdir(directory)
+      await writeFile(path.join(directory, 'existing.bin'), '')
+      await truncate(path.join(directory, 'existing.bin'), 46 * 1024 * 1024)
+      const file = new File([payload], 'concurrent.png', { type: 'image/png' })
+      const results = await Promise.allSettled([
+        writeCustomerUpload(db, root, id, file, 'image'),
+        writeCustomerUpload(client, root, id, file, 'image', 'contacts'),
+      ])
+      assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+      const rejected = results.find(result => result.status === 'rejected')
+      assert.ok(rejected?.status === 'rejected')
+      assert.equal(rejected.reason.message, 'customer_upload_quota_exceeded', 'local contention must not expire/deadlock the transaction')
+    }
 
     console.log('upload security checks passed')
   } finally {
@@ -116,4 +155,5 @@ async function main() {
   }
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1 })
+const timeout = setTimeout(() => { throw new Error('upload security tests timed out') }, 60_000)
+main().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => clearTimeout(timeout))

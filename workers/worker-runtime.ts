@@ -58,6 +58,7 @@ type WorkerOptions = {
   owner?: string
   wait?: (ms: number, signal: AbortSignal) => Promise<void>
   log?: (code: string) => void
+  workAllowed?: () => Promise<boolean>
 }
 
 export function collectorEnabled(value = process.env.INQUIRY_COLLECTOR_ENABLED) {
@@ -67,11 +68,15 @@ export function collectorEnabled(value = process.env.INQUIRY_COLLECTOR_ENABLED) 
 export async function runInquiryWorker({
   enabled,
   signal,
-  dependencies: deps,
+  dependencies: provided,
   owner = randomUUID(),
   wait = abortableWait,
   log = (code) => console.error(code),
+  workAllowed = async () => true,
 }: WorkerOptions) {
+  const deps = { ...provided, dispatchPendingWarp: async (...args: Parameters<WorkerDependencies['dispatchPendingWarp']>) => {
+    if (await workAllowed()) return provided.dispatchPendingWarp(...args)
+  } }
   if (!enabled) {
     log('collector_disabled')
     return 0
@@ -132,7 +137,7 @@ export async function runInquiryWorker({
             if (blocked === 'stopped') break
             terminalStatus = 'offline'
             loginFailures = 0
-            await setStatus(prisma, owner, 'offline')
+            await setStatus(prisma, owner, 'ready')
             continue
           }
           if (signal.aborted) break
@@ -143,13 +148,16 @@ export async function runInquiryWorker({
             if (blocked === 'stopped') break
             terminalStatus = 'offline'
             loginFailures = 0
-            await setStatus(prisma, owner, 'offline')
+            await setStatus(prisma, owner, 'ready')
             continue
           }
 
           let loggedIn: boolean
           try {
             loggedIn = await deps.automaticLogin(launched.page, credentials)
+            if (signal.aborted) break
+            // A redirect alone is not readiness; verification failures share the bounded login retry path.
+            if (loggedIn && !(await deps.prepareProtectedPage(launched.page, INQUIRY_START_DATE, deps.koreaDate()))) throw new SyncError('page_error')
           } catch (error) {
             if (isLeaseError(error)) throw error
             if (signal.aborted) break
@@ -162,7 +170,7 @@ export async function runInquiryWorker({
               if (cooldownResult === 'stopped') break
               loginFailures = 0
               terminalStatus = 'offline'
-              await setStatus(prisma, owner, cooldownResult === 'recovered' ? 'offline' : 'login_required')
+              await setStatus(prisma, owner, cooldownResult === 'recovered' ? 'ready' : 'login_required')
               continue
             }
             await wait(LOGIN_BACKOFF_MS[loginFailures - 1], signal)
@@ -175,20 +183,24 @@ export async function runInquiryWorker({
             if (blocked === 'stopped') break
             terminalStatus = 'offline'
             loginFailures = 0
-            await setStatus(prisma, owner, 'offline')
+            await setStatus(prisma, owner, 'ready')
             continue
           }
           loginFailures = 0
-          await setStatus(prisma, owner, 'offline')
           if (signal.aborted) break
+          await setStatus(prisma, owner, 'ready')
         } else {
           await prisma.inquirySyncState.updateMany({
-            where: { id: INQUIRY_SCOPE_ID, workerOwner: owner, status: { in: SOURCE_BLOCKED_STATUSES } },
-            data: { status: 'offline' },
+            where: { id: INQUIRY_SCOPE_ID, workerOwner: owner, status: { in: [...SOURCE_BLOCKED_STATUSES, 'starting', 'source_error'] } },
+            data: { status: 'ready' },
           })
         }
 
         if (signal.aborted) break
+        if (!(await workAllowed())) {
+          await wait(POLL_MS, signal)
+          continue
+        }
         const state = await prisma.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })
         if (signal.aborted) break
         if (!state.nextRunAt || state.nextRunAt <= new Date()) await deps.enqueueSync(prisma, 'hourly')
@@ -223,7 +235,7 @@ export async function runInquiryWorker({
         await deps.finishRun(prisma, claimedRun.id, claimedRun.owner, result)
         collecting = false
       } catch (error) {
-        if (collecting || (signal.aborted && isLeaseError(error))) throw error
+        if (collecting || isLeaseError(error)) throw error
         if (signal.aborted) {
           if (errorCode(error) === 'page_error' || errorCode(error) === 'browser_disconnected') break
           throw error
@@ -231,13 +243,7 @@ export async function runInquiryWorker({
         if (!browser.isConnected()) throw new SyncError('browser_disconnected')
         const code = errorCode(error)
         log(code)
-        if (code === 'lost_worker_lease' || code === 'lost_lease') {
-          if (await deps.claimWorker(prisma, owner)) {
-            await deps.recoverStaleRuns(prisma)
-            continue
-          }
-          throw new SyncError(code)
-        }
+        await setStatus(prisma, owner, 'source_error')
         await wait(POLL_MS, signal)
       }
     }
