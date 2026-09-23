@@ -58,6 +58,7 @@ type WorkerOptions = {
   owner?: string
   wait?: (ms: number, signal: AbortSignal) => Promise<void>
   log?: (code: string) => void
+  workAllowed?: () => Promise<boolean>
 }
 
 export function collectorEnabled(value = process.env.INQUIRY_COLLECTOR_ENABLED) {
@@ -67,11 +68,15 @@ export function collectorEnabled(value = process.env.INQUIRY_COLLECTOR_ENABLED) 
 export async function runInquiryWorker({
   enabled,
   signal,
-  dependencies: deps,
+  dependencies: provided,
   owner = randomUUID(),
   wait = abortableWait,
   log = (code) => console.error(code),
+  workAllowed = async () => true,
 }: WorkerOptions) {
+  const deps = { ...provided, dispatchPendingWarp: async (...args: Parameters<WorkerDependencies['dispatchPendingWarp']>) => {
+    if (await workAllowed()) return provided.dispatchPendingWarp(...args)
+  } }
   if (!enabled) {
     log('collector_disabled')
     return 0
@@ -192,6 +197,10 @@ export async function runInquiryWorker({
         }
 
         if (signal.aborted) break
+        if (!(await workAllowed())) {
+          await wait(POLL_MS, signal)
+          continue
+        }
         const state = await prisma.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })
         if (signal.aborted) break
         if (!state.nextRunAt || state.nextRunAt <= new Date()) await deps.enqueueSync(prisma, 'hourly')

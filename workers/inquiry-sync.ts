@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { collectorEnabled, runInquiryWorker, type WorkerDependencies } from './worker-runtime'
 import { configuredWorkerOwner } from '@/lib/worker-health'
+import { workerActivationAllowed } from './worker-activation'
 
 async function main() {
   const enabled = collectorEnabled()
@@ -43,7 +44,7 @@ async function main() {
       readSourcePage: source.readSourcePage,
       koreaDate: sync.koreaDate,
     }
-    return await runInquiryWorker({ enabled, signal: controller.signal, dependencies, owner })
+    return await runInquiryWorker({ enabled, signal: controller.signal, dependencies, owner, workAllowed: workerActivationAllowed })
   } finally {
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)

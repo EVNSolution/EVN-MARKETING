@@ -22,7 +22,7 @@ JS form과 화면 이동은 `/api/release`를 확인한 뒤 진행합니다. 만
 - 생성기는 생성 시각에 만료된 previous를 제거하고 30분 초과 보존 입력을 거부합니다. 자동 만료 타이머·호스트 journal·설정 설치는 M3 작업입니다. 만료 시 재생성/검사/reload하고 진행 중 요청 종료 전 슬롯을 재사용하지 않아야 합니다.
 - 사전 확인과 실제 요청 사이에도 만료될 수 있으므로 최종 프록시의 거부가 기준입니다. 사전 확인은 인증이나 인계 잠금이 아닙니다. 문의 확인과 실제 RSC 요청 사이에 만료되어 Next가 전체 이동으로 바꾸는 경우, 편집한 화면은 beforeunload 확인으로 입력의 조용한 폐기를 막습니다. 저장 뒤에도 전체 이동에서는 보수적으로 확인이 표시될 수 있습니다. 로그아웃 action 실패는 해당 form의 오류 경계로 격리하여 고객 편집 화면을 유지합니다.
 - 현재 설정은 private upstream의 HTTP 계약/합성 검증용입니다. 공개 HTTPS·방화벽·인증서·배포 환경의 proxy 신뢰 경계는 M3/M5에서 구성합니다. 앱 포트를 직접 공개하지 않습니다.
-- 현재 검사는 같은 변경본을 서로 다른 ID/독립 action 키로 두 번 빌드해 전환합니다. 향후 REST/schema 변경 시 실제 N/N-1 코드 조합으로 다시 검사해야 합니다. 모든 과거 버전의 호환성을 보장하지 않습니다.
+- 최초 PR #7 검사는 같은 변경본을 서로 다른 ID/독립 action 키로 두 번 빌드했습니다. 후속 [DB 호환성 검사](data-compatibility.md)는 PR #7 고정 source와 현재 source의 실제 두 코드 버전을 빌드해 전환합니다. 현재 schema는 동일하며, 향후 REST/schema 변경 시 해당 N/N-1 조합을 다시 검사해야 합니다. 모든 과거 버전의 호환성을 보장하지 않습니다.
 
 ## 공용 업로드 제한
 
@@ -36,7 +36,7 @@ SQLite는 모든 writer를 직렬화하므로 다른 고객 저장도 잠깐 기
 
 - `test:upload-security` / `test:upload-processes`: 소유권·rollback·실제 프로세스 경쟁, 잠금 중 강제 종료, 남은 파일 용량 산정, 만료 트랜잭션의 파일 쓰기 차단.
 - `test:release-routing`: 허용된 릴리스/슬롯과 정확한 만료 경계.
-- Linux `tests/release-compat.sh`: 두 독립 이미지, 실제 Nginx/Chromium, 공유 합성 DB/업로드를 사용합니다. 컨테이너는 외부 통신 없는 internal network에서 실행하고 운영 데이터·로그인·키를 사용하지 않습니다.
+- Linux `tests/release-compat.sh`: 두 독립 이미지, 실제 Nginx/Chromium, 공유 합성 DB/업로드를 사용합니다. 고정 PR #7의 앱 소스/lockfile은 유지하고 Docker 빌드 단계에만 Python/make/g++를 추가하여 SQLite 사전 빌드 바이너리를 받지 못해도 소스 빌드가 가능합니다. 현재 이미지도 같은 빌드 도구를 갖추며 실행 이미지에는 추가하지 않습니다. 컨테이너는 외부 통신 없는 internal network에서 실행하고 운영 데이터·로그인·키를 사용하지 않습니다.
 - hydrated/native/JS 비활성/JS 로드 차단 로그인·로그아웃, 여러 탭/쿠키 변경, 이전 탭 저장·업로드·RSC/lazy asset, 세션, 만료 후 입력 보존·재전송 없음·readyz active 고정을 검사합니다.
 - 두 이미지가 남은 용량을 동시에 사용하도록 HTTP 업로드하여 정확히 하나가 성공하는지, 50 MiB 한도·기존 파일·metadata·병렬 고객 저장·DB 무결성을 확인합니다.
 

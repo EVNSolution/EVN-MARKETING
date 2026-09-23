@@ -34,6 +34,7 @@ type Controls = {
 }
 
 async function main() {
+  await testDeploymentActivation()
   await testDisabledGate()
   await testRetryThenSuccessPreservesSchedule()
   await testExhaustionCooldownRecovery()
@@ -53,6 +54,38 @@ async function main() {
   await testHealthTransitionsAndLeaseLoss()
   await testLoginRedirectIsNotReadiness()
   console.log('worker runtime tests passed')
+}
+
+async function testDeploymentActivation() {
+  await withWorkerDatabase(async (worker, inspect) => {
+    await ensureSyncState(inspect)
+    const scheduled = new Date(Date.now() + 3_600_000)
+    await inspect.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { nextRunAt: scheduled } })
+    const controller = new AbortController()
+    let active = false
+    let sends = 0
+    let preparations = 0
+    const deps = dependencies(worker, {
+      prepare: async () => { preparations++; return true },
+      dispatch: async () => { sends++; controller.abort() },
+    })
+    const result = await runInquiryWorker({
+      enabled: true, signal: controller.signal, dependencies: deps, owner: 'deployment-gate',
+      workAllowed: async () => active,
+      wait: async () => {
+        assert.equal(sends, 0)
+        assert.equal(await inspect.inquirySyncRun.count(), 0, 'unactivated worker cannot enqueue or claim')
+        const state = await inspect.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })
+        assert.equal(state.status, 'ready', 'source readiness is visible before work activation')
+        assert.equal(state.nextRunAt?.getTime(), scheduled.getTime())
+        active = true
+      },
+    })
+    assert.equal(result, 0)
+    assert.ok(preparations > 0)
+    assert.equal(sends, 1)
+    assert.equal((await inspect.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })).workerOwner, null)
+  })
 }
 
 async function testLoginRedirectIsNotReadiness() {

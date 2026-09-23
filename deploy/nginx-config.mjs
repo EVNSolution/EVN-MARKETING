@@ -2,10 +2,12 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 // Only these two private upstreams exist. Request values never become hostnames or paths.
-export function renderNginx({ active, previous = null }, now = Date.now()) {
+export function renderNginx({ active, previous = null, publicUrl = null }, now = Date.now()) {
   const valid = item => item && /^[0-9a-f]{40}$/.test(item.id) && ['blue', 'green'].includes(item.slot)
   if (!valid(active) || (previous && (!valid(previous) || previous.id === active.id || previous.slot === active.slot
     || !Number.isSafeInteger(previous.expiresAt) || previous.expiresAt > now + 30 * 60_000))) throw new Error('invalid_release_mapping')
+  if (publicUrl !== null && !/^https:\/\/[a-z0-9.-]+(?::[0-9]+)?$/.test(publicUrl)) throw new Error('invalid_public_url')
+  const authority = publicUrl === null ? null : new URL(publicUrl).host
   const releases = [active, ...(previous && previous.expiresAt > now ? [previous] : [])]
   const identities = releases.flatMap(({ id }) => [`"${id}:" ${id};`, `":${id}" ${id};`, `"${id}:${id}" ${id};`]).join('\n    ')
   const slots = releases.map(({ id, slot }) => `"1:${id}:0" ${slot};`).join('\n    ')
@@ -58,11 +60,12 @@ http {
   }
   server {
     listen 8080;
+    ${authority ? `if ($http_host != "${authority}") { return 421; }` : ''}
     client_max_body_size 10551296;
     proxy_http_version 1.1;
     proxy_set_header Host $http_host;
     proxy_set_header X-Forwarded-Host $http_host;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Proto ${authority ? 'https' : '$scheme'};
     proxy_set_header Connection "";
     proxy_buffering off;
     proxy_next_upstream off;
