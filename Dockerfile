@@ -35,6 +35,9 @@ CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 FROM node:22-bookworm-slim
 ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app
+COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
+RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
+    && chmod -R a+rX /ms-playwright
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/app/fonts/licenses ./licenses/fonts
@@ -46,13 +49,10 @@ COPY --from=build /app/scripts/data-backup.mjs ./data-backup.mjs
 COPY --from=build /app/scripts/schema-check.mjs ./schema-check.mjs
 COPY --from=build /app/schema-manifest.json ./schema-manifest.json
 COPY --from=build /app/worker-activation.version ./worker-activation.version
-COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
 COPY --from=build /app/node_modules/dotenv ./node_modules/dotenv
 COPY --from=build /app/node_modules/@prisma/adapter-better-sqlite3 ./node_modules/@prisma/adapter-better-sqlite3
 COPY --from=build /app/node_modules/@prisma/driver-adapter-utils ./node_modules/@prisma/driver-adapter-utils
 COPY --from=build /app/node_modules/@prisma/debug ./node_modules/@prisma/debug
-RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
-    && chmod -R a+rX /ms-playwright
 RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 CMD ["node", "server.js"]

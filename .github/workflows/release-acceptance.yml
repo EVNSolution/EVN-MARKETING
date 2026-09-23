@@ -1,26 +1,44 @@
-name: Release acceptance (30 minutes)
+name: Release acceptance (manual)
 on:
-  pull_request:
-    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      full_observation:
+        description: Run the actual 30-minute observation instead of the accelerated lab
+        type: boolean
+        default: false
+        required: true
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   acceptance:
-    if: github.event.label.name == 'release-acceptance' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Build runtime image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
-      - name: One real 1800-second observation with concurrent API traffic and request drain
+          context: .
+          load: true
+          push: false
+          tags: evn-marketing:ci
+          build-args: MARKETING_BUILD_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=marketing-runtime
+          cache-to: type=gha,scope=marketing-runtime,mode=max
+      - name: Release lab with optional real 1800-second observation
         timeout-minutes: 40
-        run: python3 tests/deploy-controller-lab.py --real-time --report "$RUNNER_TEMP/marketing-acceptance.json"
+        env:
+          FULL_OBSERVATION: ${{ inputs.full_observation }}
+        run: |
+          case "$FULL_OBSERVATION" in
+            true) python3 tests/deploy-controller-lab.py --real-time --report "$RUNNER_TEMP/marketing-acceptance.json" ;;
+            false) python3 tests/deploy-controller-lab.py --report "$RUNNER_TEMP/marketing-acceptance.json" ;;
+            *) echo 'invalid full_observation input' >&2; exit 1 ;;
+          esac
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: marketing-acceptance-${{ github.sha }}

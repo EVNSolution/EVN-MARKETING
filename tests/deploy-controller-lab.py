@@ -14,9 +14,9 @@ import sys
 import urllib.request
 import uuid
 
-assert os.environ.get('GITHUB_ACTIONS') == 'true', 'dedicated ephemeral CI runner only'
 parser = argparse.ArgumentParser()
 parser.add_argument('--real-time', action='store_true', help='observe one release for 1800 real seconds; default runs accelerated transitions and crash recovery')
+parser.add_argument('--self-test', action='store_true', help='check lab timing without Docker or CI environment')
 parser.add_argument('--report', type=Path)
 options = parser.parse_args()
 ROOT = Path.cwd()
@@ -50,9 +50,12 @@ class Lab(m.Controller):
         return time.monotonic() if self.real_time else self.clock
 
     def wait(self, seconds):
-        self.clock += seconds
-        # Accelerate observation only; real processes still need real startup/drain time.
-        time.sleep(0.01 if not self.real_time and self.state['phase'] == 'observing' else seconds)
+        if not self.real_time and self.state['phase'] == 'observing':
+            self.clock += seconds * 30
+            time.sleep(0.01)
+        else:
+            self.clock += seconds
+            time.sleep(seconds)
 
     def save(self, **changes):
         if changes.get('phase') == 'switching':
@@ -62,7 +65,10 @@ class Lab(m.Controller):
         return super().save(**changes)
 
     def secrets(self, worker):
-        return {'AUTH_SECRET': 'synthetic-lab-secret-at-least-32-characters'}
+        secrets = {'AUTH_SECRET': 'synthetic-lab-secret-at-least-32-characters'}
+        if worker:
+            secrets['MARKETING_TEST_LEASE_MS'] = str(180000 if self.real_time else 10000)
+        return secrets
 
     def preflight(self, release, other):
         # No AWS resources in CI. Pure gate validation is covered by unit tests.
@@ -116,6 +122,40 @@ class Lab(m.Controller):
             super().drained_proxy(workers)
 
 
+def self_test():
+    from unittest.mock import patch
+
+    assert m.WINDOW == 1800
+    lab = Lab.__new__(Lab)
+    lab.clock, lab.real_time, lab.state = 0, False, {'phase': 'observing'}
+    with patch.object(time, 'sleep') as sleep:
+        lab.wait(1)
+        assert lab.clock == 30 and sleep.call_args.args == (0.01,)
+        lab.state['phase'] = 'draining'
+        lab.wait(1)
+        assert lab.clock == 31 and sleep.call_args.args == (1,)
+        lab.state['phase'], lab.real_time = 'observing', True
+        lab.wait(1)
+        assert lab.clock == 32 and sleep.call_args.args == (1,)
+        lab.clock, lab.real_time = 0, False
+        for _ in range(2):
+            for _ in range(m.WINDOW // 30):
+                lab.wait(1)
+        assert lab.clock == 2 * m.WINDOW and 2 * (m.WINDOW // 30) == 120
+    assert lab.secrets(True)['MARKETING_TEST_LEASE_MS'] == '10000'
+    assert 'MARKETING_TEST_LEASE_MS' not in lab.secrets(False)
+    lab.real_time = True
+    assert lab.secrets(True)['MARKETING_TEST_LEASE_MS'] == '180000'
+    assert 'MARKETING_TEST_LEASE_MS' not in lab.secrets(False)
+    print(json.dumps({'ok': True, 'timingSelfTest': True, 'observationSteps': 120, 'dockerRun': False}))
+
+
+if options.self_test:
+    self_test()
+    raise SystemExit(0)
+
+assert os.environ.get('GITHUB_ACTIONS') == 'true', 'dedicated ephemeral CI runner only'
+
 with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporary:
     root = Path(temporary)
     os.chmod(root, 0o755)
@@ -129,8 +169,12 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
     probes = []
     latencies = []
     probe_times = []
+    fixture_lease_ms = 180000 if options.real_time else 10000
     summary = {'sourceSha': os.environ.get('GITHUB_SHA'), 'synthetic': True, 'aws': False,
-               'hostReboot': False, 'ssmDisconnect': False, 'observations': []}
+               'hostReboot': False, 'ssmDisconnect': False, 'observations': [],
+               'mode': 'real-time' if options.real_time else 'accelerated',
+               'fixtureLeaseMs': fixture_lease_ms,
+               'observationAccelerationFactor': 1 if options.real_time else 30}
     def observe():
         context = ssl.create_default_context(cafile=str(root/'tls/cert.pem'))
         while not stopped.is_set():
@@ -179,7 +223,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         for character, slot in (('a', 'blue'), ('b', 'green')):
             revision = character * 40
             tag = '127.0.0.1:5000/evn-marketing:' + revision
-            docker('build', '--build-arg', 'REVISION=' + revision, '-t', tag, str(fixture))
+            docker('build', '--builder', 'default', '--build-arg', 'REVISION=' + revision, '-t', tag, str(fixture))
             docker('push', tag)
             digest = json.loads(docker('image', 'inspect', tag))[0]['RepoDigests'][0].split('@')[1]
             releases.append({'revision': revision, 'digest': digest, 'slot': slot, 'owner': str(uuid.uuid4())})
@@ -195,6 +239,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         (root/'config.json').write_text(json.dumps(config))
         (root/'state/release.json').write_text(json.dumps({'format':1,'phase':'stable','active':a,'previous':None}))
         controller = Lab(root)
+        controller.real_time = options.real_time
         controller.start(a)
         controller.healthy_web(a)
         controller.start(a, worker=True)
@@ -213,7 +258,6 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         controller.healthy_web(a, public=True)
         start_traffic()
         controller.exercise_drain = True
-        controller.real_time = options.real_time
         observer = threading.Thread(target=observe, daemon=True)
         observer.start()
         controller.release(b['revision'], b['digest'])
@@ -222,7 +266,8 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         if not options.real_time:
             controller.release('', '', rollback=True)
             assert controller.state['active']['digest'] == a['digest']
-            assert controller.probes >= 3600
+            # Fast probes exercise two state transitions; they are not 3600 real seconds of observation.
+            assert controller.probes >= 120
             assert controller.drains == 2
             controller.exercise_drain = False
             # Actual worker failure after the public switch must restore the old pair.
@@ -247,6 +292,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         assert not observer.is_alive() and probes and not errors, 'continuous public probes failed during a transition'
         summary['traffic'] = finish_traffic()
         summary['publicProbes'] = len(probes)
+        summary['controllerPublicProbes'] = controller.probes
         summary['publicErrors'] = len(errors)
         summary['heldUploadDrains'] = controller.drains
         if options.real_time:
@@ -262,7 +308,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
             recovery_spec = importlib.util.spec_from_file_location('lab_recovery', ROOT/'tests/deploy-lab-recovery.py')
             recovery = importlib.util.module_from_spec(recovery_spec)
             recovery_spec.loader.exec_module(recovery)
-            summary['recovery'] = recovery.run_recovery(Lab, root, releases)
+            summary['recovery'] = recovery.run_recovery(Lab, root, releases, fixture_lease_ms)
         summary['ok'] = True
         if options.report:
             options.report.write_text(json.dumps(summary, indent=2)+'\n')

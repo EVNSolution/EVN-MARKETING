@@ -1,10 +1,20 @@
 name: PR checks
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -17,12 +27,31 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
       - name: Release controller and cloud declaration checks
-        run: python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py
+        run: python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/deploy-controller-lab.py --self-test
       - name: Offline backup and bounded receipt recovery
         run: npm run test:backup && npm run test:warp-recovery
       - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
-      - run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
-      - run: docker build --target operations --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ops .
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Build runtime image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          load: true
+          push: false
+          tags: evn-marketing:ci
+          build-args: MARKETING_BUILD_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=marketing-runtime
+          cache-to: type=gha,scope=marketing-runtime,mode=max
+      - name: Build operations image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          target: operations
+          load: true
+          push: false
+          tags: evn-marketing:ops
+          build-args: MARKETING_BUILD_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=marketing-runtime
       - name: Synthetic container smoke
         run: |
           mkdir -p "$RUNNER_TEMP/marketing-smoke"
@@ -45,6 +74,19 @@ jobs:
           done
           test "$started" = true
           docker exec marketing-smoke node /src/tests/readiness-http.mjs
+      - name: Prepare pinned previous release source
+        run: bash tests/release-compat.sh --prepare
+      - name: Build pinned previous release image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: ${{ runner.temp }}/marketing-compat-previous
+          load: true
+          push: false
+          tags: evn-marketing:compat-a
+          build-args: MARKETING_BUILD_REVISION=fbf325f3efc30b8913b6dd3989d93abba9af0a7c
+          labels: org.opencontainers.image.revision=fbf325f3efc30b8913b6dd3989d93abba9af0a7c
+          cache-from: type=gha,scope=marketing-compat-fbf325f3
+          cache-to: type=gha,scope=marketing-compat-fbf325f3,mode=max
       - name: Two-image browser and concurrent upload compatibility
         timeout-minutes: 12
         run: bash tests/release-compat.sh
