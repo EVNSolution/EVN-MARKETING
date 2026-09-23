@@ -18,8 +18,8 @@ python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
 
 - `PR checks`의 concurrency는 workflow와 PR 번호 또는 브랜치로 구분하고 `cancel-in-progress: true`로 둡니다. PR `closed` 이벤트는 새 무거운 job을 시작하지 않으며 이전 run을 취소합니다.
 - 문서만 바뀐 PR은 무거운 검사를 생략합니다. 의미가 바뀔 수 있는 JSON 계약 파일 등의 변경은 반드시 검사합니다.
-- runtime/operations Docker 빌드에 GitHub cache를 사용합니다.
-- 경계 selftest와 workflow YAML parse를 확인하고 Linux CI의 cold/warm 실행 시간과 시나리오 수를 비교합니다.
+- runtime/operations Docker 빌드는 같은 runner의 Docker layer를 재사용하며 원격 cache 전송은 사용하지 않습니다. 이미지 tar 적재와 원격 cache 최초 저장 비용이 기존 직접 빌드보다 컸고 PR별 cache 공유에도 제약이 있어 채택하지 않았습니다.
+- 경계 selftest와 workflow YAML parse를 확인하고 Linux CI의 실행 시간과 시나리오 수를 이전 성공 기준과 비교합니다.
 - 이전 기준은 [PR checks 1,065초, lab 661초](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35807195118)와 [인수 2,038초 중 실제 시간 1,877초](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35704433370)입니다. 두 링크는 과거 실행 기록입니다.
 
 ## 확인하는 내용
