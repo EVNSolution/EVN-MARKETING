@@ -1,12 +1,6 @@
-name: Release acceptance (manual)
+name: 30-minute release observation (manual)
 on:
   workflow_dispatch:
-    inputs:
-      full_observation:
-        description: Run the actual 30-minute observation instead of the accelerated lab
-        type: boolean
-        default: false
-        required: true
 permissions:
   contents: read
 concurrency:
@@ -26,16 +20,9 @@ jobs:
       - run: npx prisma generate
       - name: Build runtime image
         run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
-      - name: Release lab with optional real 1800-second observation
+      - name: One real 1800-second observation with concurrent API traffic and request drain
         timeout-minutes: 40
-        env:
-          FULL_OBSERVATION: ${{ inputs.full_observation }}
-        run: |
-          case "$FULL_OBSERVATION" in
-            true) python3 tests/deploy-controller-lab.py --real-time --report "$RUNNER_TEMP/marketing-acceptance.json" ;;
-            false) python3 tests/deploy-controller-lab.py --report "$RUNNER_TEMP/marketing-acceptance.json" ;;
-            *) echo 'invalid full_observation input' >&2; exit 1 ;;
-          esac
+        run: python3 tests/deploy-controller-lab.py --real-time --report "$RUNNER_TEMP/marketing-acceptance.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: marketing-acceptance-${{ github.sha }}

@@ -237,7 +237,7 @@ class Controller:
             WARP_DELIVERY_ENABLED='true' if worker and self.config['warpDeliveryEnabled'] else 'false',
             INQUIRY_COLLECTOR_ENABLED='true' if worker else 'false')
         args = ['run', '-d', '--name', name, '--init', '--restart=no', '--network', self.config['network'],
-                '--label', 'evn.marketing.managed=true', '--label', 'evn.marketing.revision=' + release['revision'], '--memory', '1536m' if worker else '768m',
+                '--label', 'evn.marketing.managed=true', '--label', 'evn.marketing.revision=' + release['revision'], '--memory', '768m' if worker else '384m',
                 '--cpus', '1', '--pids-limit', '256', '--log-driver', 'local',
                 '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3', '-v', self.config['volume'] + ':/data']
         if worker:

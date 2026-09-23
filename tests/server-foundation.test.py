@@ -12,13 +12,18 @@ assert parameters["PublicSubnetId"]["Type"] == "AWS::EC2::Subnet::Id"
 assert parameters["UbuntuAmiId"]["Type"] == "AWS::EC2::Image::Id"
 assert "Default" not in parameters["UbuntuAmiId"]
 assert "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id" in parameters["UbuntuAmiId"]["Description"]
+size = parameters["InstanceType"]
+assert size["Type"] == "String" and size["Default"] == "t3a.small"
+assert len(size["AllowedValues"]) == 4
+assert set(size["AllowedValues"]) == {"t3a.small", "t3.small", "t3a.medium", "t3.medium"}
+assert size["Default"] in size["AllowedValues"]
 
 for name in ("MarketingInstance", "MarketingSecurityGroup", "MarketingElasticIp", "MarketingSecretsKey"):
     assert resources[name]["DeletionPolicy"] == resources[name]["UpdateReplacePolicy"] == "Retain"
 assert instance["ImageId"] == {"Ref": "UbuntuAmiId"}
 assert instance["SubnetId"] == {"Ref": "PublicSubnetId"}
 assert instance["SecurityGroupIds"] == [{"Fn::GetAtt": ["MarketingSecurityGroup", "GroupId"]}]
-assert instance["InstanceType"] == "t3.medium"
+assert instance["InstanceType"] == {"Ref": "InstanceType"}
 assert instance["CreditSpecification"]["CPUCredits"] == "standard"
 assert instance["MetadataOptions"]["HttpTokens"] == "required"
 assert instance["MetadataOptions"]["HttpPutResponseHopLimit"] == 1
