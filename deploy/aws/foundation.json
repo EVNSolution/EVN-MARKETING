@@ -1,0 +1,222 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Marketing-only dedicated EC2 foundation declaration. Review and apply separately; this template does not bootstrap or deploy the application.",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Description": "Existing VPC for the dedicated Marketing server."
+    },
+    "PublicSubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Description": "Existing public subnet for the dedicated Marketing server."
+    },
+    "UbuntuAmiId": {
+      "Type": "AWS::EC2::Image::Id",
+      "Description": "Required reviewed Ubuntu Server 24.04 LTS amd64 AMI ID; discover it from /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id and pin the resolved ID."
+    }
+  },
+  "Resources": {
+    "MarketingSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "GroupDescription": "Public HTTP and HTTPS for the dedicated Marketing server",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "evn-marketing-dedicated-server"
+          },
+          {
+            "Key": "Service",
+            "Value": "evn-marketing"
+          }
+        ]
+      }
+    },
+    "MarketingSecretsKey": {
+      "Type": "AWS::KMS::Key",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Description": "Marketing-only key for future exact SSM SecureString paths",
+        "EnableKeyRotation": true,
+        "KeyPolicy": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "EnableAccountRootPermissions",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+                }
+              },
+              "Action": "kms:*",
+              "Resource": "*"
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Service",
+            "Value": "evn-marketing"
+          }
+        ]
+      }
+    },
+    "MarketingSecretsAlias": {
+      "Type": "AWS::KMS::Alias",
+      "Properties": {
+        "AliasName": "alias/evn-marketing/production",
+        "TargetKeyId": {
+          "Ref": "MarketingSecretsKey"
+        }
+      }
+    },
+    "MarketingInstance": {
+      "Type": "AWS::EC2::Instance",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "ImageId": {
+          "Ref": "UbuntuAmiId"
+        },
+        "InstanceType": "t3.medium",
+        "SubnetId": {
+          "Ref": "PublicSubnetId"
+        },
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "MarketingSecurityGroup",
+              "GroupId"
+            ]
+          }
+        ],
+        "CreditSpecification": {
+          "CPUCredits": "standard"
+        },
+        "MetadataOptions": {
+          "HttpEndpoint": "enabled",
+          "HttpTokens": "required",
+          "HttpPutResponseHopLimit": 1,
+          "InstanceMetadataTags": "disabled"
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "DeleteOnTermination": false,
+              "Encrypted": true,
+              "VolumeSize": 40,
+              "VolumeType": "gp3"
+            }
+          }
+        ],
+        "PropagateTagsToVolumeOnCreation": true,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "evn-marketing-dedicated-server"
+          },
+          {
+            "Key": "Service",
+            "Value": "evn-marketing"
+          }
+        ]
+      }
+    },
+    "MarketingElasticIp": {
+      "Type": "AWS::EC2::EIP",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "evn-marketing-dedicated-server"
+          },
+          {
+            "Key": "Service",
+            "Value": "evn-marketing"
+          }
+        ]
+      }
+    },
+    "MarketingElasticIpAssociation": {
+      "Type": "AWS::EC2::EIPAssociation",
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "MarketingElasticIp",
+            "AllocationId"
+          ]
+        },
+        "InstanceId": {
+          "Ref": "MarketingInstance"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "MarketingInstanceId": {
+      "Value": {
+        "Ref": "MarketingInstance"
+      }
+    },
+    "MarketingPublicIpv4": {
+      "Value": {
+        "Ref": "MarketingElasticIp"
+      }
+    },
+    "MarketingElasticIpAllocationId": {
+      "Value": {
+        "Fn::GetAtt": [
+          "MarketingElasticIp",
+          "AllocationId"
+        ]
+      }
+    },
+    "MarketingSecurityGroupId": {
+      "Value": {
+        "Fn::GetAtt": [
+          "MarketingSecurityGroup",
+          "GroupId"
+        ]
+      }
+    },
+    "MarketingSecretsKmsKeyArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "MarketingSecretsKey",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

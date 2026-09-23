@@ -1,12 +1,12 @@
 # DB 호환성 검사와 복구 검증
 
-M2 후속 작업입니다. 현재 릴리스는 DB 변경이 없으므로 **동일 schema만 일반 배포 허용**합니다. M3 호스트 배포/rollback과 M4 운영 backup/restore·승인 대상 재전송 도구는 별도 구현합니다.
+M2 후속 작업입니다. 현재 릴리스는 DB 변경이 없으므로 **동일 schema만 일반 배포 허용**합니다. 호스트 배포/rollback은 [배포 컨트롤러](release-controller.md), 운영 backup/restore·승인 대상 재전송은 [M4 복구 절차](backup-recovery.md)를 따릅니다. 실제 AWS 자원 적용과 운영 이전은 별도 인수 단계입니다.
 
 ## 배포 전 읽기 전용 검사
 
 이미지 빌드 때 `schema-manifest.json`을 만들고 `schema-check.mjs`를 실행 이미지에 포함합니다. manifest는 source revision, Prisma schema hash, migration 파일별 SHA-256, migration을 빈 메모리 DB에 적용한 최종 DDL을 담습니다. 고객 자료나 인증값은 없습니다. 실행 이미지에는 migration 실행기·Prisma CLI·seed를 넣지 않습니다.
 
-배포 컨트롤러에서 current/previous **검증된 이미지**의 manifest를 추출하고 다음 검사를 성공한 경우에만 준비 단계를 이어갑니다. 이 PR은 검사 도구를 제공하며 실제 서버 배포 흐름에 연결하는 작업은 M3입니다.
+배포 컨트롤러에서 current/previous **검증된 이미지**의 manifest를 추출하고 다음 검사를 성공한 경우에만 준비 단계를 이어갑니다. 이 검사 도구는 M3 컨트롤러의 호환성 검사에 연결되어 있습니다.
 
 ```sh
 DATABASE_URL=file:/data/marketing.db node /app/schema-check.mjs check /app/schema-manifest.json /previous/schema-manifest.json
@@ -30,7 +30,7 @@ DATABASE_URL=file:/data/marketing.db node /app/schema-check.mjs check /app/schem
 
 2026-09-22 로컬에서 실제 사용 중인 DB를 읽기 전용으로 검사했고 현재 schema·완료된 migration checksum·무결성이 통과했습니다. 고객 내용이나 인증값을 출력하거나 실제 DB를 변경하지 않았습니다. 이것은 해당 시점의 로컬 확인이며 서버 이전 후 검사를 대체하지 않습니다.
 
-현재 schema 변화가 없다는 사실과 이 두 코드 버전의 검증을 기록합니다. 임의 N/N-1 schema 변경의 호환성을 증명한 것은 아닙니다. 운영 host 잠금·복원 명령·암호화 off-host 백업·복원 시간·원격 receipt 불일치 대상의 승인된 복구는 M3/M4에 남습니다.
+현재 schema 변화가 없다는 사실과 이 두 코드 버전의 검증을 기록합니다. 임의 N/N-1 schema 변경의 호환성을 증명한 것은 아닙니다. 운영 host 잠금과 복원 명령·승인 대상 재전송 도구는 M3/M4에 구현하며, 실제 암호화 snapshot 복원과 운영 자료의 복구 시간은 별도 인수 증거가 필요합니다.
 
 ## 복구 시 전송 이력의 의미
 
