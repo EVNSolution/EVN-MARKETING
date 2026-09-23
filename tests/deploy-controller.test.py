@@ -132,6 +132,18 @@ class Tests(unittest.TestCase):
         (self.root / 'state/release.json').write_text(json.dumps({'format': 1, 'phase': 'stable', 'active': A, 'previous': None}))
         self.c = Fake(self.root)
 
+    def test_container_memory_limits_reach_docker_run(self):
+        controller = module.Controller(self.root)
+        for worker, name, memory in ((False, 'evn-marketing-web-blue', '384m'),
+                                     (True, 'evn-marketing-worker', '768m')):
+            with self.subTest(worker=worker), patch.object(controller, 'docker', return_value='') as docker, \
+                    patch.object(controller, 'secrets', return_value={}), patch.object(controller, 'identity'):
+                controller.start(A, worker=worker)
+                runs = [call.args for call in docker.call_args_list if call.args[0] == 'run']
+                self.assertEqual(len(runs), 1)
+                self.assertEqual(runs[0][runs[0].index('--name') + 1], name)
+                self.assertEqual(runs[0][runs[0].index('--memory') + 1], memory)
+
     def test_success_rollback_and_window(self):
         self.c.release(B['revision'], B['digest'])
         self.assertEqual(self.c.state['active']['digest'], B['digest'])

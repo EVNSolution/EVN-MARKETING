@@ -6,7 +6,7 @@
 
 ## 1. 결정할 기본 구조
 
-**Marketing 전용 신규 EC2 1대**를 기본안으로 합니다. 서울 리전, Ubuntu 24.04 LTS x86_64, 최초 측정 후보 `t3.medium`(2 vCPU/4 GiB), 암호화 gp3 40 GB입니다. 크기는 측정 전 가정이며 수용량 보장이 아닙니다. WARP 인스턴스 증설·동거는 이 계획의 선택지에 포함하지 않습니다.
+**Marketing 전용 신규 EC2 1대**를 기본안으로 합니다. 2026-09-23 현재 선택한 시작 크기는 서울 리전의 Ubuntu 24.04 LTS x86_64, `t3a.small`(2 vCPU/2 GiB), 암호화 gp3 40 GiB입니다. `t3.small`(2 GiB)과 `t3a.medium`·`t3.medium`(각 4 GiB)은 크기 조정 후보입니다. 아래 원래 2026-09-18 계획의 `t3.medium` 4 GiB는 역사적 측정 가정이었으며 현재 기본값이 아닙니다. 실제 수용량은 아직 입증되지 않았습니다. WARP 인스턴스 증설·동거는 이 계획의 선택지에 포함하지 않습니다.
 
 ```mermaid
 flowchart LR
@@ -98,36 +98,35 @@ flowchart LR
 
 ## 7. 서버 사양 측정과 비용
 
-측정은 최종 Linux amd64 이미지와 합성 데이터로 먼저 수행하고 승인 후 실제 워크로드에서 재확인합니다. 현재 실측 RSS/PSS, DB/업로드 크기, 원본 로그인 지속시간은 없습니다.
+측정은 최종 Linux amd64 이미지와 합성 데이터로 먼저 수행하고 실제 호스트·원본 수집에서 다시 확인합니다. 현재 `t3a.small` 2 GiB의 실제 수집기+OS 포함 용량 증거는 없습니다. [이전 CI의 약 1.37 GiB 메모리 집계](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35811912599)(`marketing-recovery` summary 합계 1,475,899,392 bytes)는 시험 브라우저 다중 탭과 두 웹의 개별 peak 합산이며 실제 운영 동시 사용량이나 서버 크기 확정 증거가 아닙니다.
 
 | 시나리오 | 기록할 값 | 초기 통과 기준 제안 |
 | --- | --- | --- |
-| 웹 idle + Chromium 대기 24시간 | 호스트 MemAvailable, 컨테이너 memory.current/peak, RSS/PSS, CPU·credit 추이, FD/process 수 | OOM 0, 재시작 루프 0, 지속적 메모리 증가 없음 |
-| 최초 전체 수집 + 시간당 증분 + active/candidate 웹 두 개의 조회/업로드 | 각 컨테이너 peak, OS 포함 총 메모리, CPU, I/O wait, 처리시간, DB lock 지연 | 4 GiB에서 두 웹+worker+OS 합산 peak 약 2.8 GiB 이하/약 30% 여유; 초과 시 8 GiB 후보 재시험. old 웹 선종료로 용량을 맞추지 않음 |
+| 시작 전 메모리 점검 | 호스트 `MemAvailable`, OS·프록시 사용량 | `MemAvailable` 512 MiB 이상 확인 |
+| 최초 전체 수집과 active/candidate 웹 두 개가 겹치는 대표 상황 1회 | 각 컨테이너 peak, OS 포함 총 메모리, CPU·credit, swap, OOM, 처리시간·DB lock 지연 | OOM 0, 지속 swap 0, 호스트 여유 확인. old 웹 선종료로 용량을 맞추지 않음 |
 | WARP 지연·503·응답 유실 및 원본 로그인 만료 | 전송 대기 증가, backoff, 다음 정상 행 처리, 수집 heartbeat | 대기 이력 유지, 중복 활동 0, 무한 tight loop 0 |
 | 교체·강제 종료·호스트 재부팅·복원 | lease 회복시간, 기존/새 컨테이너 동시 존재 peak, 준비 시간, 복원 시간 | 동시 worker 소유자 1, 데이터 일치, 제안 RTO 이내 |
 | 24시간 저장소 증가 | DB/WAL·업로드·이미지 현재/직전·로그·백업 staging 크기 | 디스크 30% 여유 + 백업/다음 이미지 임시 공간 확보 |
 
-`docker stats`만으로 호스트 여유를 대신하지 않습니다. 1~5초 단위 측정으로 Chromium 순간 peak를 기록합니다. CPU burst 인스턴스는 평균 CPU뿐 아니라 credit 고갈과 추가 credit 비용을 봅니다. 부족하면 8 GiB로 올리거나 지속 CPU에 적합한 인스턴스를 비교합니다. 예비 제한은 측정 후 정하며 worker 제한으로 웹이 안정적인지 함께 시험합니다.
+`docker stats`만으로 호스트 여유를 대신하지 않습니다. 후보 runtime 상한은 웹 384 MiB × 2, worker 768 MiB로 합계 1,536 MiB이며 예약량이 아닙니다. 남은 512 MiB를 OS·프록시 여유로 보는 것은 가정이므로 실제 측정으로 확인합니다. CPU burst 인스턴스는 평균 CPU뿐 아니라 credit 고갈도 봅니다. 4 GiB 후보로 바꾸면 컨테이너 상한 조정도 별도로 검토합니다.
 
-승인 후 실제 워크로드에서 최소 7일 추이를 관찰해 4 GiB를 확정합니다. t3.medium은 vCPU별 baseline 20%, 시간당 24 credit이며 T3의 Unlimited 기본 모드에서는 추가 CPU credit 과금이 생길 수 있습니다. [AWS CPU credit 기준](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-credits-baseline-concepts.html), [Unlimited 모드](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-performance-instances-unlimited-mode-concepts.html)
+출시 전 필수 용량 검증은 위의 대표 겹침 상황입니다. 7일 장기 관측을 출시 전 필수 조건으로 추가하지 않습니다. `t3a.small`은 vCPU 2개, 시간당 24 credit, vCPU별 baseline 20%이며 CPU credit 모드는 **standard**를 유지합니다. [AWS CPU credit 기준](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-credits-baseline-concepts.html)
 
-2026-09-18 조회한 서울 Linux on-demand 공개 가격, 월 730시간, USD 기준의 **예산 산식**입니다. 실제 사용량/할인/세금/환율이 반영된 견적은 아닙니다.
+2026-09-23 확인한 서울 Linux/Shared On-Demand 공식 Price List 단가, 월 730시간, USD 기준의 **계획 예산**입니다. 신규 서버가 아직 생성되지 않아 실제 청구 절감이 아닙니다. 할인·추가 사용량·세금·환율은 반영하지 않았습니다.
 
 | 항목 | 단가·가정 | 월 비용 |
 | --- | --- | ---: |
-| EC2 t3.medium 2 vCPU / 4 GiB | $0.052/시간 × 730 | $37.96 |
-| 암호화 gp3 40 GB | $0.0912/GB·월 × 40, 기본 IOPS/처리량 | $3.648 |
+| EC2 t3a.small 2 vCPU / 2 GiB | $0.0234/시간 × 730 | $17.082 |
+| 암호화 gp3 40 GiB | $0.0912/GB·월 × 40, 기본 IOPS/처리량 | $3.648 |
 | 공개 IPv4 1개 | $0.005/시간 × 730 | $3.65 |
-| Marketing ECR 이미지 저장 5 GB | $0.10/GB·월 × 5 | $0.50 |
-| EBS snapshot 과금 데이터 평균 10 GB | $0.05/GB·월 × 10 | $0.50 |
-| **소계** | 반올림 | **$46.26/월** |
+| 고객 관리 KMS 키 버전 1개 | $1/월 | $1.00 |
+| **기본 소계** | 반올림 | **$25.38/월** |
 
-인터넷 송신, CPU surplus credit, CloudWatch 로그/지표, 추가 KMS·DNS·유료 SSM 기능, 검사 서비스 및 백업 증가 비용은 제외했습니다. EC2와 ECR 동일 리전 전송은 ECR 가격 문서의 무료 조건에 해당합니다. snapshot 10 GB는 전체 보존 데이터 가정이지 40 GB 디스크의 고정 백업 요금이 아닙니다. 데이터 실측 후 이미지/로그/백업 보존 정책을 넣어 다시 계산합니다. 운영 예산은 이 소계에 관측·백업 여유를 더해 잡습니다.
+기존 `t3.medium` 4 GiB의 같은 기본 산식은 $46.26/월입니다. `t3a.small`은 이 계획보다 $20.88/월, 약 45%, $250.54/년 낮습니다. 후보별 같은 산식은 `t3.small` 2 GiB $27.28/월, `t3a.medium` 4 GiB $42.46/월, `t3.medium` 4 GiB $46.26/월입니다. 원래 문서의 ECR 5 GB·snapshot 10 GB 각 $0.50은 과거 추가 사용량 가정이며 위 기본 소계에 포함하지 않습니다.
 
-메모리가 부족하면 t3.large(2 vCPU/8 GiB, $0.104/시간)와 같은 저장소 가정의 소계는 **$84.22/월**입니다. 이는 CPU 병렬 처리량 두 배를 뜻하지 않습니다. 저비용 비교안인 Lightsail 4/8 GiB Linux IPv4 bundle은 각각 $24/$44이지만, EC2와 같은 instance profile 기반 비밀값·배포 권한 경로를 그대로 적용할 수 있다고 가정하지 않아 기본안으로 선택하지 않았습니다. [Lightsail 공식 bundle](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-bundles.html)
+ECR 이미지, snapshot, 인터넷 송신, CloudWatch, 추가 KMS 요청·rotation, DNS, 유료 SSM 기능, 검사 서비스, 세금 등은 별도입니다. 실제 자료·이미지·로그·백업 사용량을 측정한 뒤 계산해야 합니다.
 
-가격 근거: [서울 EC2/gp3/snapshot Price List, 20260917211835](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/20260917211835/ap-northeast-2/index.json), [서울 ECR Price List, 20260911124425](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonECR/20260911124425/ap-northeast-2/index.json), [공개 IPv4](https://aws.amazon.com/vpc/pricing/), [ECR 전송·저장](https://aws.amazon.com/ecr/pricing/). 확인 SKU는 순서대로 `G5CAZXC4M5ENHEZN`, `MTK7D9SGKGYR3JD6`, `JC4HQPKR4ATMSY93`, `FP58BXCX2RHZR3B2`입니다.
+공식 근거: [서울 EC2·gp3 Price List](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/ap-northeast-2/index.json), [공개 IPv4 Price List](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonVPC/current/ap-northeast-2/index.json), [KMS Price List](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/awskms/current/ap-northeast-2/index.json). 확인 SKU는 `t3a.small C2X6J7RSNDMJVBF6`, `t3.small PZHVQ3KFPA3RHA5V`, `t3a.medium 38WTDXMUU954VY9X`, `t3.medium G5CAZXC4M5ENHEZN`, `gp3 MTK7D9SGKGYR3JD6`, `IPv4 ZKBHEVDXYBRCKFQ8`, `KMS 6A8VB4MVVE4M8M69`입니다. EC2·gp3·IPv4 가격의 effective date는 2026-09-01, KMS는 2025-07-01입니다.
 
 ## 8. 운영 전환 완료 판정
 

@@ -8,7 +8,7 @@
   "network": "evn-marketing",
   "collectorEnabled": false,
   "warpDeliveryEnabled": false,
-  "minFreeMemoryMiB": 1024,
+  "minFreeMemoryMiB": 512,
   "minFreeDiskMiB": 4096,
   "parameters": {
     "AUTH_SECRET": "/evn-marketing/production/auth-secret",
