@@ -60,7 +60,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const old = docs.find(doc => doc.type === docType)
-    const written = await writeCustomerUpload(UPLOADS_DIR, id, file, docType === '차량사진' ? 'image' : 'document')
+    const written = await writeCustomerUpload(prisma, UPLOADS_DIR, id, file, docType === '차량사진' ? 'image' : 'document')
     const doc: DocMeta = {
       type: docType,
       name: file.name,

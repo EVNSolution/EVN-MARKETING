@@ -16,5 +16,6 @@ export default auth((req) => {
 
 export const config = {
   // api/external 은 로그인 세션이 아닌 공유키(x-api-key)로 자체 인증하는 외부 연동용 엔드포인트다.
-  matcher: ['/((?!api/auth|api/external|_next/static|_next/image|favicon.ico).*)'],
+  // readyz exposes only a boolean and validated release identity; all business APIs stay protected.
+  matcher: ['/((?!api/readyz$|api/release$|api/auth|api/external|_next/static|_next/image|favicon.ico).*)'],
 }

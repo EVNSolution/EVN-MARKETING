@@ -1,5 +1,7 @@
 'use client'
 
+import { apiFetch } from '@/lib/release-client'
+
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react'
@@ -41,6 +43,9 @@ type InquiryResponse = {
 }
 
 const statusText: Record<string, { label: string; className: string }> = {
+  starting: { label: '수집 연결 준비 중', className: 'bg-amber-100 text-amber-800' },
+  ready: { label: '정상 대기', className: 'bg-lime-100 text-lime-800' },
+  source_error: { label: '원본 연결 재시도 중', className: 'bg-orange-100 text-orange-800' },
   success: { label: '정상 대기', className: 'bg-lime-100 text-lime-800' },
   running: { label: '가져오는 중', className: 'bg-sky-100 text-sky-700' },
   pending: { label: '실행 대기', className: 'bg-amber-100 text-amber-800' },
@@ -95,7 +100,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
     request.current = { id, controller }
     setLoading(true)
     try {
-      const response = await fetch(`/api/inquiries${queryString ? `?${queryString}` : ''}`, { signal: controller.signal, cache: 'no-store' })
+      const response = await apiFetch(`/api/inquiries${queryString ? `?${queryString}` : ''}`, { signal: controller.signal, cache: 'no-store' })
       if (!response.ok) throw new Error()
       const next = await response.json() as InquiryResponse
       if (request.current?.id !== id) return
@@ -144,7 +149,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
     setSyncing(true)
     setSyncMessage('')
     try {
-      const response = await fetch('/api/inquiries/sync', { method: 'POST' })
+      const response = await apiFetch('/api/inquiries/sync', { method: 'POST' })
       const result = await response.json() as { queued?: boolean; error?: string }
       if (!response.ok) throw new Error(result.error)
       setSyncMessage(result.queued ? '가져오기 요청을 등록했습니다.' : '이미 실행 중이거나 원본 로그인이 필요합니다.')

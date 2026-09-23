@@ -1,12 +1,13 @@
-import { constants } from 'node:fs'
+import { closeSync, constants, openSync, writeFileSync } from 'node:fs'
 import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import type { PrismaClient } from '@/app/generated/prisma/client'
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 export const MAX_CUSTOMER_BYTES = 50 * 1024 * 1024
 export const MAX_MULTIPART_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
-const uploadLocks = new Map<string, Promise<void>>()
+let uploadsSettled = Promise.resolve()
 
 export type Contact = {
   id: string
@@ -197,44 +198,54 @@ export function validateMultipartLength(request: Request) {
   if (length > MAX_MULTIPART_BYTES) throw new Error('invalid_upload_size')
 }
 
-async function withUploadLock<T>(key: string, work: () => Promise<T>) {
-  const previous = uploadLocks.get(key) ?? Promise.resolve()
-  let release!: () => void
-  const current = new Promise<void>(resolve => { release = resolve })
-  const queued = previous.then(() => current)
-  uploadLocks.set(key, queued)
-  await previous
-  try { return await work() } finally {
-    release()
-    if (uploadLocks.get(key) === queued) uploadLocks.delete(key)
-  }
+function serializeLocalUploads<T>(write: () => Promise<T>) {
+  // A synchronous SQLite busy wait must not block another local upload's filesystem awaits.
+  // ponytail: one local queue follows SQLite's single writer; split storage only if measured throughput needs it.
+  const result = uploadsSettled.then(write)
+  uploadsSettled = result.then(() => {}, () => {})
+  return result
 }
 
-export async function writeCustomerUpload(root: string, customerId: string, file: File, kind: 'image' | 'document', subdir?: 'contacts') {
+export async function writeCustomerUpload(db: PrismaClient, root: string, customerId: string, file: File, kind: 'image' | 'document', subdir?: 'contacts') {
   const { buffer, ext } = await validateUpload(file, kind)
-  // ponytail: this lock bounds concurrent uploads in one web process; use a shared reservation if the web tier scales out.
-  return withUploadLock(`${path.resolve(root)}:${customerId}`, async () => {
-    const customerPath = await customerDirectory(root, customerId, true)
-    if (await directoryBytes(customerPath) + buffer.length > MAX_CUSTOMER_BYTES) throw new Error('customer_upload_quota_exceeded')
-    const directory = subdir ? path.join(customerPath, subdir) : customerPath
-    await mkdir(directory, { recursive: true })
-    const directoryInfo = await lstat(directory)
-    if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error('invalid_customer_path')
-    const resolvedDirectory = await realpath(directory)
-    if (!inside(customerPath, resolvedDirectory)) throw new Error('invalid_customer_path')
-    const name = `${randomUUID()}${ext}`
-    const filename = path.join(resolvedDirectory, name)
-    const handle = await open(filename, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600)
+  safeCustomerId(customerId)
+  return serializeLocalUploads(async () => {
+    let filename: string | undefined
     try {
-      await handle.writeFile(buffer)
-    } catch {
-      try { await handle.close(); await unlink(filename) } catch { throw new Error('partial_upload_cleanup_failed') }
-      throw new Error('upload_write_failed')
-    }
-    await handle.close()
-    return {
-      filename,
-      url: `/api/uploads/customers/${customerId}/${subdir ? `${subdir}/` : ''}${name}`,
+      return await db.$transaction(async (tx) => {
+        // SQLite's writer lock also covers other web processes. Do not change metadata or updatedAt.
+        requireMetadataUpdate(await tx.$executeRaw`UPDATE "Customer" SET "id" = "id" WHERE "id" = ${customerId}`)
+        const customerPath = await customerDirectory(root, customerId, true)
+        // Orphaned replacements and staged deletions still consume space until actually removed.
+        if (await directoryBytes(customerPath) + buffer.length > MAX_CUSTOMER_BYTES) throw new Error('customer_upload_quota_exceeded')
+        const directory = subdir ? path.join(customerPath, subdir) : customerPath
+        await mkdir(directory, { recursive: true })
+        const directoryInfo = await lstat(directory)
+        if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error('invalid_customer_path')
+        const resolvedDirectory = await realpath(directory)
+        if (!inside(customerPath, resolvedDirectory)) throw new Error('invalid_customer_path')
+        const name = `${randomUUID()}${ext}`
+        const target = path.join(resolvedDirectory, name)
+        // Async directory checks may outlive Prisma's transaction timeout. Recheck before
+        // the capped synchronous write so a timeout cannot release the lock mid-write.
+        requireMetadataUpdate(await tx.$executeRaw`UPDATE "Customer" SET "id" = "id" WHERE "id" = ${customerId}`)
+        const handle = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600)
+        filename = target
+        try {
+          writeFileSync(handle, buffer)
+        } catch {
+          throw new Error('upload_write_failed')
+        } finally { closeSync(handle) }
+        return {
+          filename: target,
+          url: `/api/uploads/customers/${customerId}/${subdir ? `${subdir}/` : ''}${name}`,
+        }
+      })
+    } catch (error) {
+      if (filename) {
+        try { await unlink(filename) } catch { throw new Error('partial_upload_cleanup_failed') }
+      }
+      throw error
     }
   })
 }

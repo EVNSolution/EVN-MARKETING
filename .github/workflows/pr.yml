@@ -7,28 +7,53 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
-      - run: npm run test:server-runtime && npm run test:worker-runtime && npm run test:upload-security && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
-      - run: docker build -t evn-marketing:ci .
+      - name: Release controller and cloud declaration checks
+        run: python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py
+      - name: Offline backup and bounded receipt recovery
+        run: npm run test:backup && npm run test:warp-recovery
+      - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
+      - run: docker build --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ci .
+      - run: docker build --target operations --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:ops .
       - name: Synthetic container smoke
         run: |
           mkdir -p "$RUNNER_TEMP/marketing-smoke"
           chmod 777 "$RUNNER_TEMP/marketing-smoke"
           docker run --rm --network none -v "$PWD:/src:ro" -v "$RUNNER_TEMP/marketing-smoke:/data" evn-marketing:ci node /src/tests/container-smoke.mjs
           docker run --rm --network none evn-marketing:ci node worker.mjs
-          docker run -d --name marketing-smoke --network none -v "$RUNNER_TEMP/marketing-smoke:/data" \
+          docker run -d --name marketing-smoke --network none -v "$RUNNER_TEMP/marketing-smoke:/data" -v "$PWD:/src:ro" \
             -e AUTH_SECRET=synthetic-ci-only-secret-at-least-32-characters \
             -e AUTH_TRUST_HOST=true -e AUTH_URL=http://127.0.0.1:3100 \
             -e DATABASE_URL=file:/data/marketing.db -e UPLOADS_DIR=/data/uploads \
+            -e MARKETING_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            -e MARKETING_IMAGE_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+            -e MARKETING_VOLUME_ID=synthetic-volume-ci \
             -e WARP_DELIVERY_ENABLED=false evn-marketing:ci
           trap 'docker logs marketing-smoke; docker rm -f marketing-smoke' EXIT
+          started=false
           for attempt in $(seq 1 30); do
-            if docker exec marketing-smoke node -e "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then exit 0; fi
+            if docker exec marketing-smoke node -e "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then started=true; break; fi
             sleep 2
           done
-          exit 1
+          test "$started" = true
+          docker exec marketing-smoke node /src/tests/readiness-http.mjs
+      - name: Two-image browser and concurrent upload compatibility
+        timeout-minutes: 12
+        run: bash tests/release-compat.sh
+      - name: Isolated release controller Docker lab
+        timeout-minutes: 25
+        run: python3 tests/deploy-controller-lab.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: marketing-recovery-${{ github.sha }}
+          path: ${{ runner.temp }}/marketing-recovery-summary.json
+          if-no-files-found: error
+          retention-days: 7

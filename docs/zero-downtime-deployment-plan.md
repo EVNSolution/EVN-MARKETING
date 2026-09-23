@@ -98,7 +98,7 @@ Marketing은 Next 16.3.5 standalone이고 로그인/로그아웃에 Server Actio
 
 ## 7. 필수 인수 검사
 
-아래는 구현 후 채울 결과표입니다. 현재는 전부 **미실행**입니다. CI 합성 환경은 WARP/원본 서비스로 나가는 네트워크를 차단합니다.
+아래는 전체 운영 인수 기준입니다. 계획 작성 시에는 모두 미실행이었으며, 후속 PR의 부분 검증은 [웹 호환성](web-compatibility.md), [DB 호환성과 복구](data-compatibility.md), [운영 준비 기록](production-deployment.md)에 구분합니다. 일부 합성 검사 통과를 Z01–Z10 전체 또는 운영 완료로 표시하지 않습니다. CI 합성 환경은 WARP/원본 서비스로 나가는 네트워크를 차단합니다.
 
 | ID | 시나리오 | 합격 증거 |
 | --- | --- | --- |
@@ -116,6 +116,8 @@ Marketing은 Next 16.3.5 standalone이고 로그인/로그아웃에 Server Actio
 산출물은 `source SHA`, runtime/ops digest, CI URL, SSM command ID(값/로그에 secret 없음), 전환 전후 active/previous 상태, 백업 summary ID, probe 결과 집계, 익명화한 브라우저 검증, worker owner 수·실행 시각을 묶습니다. 원본 고객 내용·쿠키·비밀번호·API 키는 증거에 포함하지 않습니다.
 
 ## 8. 구현 PR 순서와 검토 책임
+
+M3 구현의 현재 계약과 부분 검증 범위는 [배포·복귀 컨트롤러](release-controller.md), AWS 실행 경계는 [AWS 배포 연결](cloud-release.md)에 기록합니다. 구현은 Python 표준 라이브러리와 Docker CLI를 사용하여 아래 계획의 Compose 계층을 대체합니다. 초기 설치·실제 AWS 실행·전체 Z01–Z09 통과를 의미하지 않습니다.
 
 | 단계 | 범위 | 완료 조건·다음 단계 gate |
 | --- | --- | --- |

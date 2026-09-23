@@ -1,5 +1,7 @@
 'use client'
 
+import { apiFetch, checkRelease } from '@/lib/release-client'
+
 import { useState, useMemo, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -187,7 +189,7 @@ export default function CustomerListClient({ customers: initial }: CustomerListP
     if (creating) return
     setCreating(true)
     try {
-      const res = await fetch('/api/customers', {
+      const res = await apiFetch('/api/customers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -343,7 +345,7 @@ export default function CustomerListClient({ customers: initial }: CustomerListP
                 const lastAct = c.activities[0]
                 return (
                   <tr key={c.id} className="hover:bg-slate-50 transition-colors cursor-pointer"
-                    onClick={() => router.push(`/customers/${c.id}`)}>
+                    onClick={async () => { if (await checkRelease()) router.push(`/customers/${c.id}`) }}>
                     {visCols.map(vc => {
                       switch (vc.key) {
                         case 'name': {

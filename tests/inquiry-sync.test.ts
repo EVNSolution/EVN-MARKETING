@@ -55,10 +55,37 @@ async function main() {
     await testStaleRecovery(prisma)
     await testLoginRequired(prisma)
     await testWorkerLease(prisma)
+    await testInterruptedClaim(prisma)
     console.log('inquiry sync tests passed')
   } finally {
     await prisma.$disconnect()
     await rm(temp, { recursive: true, force: true })
+  }
+}
+
+async function testInterruptedClaim(prisma: PrismaClient) {
+  for (const stage of ['lock', 'start']) {
+    const pending = await enqueueSync(prisma, 'manual', '2026-09-22')
+    assert.ok(pending)
+    const before = await prisma.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })
+    const controller = new AbortController()
+    const interrupted = prisma.$extends({ query: {
+      inquirySyncState: { async updateMany({ args, query }) {
+        const result = await query(args)
+        if (stage === 'lock') controller.abort()
+        return result
+      } },
+      inquirySyncRun: { async updateMany({ args, query }) {
+        const result = await query(args)
+        if (stage === 'start') controller.abort()
+        return result
+      } },
+    } })
+    assert.equal(await claimNextRun(interrupted as PrismaClient, new Date(), 'interrupted-claim', '2026-09-23', controller.signal), null)
+    assert.equal(controller.signal.aborted, true)
+    assert.deepEqual(await prisma.inquirySyncRun.findUniqueOrThrow({ where: { id: pending.id } }), pending, 'canceled transaction preserves pending status and original range')
+    assert.deepEqual(await prisma.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } }), before, 'canceled transaction preserves schedule, cutoff and ownership')
+    await prisma.inquirySyncRun.delete({ where: { id: pending.id } })
   }
 }
 
