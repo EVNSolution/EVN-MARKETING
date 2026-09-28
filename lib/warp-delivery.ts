@@ -20,6 +20,15 @@ export function warpConfigured(env: Env = process.env) {
   return env.WARP_DELIVERY_ENABLED === 'true' && keyConfigured(env)
 }
 
+export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError: string | null }) {
+  if (row.warpDeliveredAt) return { status: 'delivered', label: '등록 완료', reason: null }
+  if (row.warpError === 'warp_customer_conflict') return {
+    status: 'blocked', label: '확인 필요', reason: '동일 연락처 고객이 여러 명이라 자동 등록을 보류했습니다.',
+  }
+  if (row.warpError) return { status: 'retrying', label: '재시도 대기', reason: '자동 등록 오류로 재시도를 기다리고 있습니다.' }
+  return { status: 'pending', label: '등록 대기', reason: null }
+}
+
 export function warpActivityId(sourceId: string) {
   return `mleverage_${createHash('sha256').update([INQUIRY_SOURCE, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID, sourceId.toLowerCase()].join(':')).digest('hex')}`
 }
@@ -77,13 +86,13 @@ export async function checkWarpConnection(send: typeof fetch = fetch, env: Env =
   }
 }
 
-export async function warpDeliverySummary(db: PrismaClient) {
+export async function warpDeliverySummary(db: PrismaClient, env: Env = process.env) {
   const [delivered, pending, failed] = await Promise.all([
     db.inquiry.count({ where: { ...scope, warpDeliveredAt: { not: null } } }),
     db.inquiry.count({ where: { ...scope, warpDeliveredAt: null } }),
     db.inquiry.count({ where: { ...scope, warpDeliveredAt: null, warpError: { not: null } } }),
   ])
-  return { configured: warpConfigured(), delivered, pending, failed }
+  return { configured: env.WARP_DELIVERY_ENABLED === 'true', delivered, pending, failed }
 }
 
 export const rowSelect = { id: true, sourceId: true, inquiryDate: true, inquiryTime: true, sourceStatus: true, name: true, phone: true } as const

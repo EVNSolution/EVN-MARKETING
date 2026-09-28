@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
-import { warpDeliverySummary } from '@/lib/warp-delivery'
+import { warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import {
   INQUIRY_COMPANY_ID,
   INQUIRY_HOMEPAGE_ID,
@@ -62,7 +62,10 @@ export async function GET(request: Request) {
         orderBy: [{ inquiryDate: 'desc' }, { inquiryTime: 'desc' }, { sourceId: 'desc' }],
         skip,
         take: limit,
-        select: { id: true, inquiryDate: true, inquiryTime: true, sourceStatus: true, name: true, phone: true },
+        select: {
+          id: true, inquiryDate: true, inquiryTime: true, sourceStatus: true, name: true, phone: true,
+          warpDeliveredAt: true, warpError: true,
+        },
       }),
       prisma.inquirySyncState.findUnique({
         where: { id: INQUIRY_SCOPE_ID },
@@ -89,7 +92,10 @@ export async function GET(request: Request) {
     const currentStatus = inquirySyncStatus(state, activeRun?.status, now)
 
     return NextResponse.json({
-      rows,
+      rows: rows.map(({ warpDeliveredAt, warpError, ...row }) => ({
+        ...row,
+        warpDelivery: warpDeliveryState({ warpDeliveredAt, warpError }),
+      })),
       warp,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
       filters: {

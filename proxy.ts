@@ -10,7 +10,7 @@ export default auth((req) => {
     return NextResponse.redirect(new URL('/login', req.url))
   }
   if (isLoggedIn && isLoginPage) {
-    return NextResponse.redirect(new URL('/customers', req.url))
+    return NextResponse.redirect(new URL('/inquiries', req.url))
   }
 })
 

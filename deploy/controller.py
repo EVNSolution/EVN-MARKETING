@@ -257,7 +257,7 @@ class Controller:
             MARKETING_REVISION=release['revision'], MARKETING_IMAGE_DIGEST=release['digest'],
             MARKETING_VOLUME_ID=self.config['volumeId'], AUTH_URL=self.config['publicUrl'],
             NEXTAUTH_URL=self.config['publicUrl'], AUTH_TRUST_HOST='true',
-            WARP_DELIVERY_ENABLED='true' if worker and self.config['warpDeliveryEnabled'] else 'false',
+            WARP_DELIVERY_ENABLED='true' if self.config['warpDeliveryEnabled'] else 'false',
             INQUIRY_COLLECTOR_ENABLED='true' if worker else 'false')
         args = ['run', '-d', '--name', name, '--init', '--restart=no', '--network', self.config['network'],
                 '--label', 'evn.marketing.managed=true', '--label', 'evn.marketing.revision=' + release['revision'], '--memory', '768m' if worker else '384m',

@@ -20,7 +20,7 @@ export async function loginAction(
     }
     throw error
   }
-  redirect('/customers')
+  redirect('/inquiries')
 }
 
 export async function logoutAction() {

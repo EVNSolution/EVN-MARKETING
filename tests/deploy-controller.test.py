@@ -278,13 +278,26 @@ class Tests(unittest.TestCase):
         controller = module.Controller(self.root)
         for worker, name, memory in ((False, 'evn-marketing-web-blue', '384m'),
                                      (True, 'evn-marketing-worker', '768m')):
+            secrets = {'AUTH_SECRET': 'synthetic-auth'}
+            if worker:
+                secrets.update(MLEVERAGE_USERNAME='synthetic-user', MLEVERAGE_PASSWORD='synthetic-password',
+                               WARP_MARKETING_API_KEY='synthetic-warp-key')
             with self.subTest(worker=worker), patch.object(controller, 'docker', return_value='') as docker, \
-                    patch.object(controller, 'secrets', return_value={}), patch.object(controller, 'identity'):
+                    patch.object(controller, 'secrets', return_value=secrets), patch.object(controller, 'identity'):
                 controller.start(A, worker=worker)
                 runs = [call.args for call in docker.call_args_list if call.args[0] == 'run']
                 self.assertEqual(len(runs), 1)
                 self.assertEqual(runs[0][runs[0].index('--name') + 1], name)
                 self.assertEqual(runs[0][runs[0].index('--memory') + 1], memory)
+                passed = docker.call_args_list[-1].kwargs['env']
+                self.assertEqual(passed['WARP_DELIVERY_ENABLED'], 'true')
+                self.assertEqual('WARP_MARKETING_API_KEY' in runs[0], worker)
+
+        controller.config['warpDeliveryEnabled'] = False
+        with patch.object(controller, 'docker', return_value='') as docker, \
+                patch.object(controller, 'secrets', return_value={'AUTH_SECRET': 'synthetic-auth'}), patch.object(controller, 'identity'):
+            controller.start(A)
+            self.assertEqual(docker.call_args_list[-1].kwargs['env']['WARP_DELIVERY_ENABLED'], 'false')
 
     def test_success_rollback_and_window(self):
         self.c.release(B['revision'], B['digest'])
