@@ -28,7 +28,11 @@ RUN test -n "$MARKETING_BUILD_REVISION" \
     && ./node_modules/.bin/esbuild scripts/warp-recovery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-recovery.mjs \
     && ./node_modules/.bin/esbuild workers/health.ts --bundle --platform=node --format=esm --packages=external --outfile=worker-health.mjs
 
-FROM build AS operations
+FROM node:22-trixie-slim AS operations
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app ./
 USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 
