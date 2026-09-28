@@ -14,9 +14,9 @@ import { fileURLToPath } from 'node:url'
 // Never starts a collector or uses the caller's database, credentials or browser session.
 const require = createRequire(path.join(process.cwd(), 'package.json'))
 const Database = require('better-sqlite3')
-const bcrypt = require('bcryptjs')
 const { chromium } = require('playwright-core')
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const bcrypt = createRequire(path.join(source, 'package.json'))('bcryptjs')
 const directory = mkdtempSync(path.join(tmpdir(), 'marketing-mvp-'))
 const dbPath = path.join(directory, 'synthetic.db')
 const db = new Database(dbPath)
