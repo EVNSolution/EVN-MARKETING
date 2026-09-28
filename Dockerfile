@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS build
+FROM node:22-trixie-slim AS build
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
@@ -32,7 +32,7 @@ FROM build AS operations
 USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 
-FROM node:22-bookworm-slim
+FROM node:22-trixie-slim
 ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app
 COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
