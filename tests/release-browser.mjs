@@ -223,6 +223,8 @@ try {
   assert.equal((await oldCustomerList).headers()['x-marketing-release'], a, 'old session can still reach the local customer compatibility fixture')
   await oldLogin.waitForURL(url => url.pathname === '/customers')
   await oldLogin.waitForLoadState('networkidle')
+  // App layout persists across navigation; undo the fixture-only menu change before later expiry checks.
+  await oldLogin.getByRole('link', { name: '문의 내역', exact: true }).evaluate(anchor => { anchor.href = '/inquiries' })
   await oldLogin.locator('a[href="/customers/synthetic-edit"]').evaluate(anchor => { anchor.href = '/customers/synthetic-edit?returnTo=%2Finquiries' })
   const detailNavigation = oldLogin.waitForResponse(response => new URL(response.url()).pathname === '/customers/synthetic-edit' && response.request().headers().rsc === '1')
   await oldLogin.locator('a[href^="/customers/synthetic-edit?"]').click()
