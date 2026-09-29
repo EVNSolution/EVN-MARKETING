@@ -16,6 +16,7 @@ B = {'revision': 'b' * 40, 'digest': 'sha256:' + 'b' * 64, 'slot': 'green', 'own
 CONFIG = {'proxyImage':'nginx@sha256:'+'d'*64, 'repository': '123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/evn-marketing', 'publicUrl': 'https://marketing.example.invalid',
           'volumeId': 'synthetic-volume', 'volume': 'evn-marketing-data', 'network': 'evn-marketing', 'ebsVolumeId': 'vol-00000001',
           'collectorEnabled': True, 'warpDeliveryEnabled': True, 'minFreeMemoryMiB': 1024, 'minFreeDiskMiB': 4096}
+BOOTSTRAP_CONFIG = {**CONFIG, 'collectorEnabled': False, 'warpDeliveryEnabled': False}
 
 
 class Fake(module.Controller):
@@ -114,6 +115,87 @@ class Fake(module.Controller):
         self.webs.pop(release['slot'], None)
 
 
+class BootstrapFake(module.Controller):
+    def __init__(self, root):
+        super().__init__(root)
+        self.names = set()
+        self.live = set()
+        self.events = []
+        self.fail_public = False
+        self.unknown_proxy = False
+
+    def docker(self, *args, **kwargs):
+        if args[:2] == ('network', 'inspect'):
+            return json.dumps([{'Name': self.config['network']}])
+        if args[:2] == ('volume', 'inspect'):
+            return json.dumps([{'Name': self.config['volume'], 'Driver': 'local', 'Options': None,
+                                'Mountpoint': '/synthetic/volume'}])
+        if args[0] == 'pull':
+            self.events.append('pull')
+            return ''
+        if args[:2] == ('image', 'inspect'):
+            reference = args[2]
+            return json.dumps([{'Id': 'proxy-image' if reference == self.config['proxyImage'] else 'app-image',
+                                'RepoDigests': [reference], 'Architecture': 'amd64',
+                                'Config': {'Labels': {'org.opencontainers.image.revision': A['revision']}}}])
+        if args[:2] == ('ps', '-a'):
+            return '\n'.join(sorted(self.names))
+        if args[:2] == ('ps', '--format'):
+            return '\n'.join(sorted(self.live))
+        if args[0] == 'create':
+            self.events.append(('create', args))
+            self.names.add('evn-marketing-proxy')
+            return 'proxy'
+        if args[0] == 'start':
+            self.events.append('start_' + args[1])
+            self.live.add(args[1])
+            return args[1]
+        raise AssertionError(args)
+
+    def running(self, name):
+        return name in self.live
+
+    def inspect(self, name):
+        if name == 'other':
+            return {'Mounts': [{'Destination': '/data', 'Name': self.config['volume']}]}
+        if name == 'evn-marketing-proxy':
+            return {'Image': 'proxy-image', 'Config': {'Labels': {
+                        'evn.marketing.managed': 'false' if self.unknown_proxy else 'true'}},
+                    'HostConfig': {'PortBindings': {'8080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3080'}]}},
+                    'NetworkSettings': {'Networks': {self.config['network']: {}}},
+                    'Mounts': [{'Destination': '/etc/nginx', 'Source': str(self.root / 'nginx'), 'RW': False}],
+                    'State': {'OOMKilled': False}}
+        return {'Image': 'app-image',
+                'Config': {'Labels': {'evn.marketing.managed': 'true', 'evn.marketing.revision': A['revision']}},
+                'HostConfig': {'PortBindings': {'3000/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3100'}]}},
+                'NetworkSettings': {'Networks': {self.config['network']: {}}},
+                'Mounts': [{'Destination': '/data', 'Name': self.config['volume']}],
+                'State': {'OOMKilled': False}}
+
+    def check_schema(self, release, other):
+        self.events.append('schema')
+
+    def lease_clear(self, release, allow_expired=False):
+        self.events.append('lease')
+
+    def start(self, release, worker=False):
+        assert not worker
+        name = self.web_name(release)
+        self.events.append('start_web')
+        self.names.add(name)
+        self.live.add(name)
+
+    def healthy_web(self, release, public=False):
+        self.events.append('public' if public else 'ready')
+        if public and self.fail_public:
+            raise module.Blocked('readiness')
+
+    def proxy(self, active, previous=None):
+        self.events.append('proxy')
+        self.live.add('evn-marketing-proxy')
+        return []
+
+
 def lock_attempt(root, output):
     try:
         with module.host_lock(Path(root)):
@@ -132,17 +214,90 @@ class Tests(unittest.TestCase):
         (self.root / 'state/release.json').write_text(json.dumps({'format': 1, 'phase': 'stable', 'active': A, 'previous': None}))
         self.c = Fake(self.root)
 
+    def bootstrap_controller(self):
+        (self.root / 'config.json').write_text(json.dumps(BOOTSTRAP_CONFIG))
+        (self.root / 'state/release.json').unlink(missing_ok=True)
+        module.bootstrap_journal(self.root, A['revision'], A['digest'])
+        return BootstrapFake(self.root)
+
+    def test_bootstrap_stays_blocked_until_public_readiness_then_resumes(self):
+        controller = self.bootstrap_controller()
+        controller.fail_public = True
+        with self.assertRaisesRegex(module.Blocked, 'readiness'):
+            controller.bootstrap()
+        self.assertEqual(controller.state['phase'], 'bootstrapping')
+        with self.assertRaisesRegex(module.Blocked, 'recovery_required'):
+            controller.release(B['revision'], B['digest'])
+        with self.assertRaisesRegex(module.Blocked, 'manual_reconciliation_required'):
+            controller.recover()
+        controller.fail_public = False
+        controller.bootstrap()
+        self.assertEqual(controller.state['phase'], 'stable')
+        self.assertNotIn('evn-marketing-worker', controller.names)
+        create = next(event[1] for event in controller.events if isinstance(event, tuple) and event[0] == 'create')
+        self.assertIn('127.0.0.1:3080:8080', create)
+
+    def test_bootstrap_refuses_mismatch_stable_state_workers_and_unknown_containers(self):
+        controller = self.bootstrap_controller()
+        with self.assertRaisesRegex(module.Blocked, 'bootstrap_state'):
+            module.bootstrap_journal(self.root, B['revision'], B['digest'])
+        controller.config['collectorEnabled'] = True
+        with self.assertRaisesRegex(module.Blocked, 'bootstrap_workers_enabled'):
+            controller.bootstrap()
+        controller.config['collectorEnabled'] = False
+        controller.names.add('evn-marketing-worker')
+        with self.assertRaisesRegex(module.Blocked, 'bootstrap_unknown_container'):
+            controller.bootstrap()
+        self.assertFalse(any(event == 'rm' for event in controller.events))
+        controller.names.clear()
+        controller.names.add('other')
+        controller.live.add('other')
+        with self.assertRaisesRegex(module.Blocked, 'bootstrap_volume_busy'):
+            controller.bootstrap()
+        controller.names.clear()
+        controller.live.clear()
+        controller.names.add('evn-marketing-proxy')
+        controller.unknown_proxy = True
+        with self.assertRaisesRegex(module.Blocked, 'bootstrap_unknown_container'):
+            controller.bootstrap()
+        self.assertNotIn('start_web', controller.events)
+        controller.names.clear()
+        controller.unknown_proxy = False
+        controller.bootstrap()
+        with self.assertRaisesRegex(module.Blocked, 'bootstrap_state'):
+            module.bootstrap_journal(self.root, A['revision'], A['digest'])
+
+    def test_bootstrap_journal_rejects_dangling_symlink(self):
+        path = self.root / 'state/release.json'
+        path.unlink()
+        path.symlink_to(self.root / 'missing-release.json')
+        with self.assertRaisesRegex(module.Blocked, 'unsafe_host_permissions'):
+            module.bootstrap_journal(self.root, A['revision'], A['digest'])
+
     def test_container_memory_limits_reach_docker_run(self):
         controller = module.Controller(self.root)
         for worker, name, memory in ((False, 'evn-marketing-web-blue', '384m'),
                                      (True, 'evn-marketing-worker', '768m')):
+            secrets = {'AUTH_SECRET': 'synthetic-auth'}
+            if worker:
+                secrets.update(MLEVERAGE_USERNAME='synthetic-user', MLEVERAGE_PASSWORD='synthetic-password',
+                               WARP_MARKETING_API_KEY='synthetic-warp-key')
             with self.subTest(worker=worker), patch.object(controller, 'docker', return_value='') as docker, \
-                    patch.object(controller, 'secrets', return_value={}), patch.object(controller, 'identity'):
+                    patch.object(controller, 'secrets', return_value=secrets), patch.object(controller, 'identity'):
                 controller.start(A, worker=worker)
                 runs = [call.args for call in docker.call_args_list if call.args[0] == 'run']
                 self.assertEqual(len(runs), 1)
                 self.assertEqual(runs[0][runs[0].index('--name') + 1], name)
                 self.assertEqual(runs[0][runs[0].index('--memory') + 1], memory)
+                passed = docker.call_args_list[-1].kwargs['env']
+                self.assertEqual(passed['WARP_DELIVERY_ENABLED'], 'true')
+                self.assertEqual('WARP_MARKETING_API_KEY' in runs[0], worker)
+
+        controller.config['warpDeliveryEnabled'] = False
+        with patch.object(controller, 'docker', return_value='') as docker, \
+                patch.object(controller, 'secrets', return_value={'AUTH_SECRET': 'synthetic-auth'}), patch.object(controller, 'identity'):
+            controller.start(A)
+            self.assertEqual(docker.call_args_list[-1].kwargs['env']['WARP_DELIVERY_ENABLED'], 'false')
 
     def test_success_rollback_and_window(self):
         self.c.release(B['revision'], B['digest'])

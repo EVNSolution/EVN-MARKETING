@@ -223,7 +223,8 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         for character, slot in (('a', 'blue'), ('b', 'green')):
             revision = character * 40
             tag = '127.0.0.1:5000/evn-marketing:' + revision
-            docker('build', '--builder', 'default', '--build-arg', 'REVISION=' + revision, '-t', tag, str(fixture))
+            docker('build', '--builder', 'default', '--platform', 'linux/amd64', '--build-arg', 'REVISION=' + revision,
+                   '--label', 'org.opencontainers.image.revision=' + revision, '-t', tag, str(fixture))
             docker('push', tag)
             digest = json.loads(docker('image', 'inspect', tag))[0]['RepoDigests'][0].split('@')[1]
             releases.append({'revision': revision, 'digest': digest, 'slot': slot, 'owner': str(uuid.uuid4())})
@@ -235,27 +236,28 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         command('openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost', '-keyout', str(root/'tls/key.pem'), '-out', str(root/'tls/cert.pem'))
         config = {'proxyImage':json.loads(docker('image','inspect','nginx:1.28-alpine'))[0]['RepoDigests'][0], 'repository': '127.0.0.1:5000/evn-marketing', 'publicUrl': 'https://localhost:3443', 'caFile': str(root/'tls/cert.pem'),
                   'volumeId': 'synthetic-compat-volume', 'volume': 'evn-marketing-data', 'network': 'evn-marketing', 'ebsVolumeId': 'vol-000001',
-                  'collectorEnabled': True, 'warpDeliveryEnabled': False, 'minFreeMemoryMiB': 256, 'minFreeDiskMiB': 1024}
+                  'collectorEnabled': False, 'warpDeliveryEnabled': False, 'minFreeMemoryMiB': 256, 'minFreeDiskMiB': 1024}
         (root/'config.json').write_text(json.dumps(config))
-        (root/'state/release.json').write_text(json.dumps({'format':1,'phase':'stable','active':a,'previous':None}))
-        controller = Lab(root)
-        controller.real_time = options.real_time
-        controller.start(a)
-        controller.healthy_web(a)
-        controller.start(a, worker=True)
-        controller.worker_ready(a)
-        controller.activate_worker(a)
-        # Existing runtime proxy bootstrap and a dedicated TLS frontend; no published app ports beyond loopback.
-        initial = controller.docker('run', '--rm', '-i', '--network', 'none', '-v', str(root/'deploy/nginx-config.mjs') + ':/renderer.mjs:ro', controller.image(a), 'node', '/renderer.mjs', '/dev/stdin', stdin=json.dumps({'active':{'id':a['revision'],'slot':'blue'},'publicUrl':config['publicUrl']}))
-        (root/'nginx/nginx.conf').write_text(initial)
-        docker('run', '-d', '--name', 'evn-marketing-proxy', '--network', 'evn-marketing', '-v', str(root/'nginx') + ':/etc/nginx:ro', 'nginx:1.28-alpine')
-        # Publish only the TLS front on loopback. Resolve the internal proxy through
-        # Docker DNS: its IP can change when the recovery scenario restarts it.
+        # Start the separate TLS front first; its Docker DNS target may appear during bootstrap.
         tls = 'events {}\nhttp { access_log off; resolver 127.0.0.11 valid=1s ipv6=off; server { listen 3443 ssl; ssl_certificate /tls/cert.pem; ssl_certificate_key /tls/key.pem; location / { set $upstream evn-marketing-proxy; proxy_set_header Host $http_host; proxy_pass http://$upstream:8080; } } }'
         (root/'tls/nginx.conf').write_text(tls)
         docker('run', '-d', '--name', 'marketing-lab-tls', '-p', '127.0.0.1:3443:3443', '-v', str(root/'tls') + ':/tls:ro', '-v', str(root/'tls/nginx.conf') + ':/etc/nginx/nginx.conf:ro', 'nginx:1.28-alpine')
         docker('network', 'connect', 'evn-marketing', 'marketing-lab-tls')
-        controller.healthy_web(a, public=True)
+        with m.host_lock(root):
+            m.bootstrap_journal(root, a['revision'], a['digest'])
+            controller = Lab(root)
+            controller.real_time = options.real_time
+            controller.bootstrap()
+        assert 'evn-marketing-worker' not in docker('ps', '-a', '--format', '{{.Names}}').splitlines()
+        config['collectorEnabled'] = True
+        (root/'config.json').write_text(json.dumps(config))
+        controller = Lab(root)
+        controller.real_time = options.real_time
+        a = controller.state['active']
+        releases[0] = a
+        controller.start(a, worker=True)
+        controller.worker_ready(a)
+        controller.activate_worker(a)
         start_traffic()
         controller.exercise_drain = True
         observer = threading.Thread(target=observe, daemon=True)

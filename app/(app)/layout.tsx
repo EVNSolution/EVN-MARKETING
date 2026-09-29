@@ -15,14 +15,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
         <nav className="flex-1 px-3 space-y-1">
-          <Link href="/customers"
-            className="block px-3 py-2 rounded-lg text-sm font-semibold text-white hover:bg-white/10 transition">
-            고객 관리
-          </Link>
           <Link href="/inquiries"
             className="block px-3 py-2 rounded-lg text-sm font-semibold text-white hover:bg-white/10 transition">
             문의 내역
           </Link>
+          <a href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer"
+            className="block px-3 py-2 rounded-lg text-sm font-semibold text-white hover:bg-white/10 transition">
+            WARP CRM
+          </a>
         </nav>
         <div className="px-3 py-4 border-t border-white/10">
           <div className="px-3 text-xs text-slate-400 truncate mb-2">{user?.name} · {user?.email}</div>

@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS build
+FROM node:22-trixie-slim AS build
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
@@ -28,11 +28,15 @@ RUN test -n "$MARKETING_BUILD_REVISION" \
     && ./node_modules/.bin/esbuild scripts/warp-recovery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-recovery.mjs \
     && ./node_modules/.bin/esbuild workers/health.ts --bundle --platform=node --format=esm --packages=external --outfile=worker-health.mjs
 
-FROM build AS operations
+FROM node:22-trixie-slim AS operations
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app ./
 USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 
-FROM node:22-bookworm-slim
+FROM node:22-trixie-slim
 ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app
 COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core

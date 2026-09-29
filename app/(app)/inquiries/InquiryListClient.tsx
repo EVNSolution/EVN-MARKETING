@@ -13,6 +13,7 @@ type Inquiry = {
   sourceStatus: string | null
   name: string | null
   phone: string
+  warpDelivery: { status: 'delivered' | 'pending' | 'blocked' | 'retrying'; label: string; reason: string | null }
 }
 
 type SyncRun = {
@@ -63,9 +64,9 @@ const statusText: Record<string, { label: string; className: string }> = {
 const blockedStatusHelp: Record<string, string> = {
   login_required: '원본 서비스 세션이 만료되었습니다. 수집기가 자동 로그인을 다시 시도합니다.',
   credentials_invalid: '원본 계정이 거부되었습니다. 계정 정보를 확인한 뒤 수집기를 재시작해 주세요.',
-  credentials_missing: 'Mac 수집 브라우저에서 직접 로그인하거나, 원본 계정 정보를 설정한 뒤 수집기를 재시작해 주세요.',
+  credentials_missing: '서버의 원본 계정 정보를 설정한 뒤 수집 서비스를 재시작해 주세요.',
   source_credentials_incomplete: '원본 계정 아이디와 비밀번호를 모두 설정한 뒤 수집기를 재시작해 주세요.',
-  source_credentials_missing: 'Mac 수집 브라우저에서 직접 로그인하거나, 원본 계정 정보를 설정한 뒤 수집기를 재시작해 주세요.',
+  source_credentials_missing: '서버의 원본 계정 정보를 설정한 뒤 수집 서비스를 재시작해 주세요.',
   login_retry_exhausted: '일시 오류 재시도 한도를 넘었습니다. 5분 뒤 자동으로 다시 시도합니다.',
 }
 
@@ -209,8 +210,8 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
             <b className="text-slate-800">WARP 고객관리 자동 등록</b>
             <a className="font-semibold underline underline-offset-2" href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer">WARP 고객관리 열기</a>
           </div>
-          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''}</p>
-          <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '파일럿 전송과 CRM 확인 후 자동 등록을 활성화합니다.' : '같은 연락처는 기존 고객에 문의 이력을 추가하며, 고객 정보를 덮어쓰지 않습니다.'}</p>
+          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''}</p>
+          <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '자동 등록 설정이 꺼져 있습니다.' : '자동 등록 설정이 켜져 있습니다. 실제 연결 여부는 문의별 전송 결과에서 확인하며, 같은 연락처는 기존 고객 문의 이력에 추가합니다.'}</p>
         </section>
       )}
 
@@ -264,7 +265,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
               )}
             </div>
           ) : data?.rows.length ? (
-            <table className="w-full min-w-[720px] text-xs">
+            <table className="w-full min-w-[900px] text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-white text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">
                   <th className="px-4 py-3">문의일자</th>
@@ -272,6 +273,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                   <th className="px-4 py-3">상담상태</th>
                   <th className="px-4 py-3">성함</th>
                   <th className="px-4 py-3">연락처</th>
+                  <th className="px-4 py-3">WARP 등록</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -282,6 +284,10 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                     <td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{row.sourceStatus ?? '—'}</span></td>
                     <td className="px-4 py-3 font-medium text-slate-700">{row.name ?? '—'}</td>
                     <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{row.phone}</td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-full px-2 py-1 font-semibold ${row.warpDelivery.status === 'delivered' ? 'bg-lime-100 text-lime-800' : row.warpDelivery.status === 'pending' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800'}`}>{row.warpDelivery.label}</span>
+                      {row.warpDelivery.reason && <p className="mt-1 max-w-64 text-[11px] text-slate-500">{row.warpDelivery.reason}</p>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
