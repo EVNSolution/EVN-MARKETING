@@ -265,6 +265,7 @@ export async function reconcile(
   fetchPage: (page: number, previousFirstPageIds?: string[]) => Promise<SourcePage>,
   now = () => new Date(),
   signal?: AbortSignal,
+  afterSaved?: (row: RawInquiry) => Promise<void>,
 ): Promise<ReconcileResult> {
   const outcomes = new Map<string, Outcome>()
   let pagesRead = 0
@@ -318,6 +319,12 @@ export async function reconcile(
           attemptPages++
           await updateRunCounts(db, runId, owner, expectedCount, pagesRead, outcomes, now())
           if (signal?.aborted) throw new SyncError('interrupted')
+          if (afterSaved) for (const row of rows) {
+            if (row.sourceStatus !== null && row.sourceStatus !== '접수') continue
+            await heartbeat(db, runId, owner, now())
+            if (signal?.aborted) throw new SyncError('interrupted')
+            await afterSaved(row)
+          }
 
           if (saved.reachedCutoff) {
             stoppedAtCutoff = true

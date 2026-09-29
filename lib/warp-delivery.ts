@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import type { PrismaClient } from '@/app/generated/prisma/client'
-import { heartbeatWorker, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID, INQUIRY_SOURCE } from '@/lib/inquiry-sync'
+import { heartbeatWorker, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID, INQUIRY_SCOPE_ID, INQUIRY_SOURCE, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
 
 const WARP_ENDPOINT = 'https://warp.cleversystem.ai/api/external/marketing-inquiries'
 const RETRY_MS = 60 * 60_000
+// A durable command in the existing delivery state; only the lease-owning worker sends it.
+export const MANUAL_REGISTRATION = 'warp_manual_requested'
 export const scope = { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID }
 const connectionErrors = ['warp_auth_required', 'warp_not_configured', 'warp_endpoint_missing', 'warp_unavailable', 'warp_invalid_receipt']
 export type Env = Readonly<Record<string, string | undefined>>
@@ -22,15 +24,43 @@ export function warpConfigured(env: Env = process.env) {
 
 export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError: string | null }) {
   if (row.warpDeliveredAt) return { status: 'delivered', label: '등록 완료', reason: null }
+  if (row.warpError === MANUAL_REGISTRATION) return { status: 'queued', label: '등록 요청됨', reason: null }
+  if (row.warpError === 'warp_name_rule_pending') return {
+    status: 'blocked', label: '등록 대기', reason: '이름이 없는 고객은 WARP의 신원미상 이름 처리 적용 후 등록할 수 있습니다.',
+  }
   if (row.warpError === 'warp_customer_conflict') return {
     status: 'blocked', label: '확인 필요', reason: '동일 연락처 고객이 여러 명이라 자동 등록을 보류했습니다.',
   }
-  if (row.warpError) return { status: 'retrying', label: '재시도 대기', reason: '자동 등록 오류로 재시도를 기다리고 있습니다.' }
+  if (row.warpError) return { status: 'retrying', label: '재시도 대기', reason: '등록에 실패했습니다. 자동 등록이 꺼져 있으면 등록하기로 다시 요청해 주세요.' }
   return { status: 'pending', label: '등록 대기', reason: null }
 }
 
 export function warpActivityId(sourceId: string) {
   return `mleverage_${createHash('sha256').update([INQUIRY_SOURCE, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID, sourceId.toLowerCase()].join(':')).digest('hex')}`
+}
+
+export function manualRegistrationAllowed(row: { name: string | null }, env: Env = process.env) {
+  // Automatic delivery is enabled only after the receiver's unknown-name rollout is verified.
+  return Boolean(row.name?.trim()) || env.WARP_DELIVERY_ENABLED === 'true'
+}
+
+export async function requestWarpRegistration(db: PrismaClient, id: string, env: Env = process.env, now = new Date()) {
+  return db.$transaction(async (tx) => {
+    const row = await tx.inquiry.findFirst({ where: { ...scope, id }, select: { name: true, warpDeliveredAt: true, warpError: true } })
+    if (!row) return 'not_found' as const
+    if (row.warpDeliveredAt) return 'delivered' as const
+    if (!manualRegistrationAllowed(row, env)) return 'name_required' as const
+    if (row.warpError === MANUAL_REGISTRATION) return 'queued' as const
+    const state = await tx.inquirySyncState.findUnique({ where: { id: INQUIRY_SCOPE_ID } })
+    if (!state?.workerOwner || !['ready', 'running', 'success'].includes(state.status) || !state.workerHeartbeatAt || !state.workerLeaseExpiresAt
+      || now.getTime() - state.workerHeartbeatAt.getTime() >= WORKER_LEASE_MS
+      || state.workerHeartbeatAt.getTime() > now.getTime() + 5_000 || state.workerLeaseExpiresAt <= now) return 'worker_offline' as const
+    const blocked = await tx.inquiry.findFirst({ where: { ...scope, warpDeliveredAt: null,
+      warpError: { in: connectionErrors }, warpAttemptedAt: { gt: new Date(now.getTime() - RETRY_MS) } }, select: { id: true } })
+    if (blocked) return 'connection_backoff' as const
+    await tx.inquiry.updateMany({ where: { ...scope, id, warpDeliveredAt: null }, data: { warpError: MANUAL_REGISTRATION } })
+    return 'queued' as const
+  })
 }
 
 async function postWarp(payload: object, send: typeof fetch, env: Env, signal?: AbortSignal) {
@@ -90,7 +120,7 @@ export async function warpDeliverySummary(db: PrismaClient, env: Env = process.e
   const [delivered, pending, failed] = await Promise.all([
     db.inquiry.count({ where: { ...scope, warpDeliveredAt: { not: null } } }),
     db.inquiry.count({ where: { ...scope, warpDeliveredAt: null } }),
-    db.inquiry.count({ where: { ...scope, warpDeliveredAt: null, warpError: { not: null } } }),
+    db.inquiry.count({ where: { ...scope, warpDeliveredAt: null, warpError: { not: null, notIn: [MANUAL_REGISTRATION] } } }),
   ])
   return { configured: env.WARP_DELIVERY_ENABLED === 'true', delivered, pending, failed }
 }
@@ -156,19 +186,23 @@ export async function dispatchPendingWarp(
   signal?: AbortSignal,
 ) {
   const result = { configured: warpConfigured(env), delivered: 0, failed: 0 }
-  if (!result.configured || signal?.aborted) return result
+  if (!keyConfigured(env) || signal?.aborted) return result
   const retryBefore = new Date(now().getTime() - RETRY_MS)
   const connectionBlocked = await db.inquiry.findFirst({
     where: { ...scope, warpDeliveredAt: null, warpError: { in: connectionErrors }, warpAttemptedAt: { gt: retryBefore } },
     select: { id: true },
   })
   if (connectionBlocked || signal?.aborted) return result
-  const rows = await pendingRows(db, now(), 50)
+  const rows = result.configured ? await pendingRows(db, now(), 50) : await db.inquiry.findMany({
+    where: { ...scope, warpDeliveredAt: null, warpError: MANUAL_REGISTRATION },
+    orderBy: [{ inquiryDate: 'asc' }, { inquiryTime: 'asc' }, { sourceId: 'asc' }], take: 50, select: rowSelect,
+  })
   for (const row of rows) {
     if (signal?.aborted) break
     await heartbeatWorker(db, workerOwner, now())
     if (signal?.aborted) break
-    const delivery = await deliver(payloadFor(row), send, env)
+    const delivery: Delivery = !result.configured && !manualRegistrationAllowed(row, env)
+      ? { error: 'warp_name_rule_pending' } : await deliver(payloadFor(row), send, env, signal)
     await heartbeatWorker(db, workerOwner, now())
     const attemptedAt = now()
     if (delivery.receipt) await acknowledge(db, row.id, delivery.receipt, attemptedAt)

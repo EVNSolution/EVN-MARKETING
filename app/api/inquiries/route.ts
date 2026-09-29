@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
-import { warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
+import { manualRegistrationAllowed, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import {
   INQUIRY_COMPANY_ID,
   INQUIRY_HOMEPAGE_ID,
@@ -94,7 +94,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       rows: rows.map(({ warpDeliveredAt, warpError, ...row }) => ({
         ...row,
-        warpDelivery: warpDeliveryState({ warpDeliveredAt, warpError }),
+        warpDelivery: !warpDeliveredAt && !manualRegistrationAllowed(row)
+          ? warpDeliveryState({ warpDeliveredAt, warpError: 'warp_name_rule_pending' }) : warpDeliveryState({ warpDeliveredAt, warpError }),
+        manualRegistrationAllowed: manualRegistrationAllowed(row),
       })),
       warp,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },

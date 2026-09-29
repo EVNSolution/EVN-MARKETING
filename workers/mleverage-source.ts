@@ -6,6 +6,7 @@ import {
   INQUIRY_PAGE_SIZE,
   SyncError,
   type SourcePage,
+  type RawInquiry,
 } from '@/lib/inquiry-sync'
 
 const SOURCE_HOST = 'https://app.mleverage-admin.co.kr'
@@ -207,6 +208,44 @@ export async function sourceReady(page: Page) {
     && url.pathname === '/inquiry-history'
     && !(await page.locator('input[type="password"]').isVisible().catch(() => false))
     && await page.getByRole('button', { name: /^총 [\d,]+개$/ }).isVisible().catch(() => false)
+}
+
+// Called only after the matching page has committed to our DB. Preserve other consultation states.
+export async function markSourceManaging(page: Page, row: RawInquiry, signal?: AbortSignal) {
+  const guard = () => {
+    if (signal?.aborted) throw new SyncError('interrupted')
+    const url = new URL(page.url())
+    if (url.origin !== SOURCE_HOST || url.pathname !== '/inquiry-history'
+      || url.searchParams.get('companyUuid') !== INQUIRY_COMPANY_ID
+      || url.searchParams.get('homepageUuid') !== INQUIRY_HOMEPAGE_ID
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(row.sourceId)) throw new SyncError('source_status_scope')
+  }
+  try {
+    guard()
+    const cell = page.locator(`[id="__cell_${row.sourceId}_상담상태"]`)
+    if (await cell.count() !== 1) throw new SyncError('source_status_missing')
+    const current = (await cell.innerText()).trim()
+    if (!['', '상태 선택', '접수'].includes(current)) return
+    const phone = page.locator(`[id="__cell_${row.sourceId}_phoneNumber"]`)
+    if ((await phone.innerText()).trim() !== row.phone) throw new SyncError('source_status_changed')
+    const menuId = await cell.locator('[aria-controls]').getAttribute('aria-controls')
+    if (!menuId || !/^dropdown-[A-Za-z0-9_-]+$/.test(menuId)) throw new SyncError('source_status_menu')
+    guard()
+    await cell.getByRole('button').click()
+    const choice = page.locator(`[id="${menuId}"][role="menu"]`).getByRole('button', { name: '관리중', exact: true })
+    await choice.waitFor({ state: 'visible', timeout: 10_000 })
+    guard()
+    // Check again after opening the menu, before the only remote mutation.
+    if ((await cell.innerText()).trim() !== current) throw new SyncError('source_status_changed')
+    await choice.click()
+    await page.waitForLoadState('networkidle', { timeout: 15_000 })
+    await page.reload({ waitUntil: 'networkidle', timeout: 45_000 })
+    guard()
+    await cell.getByRole('button', { name: '관리중', exact: true }).waitFor({ state: 'visible', timeout: 15_000 })
+  } catch (error) {
+    if (error instanceof SyncError) throw error
+    throw new SyncError('source_status_update_failed')
+  }
 }
 
 export function safeNetworkErrorType(error: unknown) {
