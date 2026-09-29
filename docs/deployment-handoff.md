@@ -1,41 +1,50 @@
 ## 1. 요약
 
-관리자 측에서 Marketing 전용 서버의 도메인 연결, Caddy HTTPS와 인증서 발급, 프록시 연결 검증을 마쳤습니다. [서비스 주소](https://marketing.cleversystem.ai)는 현재 웹 앱이 설치되지 않아 `503 서비스 준비 중`을 표시합니다. 서버 접속 준비와 웹 서비스 배포 완료를 구분해 주세요.
+관리자 측에서 Marketing 전용 서버, 도메인 연결과 HTTPS 접속, 첫 설치에 필요한 호스트의 기본 도구를 준비했습니다. [서비스 주소](https://marketing.cleversystem.ai)는 아직 웹 서비스가 없어 `503 서비스 준비 중`입니다. 이 상태를 배포 완료로 보시면 안 됩니다.
 
-이미지 보관소(ECR)에 게시된 이미지는 있지만 보안 검사를 통과하지 못해 웹 앱 실행을 시작하지 않았습니다. PR #19는 `main`에 병합됐고 중복 PR #17·#18과 해당 원격 브랜치는 정리됐습니다. 이 문서는 작업 인계이며 운영 공개 승인이나 배포 완료 보고가 아닙니다.
+관리자 측에서 새 runtime·operations 이미지를 게시하고 보안 검사와 실제 서버의 합성 검증을 통과시켰습니다. [PR #20](https://github.com/EVNSolution/EVN-MARKETING/pull/20)의 CI도 성공했습니다. **실제 자료로 첫 웹 서비스를 실행한 것은 아닙니다.** 자료 수신용 비공개 S3 버킷과 서버의 설치 준비는 마쳤습니다. 이 작업들을 SUMZ711님께 다시 맡기지 않습니다.
 
-SUMZ711과 작업 에이전트께서는 기존 AWS 계정·CLI로 서버를 확인하고 **① 안전한 이미지 마련, 실제 자료 복원과 웹 최초 실행, ② 기존 계정 로그인과 단일 수집·WARP 검증, ③ 2 GiB 서버의 대표 부하 측정**을 이어가 주세요. 확인된 결과만 완료로 보고해 주세요.
+현재 꼭 필요한 협조는 **SUMZ711님 PC에만 있는 실제 Marketing DB와 업로드 파일**입니다. 본인 AWS 계정으로 CLI에 로그인하고 원본 위치를 확인해 주세요. 아래 수신 경로는 사용 가능하지만, 협의한 이관 시점 전에는 기존 수집기를 중지하지 마세요. 그 시점에 일관된 백업을 전달하고, 복원 후 기존 계정 로그인을 함께 확인해 주세요. 추가 인증이 필요하면 본인이 협조해 주세요. 원본은 복원 검증이 끝날 때까지 보존합니다.
 
 ## 2. 에이전트에게 전할 상세 작업
 
-**시작 기준과 역할.** 현재 검토 기준은 2026-09-29입니다. [PR #19](https://github.com/EVNSolution/EVN-MARKETING/pull/19)의 소스·CI 검토에서는 추가 수정이 필요한 확정 기능 코드 결함을 찾지 못했지만, 이것이 이미지 보안 검사 통과나 운영 배포를 뜻하지는 않습니다. PR #19 병합 후 `main`은 `6987e16c2e3342910c7e2c1b4a10915308aa0e40`이며 검토한 PR #19와 소스 tree가 같습니다. 실제 배포 시에는 그때 최신 원격 `main`과 HEAD가 정확히 같은 새 clean checkout만 사용해 주세요. 기존 `manual-dispatch`는 새 호스트의 첫 설치를 대신하지 않습니다. 변경이 필요하면 검토 가능한 PR로 전달하고, 자격증명·개인정보·SecureString 값은 PR·로그·메신저에 적지 마세요. [배포 문서](https://github.com/EVNSolution/EVN-MARKETING/blob/6987e16c2e3342910c7e2c1b4a10915308aa0e40/docs/cloud-release.md), [release guard](https://github.com/EVNSolution/EVN-MARKETING/blob/6987e16c2e3342910c7e2c1b4a10915308aa0e40/deploy/aws/release.py).
+**현재 경계.** 2026-09-29 기준 서울 서버 `i-09022af4acd464470`은 `t3a.small`(2 GiB)입니다. 도메인과 Caddy HTTPS 인증서·자동 갱신 구성이 완료됐고 외부 HTTPS는 정상 인증서로 `503 서비스 준비 중`을 반환합니다. 서버의 Docker·AWS CLI·SSM, 비어 있는 Marketing 전용 볼륨, controller 코드·renderer(`0644`)·data-ops 도구·실행 config·비활성 systemd 유닛이 설치됐고 아래 proxy·runtime·operations 이미지는 정확한 digest로 내려받았습니다. 설정의 `volumeId`는 `evn-marketing-production-i-09022af4acd464470`이지만 실제 볼륨 marker는 자료 검증 후 맞춰 준비해야 합니다. **실제 DB·업로드·초기 journal·웹 컨테이너는 아직 없습니다.** 자료 수신용 S3 버킷은 생성됐고, 실제 호스트 권한으로 합성 파일을 받아 체크섬을 대조한 뒤 삭제했습니다. 고객 자료 이관·복원은 하지 않았습니다. [배포 절차](https://github.com/EVNSolution/EVN-MARKETING/blob/7aa6ca187ddffd8d3e1b27524ab72acaf207ac18/docs/cloud-release.md), [controller](https://github.com/EVNSolution/EVN-MARKETING/blob/7aa6ca187ddffd8d3e1b27524ab72acaf207ac18/deploy/controller.py).
 
-**준비된 서버와 HTTPS를 확인하세요.** Route 53 A 레코드는 `54.180.203.57`(TTL 300)로 `INSYNC`입니다. 기존 AWS 인증을 사용하는 CLI에서 다음 읽기 조회로 계정과 인스턴스·SSM 상태를 먼저 확인하세요. 대상은 서울 `ap-northeast-2`의 `i-09022af4acd464470`(`t3a.small`, 2 GiB), 예상 계정은 `902837199612`입니다. 계정이 다르거나 접근 오류가 나면 이어서 접속하지 말고 관리자 측과 기존 접근 경로를 조율하세요.
+**관리자 측 선행 작업.** [PR #20](https://github.com/EVNSolution/EVN-MARKETING/pull/20)이 `main`에 병합됐고 현재 `main`은 `7aa6ca187ddffd8d3e1b27524ab72acaf207ac18`입니다. 같은 SHA의 [CI 실행](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/36507248795)은 컨테이너 smoke, 두 이미지의 브라우저·동시 업로드 검사와 controller lab을 포함해 성공했습니다. Linux amd64 두 이미지는 이 소스 revision으로 아래 digest에 게시됐고 ECR Basic 검사 원문에 기존 [release scan gate](https://github.com/EVNSolution/EVN-MARKETING/blob/7aa6ca187ddffd8d3e1b27524ab72acaf207ac18/deploy/aws/release.py#L53-L71)를 적용해 모두 통과했습니다. 실제 호스트에서도 합성 자료로 컨테이너·브라우저 검증을 통과했습니다. 기존 보안 검사 차단 이미지는 사용하지 않습니다.
+
+ECR 저장소는 `902837199612.dkr.ecr.ap-northeast-2.amazonaws.com/evn-marketing`이며, 아래 `@sha256:` 참조가 실제 게시된 불변 이미지입니다.
+
+| 이미지 | 불변 ECR 참조 | ECR 검사 |
+| --- | --- | --- |
+| runtime | `902837199612.dkr.ecr.ap-northeast-2.amazonaws.com/evn-marketing@sha256:ce950855b2c9a39e791c19ce689382a7e36de1a0770a6a878ff55aa59ac52182` | 2026-09-29 10:32:37 KST Basic `COMPLETE`, Critical/High/Undefined 0, Medium 4; gate 통과 |
+| operations | `902837199612.dkr.ecr.ap-northeast-2.amazonaws.com/evn-marketing@sha256:2bdf0690cf1b544e96d8976b0bce73e4ec2af5bb2164038ea7e030f58a90e6ca` | 2026-09-29 10:35:16 KST Basic `COMPLETE`, Critical/High/Undefined 0, Medium 4; gate 통과 |
+| proxy | `902837199612.dkr.ecr.ap-northeast-2.amazonaws.com/evn-marketing@sha256:5c62b1566930f9875c9367e459f0f6474e317be9cde8ba8e5419022133311e14` | 2026-09-29 10:03:32 KST Basic `COMPLETE`, 발견 0; 호스트에 정확한 digest 확인 |
+
+실제 호스트의 합성 검증에서 SQLite·Chromium·패키지 CLI, 합성 계정 브라우저 로그인, 준비도 실패·복구·인증 경계와 웹 두 개·브라우저 동시 실행이 통과했습니다(SSM `af9e8931-14d2-4c05-9885-974d07c2d227`, 49초). OOM·oom_kill은 0이었고 두 웹·브라우저 실행 중 `MemAvailable`은 1,168 MiB였습니다. 다만 test 컨테이너가 768 MiB 상한에 닿았으며, 이는 **실제 수집기나 운영 부하 측정이 아닙니다.** 최종 확인에서 합성 컨테이너와 S3 객체 버전을 제거했고 운영 볼륨은 비어 있으며 config는 변경되지 않았고 journal은 없습니다. operations 이미지도 정확한 digest·Linux/amd64·소스 revision을 호스트에서 확인했습니다(SSM `ccb49d7c-0d79-4caf-9f50-8c993ce5a961`). 외부 HTTPS는 검증된 TLS로 여전히 503을 반환합니다. 원본 수집과 웹 두 개의 대표 부하 검증은 자료 이관 뒤 남습니다.
+
+ECR 검사는 완료 상태와 취약점 정보 갱신 시각이 각각 24시간 이내인지 확인해야 하므로, 첫 실행 직전 정확한 두 digest의 현재 결과를 다시 확인합니다. 같은 검증된 SHA의 전체 CI나 이미지 빌드를 무조건 반복하지 않습니다. 비공개 수신함과 호스트 도구·설정은 준비됐지만, 첫 웹 실행이나 자료 이전 완료를 주장하지 않습니다. 현재 관리자 AWS 직접 실행 경로를 유지하며 선택적인 GitHub OIDC 활성화는 SUMZ711님 선결 작업이 아닙니다. Caddy 재설치, 이미지 빌드, IAM 임의 수정, 수신함 템플릿 실행을 SUMZ711님 작업으로 남기지 않습니다.
+
+**SUMZ711님과 작업 에이전트가 먼저 할 일.** 본인에게 허용된 AWS 계정·CLI로 로그인해 계정 식별 결과를 확인하고, 실제 로컬 SQLite DB·업로드 파일·현재 수집기의 위치와 자동 재시작 방식을 특정합니다. SUMZ711님 계정의 대상 서버 SSM 접속과 S3 수신함 업로드 권한은 IAM 시뮬레이션에서 허용됐지만, 본인의 실제 AWS 인증·세션·업로드는 아직 시험하지 않았습니다. 권한 오류가 나면 오류와 사용 중인 계정만 관리자 측에 알려 기존 접근 경로를 조율합니다. 키나 비밀값을 PR·로그·메신저에 게시하거나 임의로 권한을 늘리지 않습니다. 지금은 원본 수집기를 미리 중지하지 않습니다.
 
 ```bash
 aws sts get-caller-identity --query Account --output text
-aws ec2 describe-instances --region ap-northeast-2 --instance-ids i-09022af4acd464470 --query 'Reservations[].Instances[].{State:State.Name,Type:InstanceType}' --output table
-aws ssm describe-instance-information --region ap-northeast-2 --filters Key=InstanceIds,Values=i-09022af4acd464470 --query 'InstanceInformationList[].{Id:InstanceId,Status:PingStatus}' --output table
 ```
 
-호스트 Caddy 2.11.4는 `active/enabled`, 기존 host Nginx는 `inactive/disabled`입니다. 관리자 측 외부 확인에서 HTTP→HTTPS `308`, 시스템이 신뢰하는 Let's Encrypt 인증서(SAN `marketing.cleversystem.ai`, TLS 1.3)의 HTTPS HTTP/2 `503 서비스 준비 중`을 확인했습니다. Caddy 서비스는 reload 뒤에도 유지됐고, 단발성 루프백 진단으로 프록시 HTTPS `204` 및 Host/forwarded 헤더 전달을 확인했습니다. 진단 프로세스 종료 후 3080 리스너가 없는 상태와 공개 HTTPS 503 복귀도 확인했습니다. 기존 AWS 계정으로 접속해 `systemctl is-active caddy`, `systemctl is-enabled caddy`, `journalctl -u caddy --no-pager`를 확인하고, 외부에서 `curl -I http://marketing.cleversystem.ai/`, `curl -I https://marketing.cleversystem.ai/`로 상태를 다시 확인해 주세요. Caddy 재설치는 현재 작업에 필요하지 않고 인증서 자동 갱신은 구성됐습니다. 공개 포트는 80/443뿐이고 내부 `127.0.0.1:3080`은 외부로 열지 마세요. 현재 호스트 Caddy 설정의 SHA-256은 `9dd6c5873ebab3c5b743f900a55a8ed30c9bbcfabc98a9854b9d8b256882e8cd`이며 내용은 아래와 같습니다. `reverse_proxy` 뒤의 Nginx는 Docker 안쪽 서비스입니다.
+**준비된 수신 경로로 자료를 전달합니다.** 전달 위치는 `s3://evn-marketing-migration-902837199612-ap-northeast-2/incoming/<transfer-id>/`입니다. 이곳은 **현재 객체는 생성 후 7일, 이전 버전은 비현재 상태가 된 뒤 7일에 만료되는 비공개 수신함**이며 운영 백업 저장소가 아닙니다. 버킷 생성과 호스트의 읽기 검증은 끝났지만 SUMZ711님 계정의 실제 업로드는 아직 시험하지 않았습니다. 협의한 전환 시점에 기존 writer·수집기와 자동 재시작을 멈춥니다. 표준 백업 묶음에 DB와 업로드가 모두 들어 있으면 중복 전달하지 않습니다. 그렇지 않다면 SQLite Backup API로 일관된 DB 사본과 같은 시점의 업로드를 준비합니다. 어느 형식이든 건수·ID·receipt·체크섬·cutoff를 확인할 수 있는 비공개 manifest가 필요합니다. 실제 자료를 찾지 못하면 빈 DB나 seed로 대신하지 않습니다. 복원과 대조가 끝날 때까지 원본 DB·파일을 삭제하지 않습니다. [이전 순서](https://github.com/EVNSolution/EVN-MARKETING/blob/7aa6ca187ddffd8d3e1b27524ab72acaf207ac18/docs/dedicated-server-plan.md#L76-L87), [복원 기준](https://github.com/EVNSolution/EVN-MARKETING/blob/7aa6ca187ddffd8d3e1b27524ab72acaf207ac18/docs/backup-recovery.md).
 
-```caddyfile
-marketing.cleversystem.ai {
-	reverse_proxy 127.0.0.1:3080
+승인된 AWS 인증으로만 다음과 같이 업로드합니다. 이는 **파일 형식의 예시**이며, 디렉터리 형식의 표준 묶음이면 작업 에이전트가 실제 구조와 복원 방식을 확인해 내용 전체를 보존하여 전송합니다. `TRANSFER_ID`, `BACKUP_FILE`, `MANIFEST_FILE`은 실제 이관 식별자와 확정된 파일 경로로 설정합니다. 업로드 파일이 별도일 때만 `UPLOADS_FILE`도 설정합니다. 명령과 결과에 개인정보나 비밀값을 남기지 않습니다. 실제 백업 파일명과 확장자를 그대로 유지하고 암호화 백업을 `marketing.sqlite`로 바꿔 부르지 않습니다. 첫 PC 자료 이전은 실제 백업 형식을 확인한 뒤 수행하는 별도 관리자 절차입니다. 운영용 `data-ops.py`는 아직 없는 `release.json`을 요구하므로 첫 이전에 곧바로 실행하거나 그 파일을 임의로 만들지 않습니다. 기존 PC 백업이 표준 묶음 형식이면 그 구조와 검증 방법을 참고할 수 있으나 같은 운영 래퍼를 바로 재사용한다고 단정하지 않습니다. 버킷의 SSE-KMS는 **S3 서버 측 암호화**이며 기존 클라이언트 암호화와 다릅니다. 기존 암호화 백업을 쓰려면 형식·복원 방법을 알려주시고 키는 기존 보안 경로로만 전달해 주세요.
 
-	handle_errors 502 {
-		respond "서비스 준비 중" 503
-	}
-}
+```bash
+: "${TRANSFER_ID:?}" "${BACKUP_FILE:?}" "${MANIFEST_FILE:?}"
+aws s3 cp "$BACKUP_FILE" "s3://evn-marketing-migration-902837199612-ap-northeast-2/incoming/$TRANSFER_ID/db/$(basename "$BACKUP_FILE")" --region ap-northeast-2
+if [ -n "${UPLOADS_FILE:-}" ]; then
+  aws s3 cp "$UPLOADS_FILE" "s3://evn-marketing-migration-902837199612-ap-northeast-2/incoming/$TRANSFER_ID/uploads/$(basename "$UPLOADS_FILE")" --region ap-northeast-2
+fi
+aws s3 cp "$MANIFEST_FILE" "s3://evn-marketing-migration-902837199612-ap-northeast-2/incoming/$TRANSFER_ID/manifest/$(basename "$MANIFEST_FILE")" --region ap-northeast-2
 ```
 
-**1. 이미지 보완과 웹 서비스 최초 설치.** 현 runtime digest `sha256:5d8ad2c79b670af171d522dc1d2d6d458335bd364e63fcb567da802cae0c52ab`는 High 10, operations `sha256:8224a35aa6e597893efca64cb27a1fb9fba9f028c3364a4d5371c3596fb349dc`는 High 2로 PR #19의 `scan_clean()`을 통과하지 못했습니다. 이 이미지들은 병합 전 PR head `c3c9e443…` 기준 게시물이므로 tree가 같더라도 새 `main` SHA의 이미지 증거가 아닙니다. Debian 공식 기록의 [libxml2](https://security-tracker.debian.org/tracker/CVE-2026-86139), [expat](https://security-tracker.debian.org/tracker/CVE-2026-93990), [perl](https://security-tracker.debian.org/tracker/CVE-2026-82560), [zlib](https://security-tracker.debian.org/tracker/CVE-2026-85091) 상태와 실제 이미지 audit 결과를 구분합니다. 정확한 amd64 이미지 감사에서 Pod::Text는 양쪽에, Python libxml2 바인딩은 runtime에 없었지만 Chromium은 libexpat·zlib·libgbm을 실제 로드하며 libxml2도 설치 의존 사슬에 있습니다. 이 사실은 High 전체 해결이나 삭제 안전성의 증거가 아닙니다. 새 이미지 빌드·게시·패키지 변경은 아직 없으며 보안 예외도 승인되지 않았습니다. 지원되는 stable 수정이나 검증된 이미지 보완을 검토하되, 무작정 패키지를 삭제하거나 검사를 완화하지 마세요. 최신 `main`에서 Linux amd64 runtime·operations 이미지를 만들고 각각 새 digest, ECR 검사 완료 및 기존 기준 통과, 필요한 Chromium/SQLite 회귀를 확인해 주세요. [이미지·호스트 절차](https://github.com/EVNSolution/EVN-MARKETING/blob/6987e16c2e3342910c7e2c1b4a10915308aa0e40/docs/cloud-release.md).
+**자료가 도착하면 실제 자료 복원과 서비스 시작을 진행합니다.** 작업 에이전트는 승인된 자료를 암호화된 볼륨에 복원하고 원본 건수·ID·receipt·업로드 파일과 대조합니다. 최종 이미지와 실제 DB를 검증한 다음 controller bootstrap으로 수집·전송을 끈 첫 웹 서비스를 시작하고, SUMZ711님과 기존 계정의 HTTPS 로그인을 확인합니다. 추가 인증이 필요하면 본인이 협조합니다. `manual-dispatch`로 첫 설치를 대신하거나 기존 계정을 seed로 덮어쓰지 않습니다. 이후 전송을 끈 **단일** 실제 수집기를 확인하고 WARP 전송은 기존 check/pilot 범위를 통과한 뒤 활성화합니다. WARP 서버 설정은 변경하지 않습니다.
 
-호스트에는 Docker·AWS CLI·SSM·ECR 로그인 헬퍼와 네 비밀값 항목의 메타데이터가 이미 확인됐습니다(값은 읽지 않음). 현재 상태를 다시 확인한 뒤 controller·고정 config/state·systemd와 Docker 내부 Nginx의 blue/green 연결을 루프백 3080 뒤에 준비하세요. 실제 DB 복원과 두 이미지 digest·스캔을 검증한 뒤 PR #19에 추가된 [controller bootstrap](https://github.com/EVNSolution/EVN-MARKETING/blob/6987e16c2e3342910c7e2c1b4a10915308aa0e40/deploy/controller.py)으로 초기 active journal(현재 실행 버전 기록)을 수집·전송 off 상태에서 구성하세요. `manual-dispatch`로 첫 설치를 우회하지 마세요. 웹이 HTTPS에서 실제 나타나는지 따로 검증하고, 비밀값은 기존 보안 경로로만 주입하며 값을 보고서에 남기지 마세요.
+마지막으로 실제 수집과 웹 두 개가 겹치는 대표 상황을 한 번 측정해 2 GiB 호스트의 OOM·지속 swap·여유 메모리·처리시간을 기록합니다. 웹 각 384 MiB와 worker 768 MiB는 컨테이너 상한일 뿐 실제 호스트 사용량 증거가 아닙니다. 자료가 없으면 복원·기존 로그인·단일 수집·실부하 측정을 완료로 표시하지 않습니다. [측정 기준](https://github.com/EVNSolution/EVN-MARKETING/blob/7aa6ca187ddffd8d3e1b27524ab72acaf207ac18/docs/dedicated-server-plan.md#L101-L113).
 
-**2. 실제 자료와 기존 로그인.** 실제 원본 DB·업로드·수집기 위치와 자동 재시작 경로를 먼저 특정하세요. 두 작업공간에서 원본 DB를 찾지 못했다는 이전 기록은 데이터가 0건이라는 뜻이 아닙니다. 출처를 못 찾으면 빈 DB나 seed로 대체하지 마세요. 이관 시점을 협의하기 전에는 기존 수집기를 미리 중지하지 않습니다. 전환 시 모든 기존 writer·수집기 및 자동 재시작을 멈춘 것을 확인한 뒤 SQLite backup API와 같은 시점의 업로드를 보관하고, 건수·ID·receipt·파일 checksum·cutoff를 익명 요약과 비공개 manifest로 대조하세요. 암호화된 별도 볼륨에 복원해 무결성·파일·기존 계정 HTTPS 로그인까지 검증하고, 기존 계정을 seed로 덮어쓰지 마세요. SUMZ711 보고의 `409/406/3`과 실제 원본·복원 결과를 구분해 기록하세요. [이전 순서](https://github.com/EVNSolution/EVN-MARKETING/blob/6987e16c2e3342910c7e2c1b4a10915308aa0e40/docs/dedicated-server-plan.md#L76-L87), [복원](https://github.com/EVNSolution/EVN-MARKETING/blob/6987e16c2e3342910c7e2c1b4a10915308aa0e40/docs/backup-recovery.md).
-
-**3. 단일 수집기·WARP·2 GiB 실측.** 복원과 기존 로그인 이후 전송을 끈 단일 실제 수집기로 원본 로그인·신규 수집을 확인하고, WARP 전송은 기존 check/pilot 범위 검증 후 별도 활성화하세요. WARP 서버 설정을 이 PR에서 바꾸지 마세요. 웹 각 384 MiB와 worker 768 MiB는 컨테이너 상한이지 OS 포함 실사용량이 아닙니다. 실제 수집과 웹 두 개가 겹치는 대표 상황을 한 번 측정해 OOM 0, 지속 swap 0, 호스트 여유·처리시간을 기록하세요. 실패 시 수치를 보고하고 최소 보완안을 검토하며 무단으로 4 GiB 인스턴스로 바꾸지 마세요. [측정 기준](https://github.com/EVNSolution/EVN-MARKETING/blob/6987e16c2e3342910c7e2c1b4a10915308aa0e40/docs/dedicated-server-plan.md#L101-L113).
-
-완료 보고는 **(1) 정확한 최종 main SHA와 두 새 digest·스캔 및 실제 HTTPS 웹 상태, (2) 익명화된 원본·백업·복원 동일성 및 기존 계정 로그인, (3) 단일 수집·WARP 확인과 2 GiB 측정값**으로 나누어 주세요. 필요한 영향 범위 검사만 수행하고, 이미 끝난 CI 최적화·PR 정리의 재구현이나 반복 전체 CI, 7일 대기, 매번 30분 관측을 새 선결조건으로 만들지 마세요.
+완료 보고는 이미지·보안 검사와 실제 웹 상태, 익명화된 원본/백업/복원 대조 및 기존 계정 로그인, 단일 수집·WARP와 2 GiB 측정 결과를 구분해 작성합니다. 필요한 영향 범위 검사만 수행하고 이미 끝난 CI·PR 정리, 매번 30분 관측이나 7일 대기를 다시 요구하지 않습니다.
