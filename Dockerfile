@@ -1,6 +1,14 @@
-FROM node:22-trixie-slim AS build
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS nodebin
+
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS base
+COPY --from=nodebin /usr/local /usr/local
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl \
+    && groupmod -n node ubuntu && usermod -l node -d /home/node -m ubuntu \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS build
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates python3 make g++ \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -28,15 +36,13 @@ RUN test -n "$MARKETING_BUILD_REVISION" \
     && ./node_modules/.bin/esbuild scripts/warp-recovery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-recovery.mjs \
     && ./node_modules/.bin/esbuild workers/health.ts --bundle --platform=node --format=esm --packages=external --outfile=worker-health.mjs
 
-FROM node:22-trixie-slim AS operations
+FROM base AS operations
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app ./
 USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 
-FROM node:22-trixie-slim
+FROM base AS runtime
 ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app
 COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core

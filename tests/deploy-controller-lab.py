@@ -215,7 +215,10 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         docker('network', 'create', '--internal', 'evn-marketing')
         docker('volume', 'create', 'evn-marketing-data')
         docker('run', '-d', '--name', 'marketing-lab-registry', '-p', '127.0.0.1:5000:5000', 'registry:2')
-        docker('pull', 'nginx:1.28-alpine')
+        proxy_tag = '127.0.0.1:5000/evn-marketing-proxy:ci'
+        docker('build', '--builder', 'default', '--platform', 'linux/amd64', '-f', 'deploy/Dockerfile.proxy',
+               '-t', 'evn-marketing:proxy-ci', '-t', proxy_tag, str(ROOT))
+        docker('push', proxy_tag)
         fixture = root / 'fixture'
         shutil.copy(ROOT / 'tests/deploy-lab-worker.mjs', fixture / 'worker.mjs')
         (fixture / 'Dockerfile').write_text('FROM evn-marketing:ci\nUSER root\nARG REVISION\nRUN node -e "const f=require(\'fs\');const p=\'/app/schema-manifest.json\';const m=JSON.parse(f.readFileSync(p));m.revision=process.env.REVISION;f.writeFileSync(p,JSON.stringify(m))"\nCOPY worker.mjs /app/worker.mjs\nUSER node\n')
@@ -234,14 +237,14 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         docker('run', '--rm', '--network', 'none', '-v', 'evn-marketing-data:/data', 'evn-marketing:ci', 'node', '-e',
             "const D=require('better-sqlite3');const d=new D('/data/marketing.db');for(const id of ['synthetic-load-0','synthetic-load-1','synthetic-held'])d.prepare('INSERT INTO Customer(id,name,updatedAt) VALUES(?,?,?)').run(id,'Synthetic load',new Date().toISOString());d.close()")
         command('openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost', '-keyout', str(root/'tls/key.pem'), '-out', str(root/'tls/cert.pem'))
-        config = {'proxyImage':json.loads(docker('image','inspect','nginx:1.28-alpine'))[0]['RepoDigests'][0], 'repository': '127.0.0.1:5000/evn-marketing', 'publicUrl': 'https://localhost:3443', 'caFile': str(root/'tls/cert.pem'),
+        config = {'proxyImage':json.loads(docker('image','inspect',proxy_tag))[0]['RepoDigests'][0], 'repository': '127.0.0.1:5000/evn-marketing', 'publicUrl': 'https://localhost:3443', 'caFile': str(root/'tls/cert.pem'),
                   'volumeId': 'synthetic-compat-volume', 'volume': 'evn-marketing-data', 'network': 'evn-marketing', 'ebsVolumeId': 'vol-000001',
                   'collectorEnabled': False, 'warpDeliveryEnabled': False, 'minFreeMemoryMiB': 256, 'minFreeDiskMiB': 1024}
         (root/'config.json').write_text(json.dumps(config))
         # Start the separate TLS front first; its Docker DNS target may appear during bootstrap.
         tls = 'events {}\nhttp { access_log off; resolver 127.0.0.11 valid=1s ipv6=off; server { listen 3443 ssl; ssl_certificate /tls/cert.pem; ssl_certificate_key /tls/key.pem; location / { set $upstream evn-marketing-proxy; proxy_set_header Host $http_host; proxy_pass http://$upstream:8080; } } }'
         (root/'tls/nginx.conf').write_text(tls)
-        docker('run', '-d', '--name', 'marketing-lab-tls', '-p', '127.0.0.1:3443:3443', '-v', str(root/'tls') + ':/tls:ro', '-v', str(root/'tls/nginx.conf') + ':/etc/nginx/nginx.conf:ro', 'nginx:1.28-alpine')
+        docker('run', '-d', '--name', 'marketing-lab-tls', '-p', '127.0.0.1:3443:3443', '-v', str(root/'tls') + ':/tls:ro', '-v', str(root/'tls/nginx.conf') + ':/etc/nginx/nginx.conf:ro', 'evn-marketing:proxy-ci')
         docker('network', 'connect', 'evn-marketing', 'marketing-lab-tls')
         with m.host_lock(root):
             m.bootstrap_journal(root, a['revision'], a['digest'])
