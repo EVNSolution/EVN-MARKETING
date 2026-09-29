@@ -7,7 +7,7 @@ import { createClient } from '@libsql/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, releaseWorker, INQUIRY_SOURCE, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID } from '@/lib/inquiry-sync'
-import { checkWarpConnection, dispatchPendingWarp, pilotPendingWarp, warpActivityId, warpConfigured } from '@/lib/warp-delivery'
+import { checkWarpConnection, dispatchPendingWarp, pilotPendingWarp, warpActivityId, warpConfigured, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
 const keyOnly = { WARP_MARKETING_API_KEY: 'synthetic-test-key-never-used-in-production' }
@@ -52,12 +52,23 @@ async function main() {
   }
   try {
     assert.equal(warpConfigured(keyOnly), false)
+    assert.equal(warpConfigured({ WARP_DELIVERY_ENABLED: 'true' }), false)
     assert.equal(warpConfigured({ ...env, WARP_MARKETING_API_KEY: ` ${env.WARP_MARKETING_API_KEY}` }), false)
+    assert.deepEqual(warpDeliveryState({ warpDeliveredAt: now(), warpError: 'ignored' }), { status: 'delivered', label: '등록 완료', reason: null })
+    assert.deepEqual(warpDeliveryState({ warpDeliveredAt: null, warpError: null }), { status: 'pending', label: '등록 대기', reason: null })
+    assert.equal(warpDeliveryState({ warpDeliveredAt: null, warpError: 'warp_customer_conflict' }).status, 'blocked')
+    const retryState = warpDeliveryState({ warpDeliveredAt: null, warpError: 'private upstream body' })
+    assert.equal(retryState.status, 'retrying')
+    assert.doesNotMatch(retryState.reason!, /private|upstream/)
     assert.equal(warpActivityId('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'), warpActivityId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
     const first = await add(1, { sourceId: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', inquiryTime: '09:06' })
     await add(2, { companyScopeId: 'other-company' })
     await add(3)
+    assert.equal((await warpDeliverySummary(db, { WARP_DELIVERY_ENABLED: 'true' })).configured, true, 'web summary needs only nonsecret enabled intent')
+    assert.equal((await warpDeliverySummary(db, { WARP_DELIVERY_ENABLED: 'false' })).configured, false)
     await claimWorker(db, owner, now())
+    assert.deepEqual(await dispatchPendingWarp(db, owner, send, { WARP_DELIVERY_ENABLED: 'true' }, now), { configured: false, delivered: 0, failed: 0 })
+    assert.equal(calls, 0, 'enabled intent without the worker key never sends backlog')
     assert.deepEqual(await dispatchPendingWarp(db, owner, send, keyOnly, now), { configured: false, delivered: 0, failed: 0 })
     assert.equal(calls, 0, 'key alone never sends backlog')
     const beforeCheck = await db.inquiry.count()

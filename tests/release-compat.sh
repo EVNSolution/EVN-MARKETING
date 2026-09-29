@@ -17,7 +17,7 @@ cleanup() {
   docker network rm marketing-compat >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-docker pull nginx:1.28-alpine
+docker build --platform linux/amd64 -f deploy/Dockerfile.proxy -t evn-marketing:proxy-ci .
 mkdir "$compat_dir/previous"
 git archive "$release_a" | tar -x -C "$compat_dir/previous"
 # Only add native build tools to the historical recipe; its app source/lockfile stay pinned.
@@ -71,7 +71,7 @@ import { renderNginx } from './deploy/nginx-config.mjs';
 writeFileSync(`${process.argv[2]}/nginx/nginx.conf`, renderNginx({ active: { id: process.argv[3], slot: 'blue' } }));
 NODE
 docker run -d --name marketing-compat-proxy --network marketing-compat --network-alias proxy \
-  -v "$compat_dir/nginx:/etc/nginx:ro" nginx:1.28-alpine nginx -g 'daemon off;'
+  -v "$compat_dir/nginx:/etc/nginx:ro" evn-marketing:proxy-ci nginx -g 'daemon off;'
 docker exec marketing-compat-proxy nginx -t
 docker run -d --name marketing-compat-test --network marketing-compat \
   -v "$PWD:/src:ro" -v "$compat_dir/data:/data" -v "$compat_dir/control:/control" \

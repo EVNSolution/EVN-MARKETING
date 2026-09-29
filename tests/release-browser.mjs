@@ -63,7 +63,7 @@ async function login(page) {
   await page.locator('input[name=email]').fill('synthetic@example.invalid')
   await page.locator('input[name=password]').fill('synthetic-compat-only')
   await page.getByRole('button', { name: '로그인', exact: true }).click()
-  await page.waitForURL('**/customers')
+  await page.waitForURL(url => ['/customers', '/inquiries'].includes(url.pathname))
   await page.waitForLoadState('networkidle')
 }
 async function phase(name) {
@@ -216,6 +216,15 @@ try {
   assert.equal((await authenticated.request.get(base + document.path, { maxRedirects: 0 })).status(), 307, 'saved upload becomes inaccessible after logout')
 
   // This other context still has the session created by its old login action.
+  // Keep the old client through RSC navigation; an ordinary document always loads the active release.
+  await oldLogin.locator('nav a[href="/inquiries"]').evaluate(anchor => { anchor.href = '/customers?compat-list=1' })
+  const oldCustomerList = oldLogin.waitForResponse(response => new URL(response.url()).pathname === '/customers' && response.request().headers().rsc === '1')
+  await oldLogin.getByRole('link', { name: '문의 내역', exact: true }).click()
+  assert.equal((await oldCustomerList).headers()['x-marketing-release'], a, 'old session can still reach the local customer compatibility fixture')
+  await oldLogin.waitForURL(url => url.pathname === '/customers')
+  await oldLogin.waitForLoadState('networkidle')
+  // App layout persists across navigation; undo the fixture-only menu change before later expiry checks.
+  await oldLogin.getByRole('link', { name: '문의 내역', exact: true }).evaluate(anchor => { anchor.href = '/inquiries' })
   await oldLogin.locator('a[href="/customers/synthetic-edit"]').evaluate(anchor => { anchor.href = '/customers/synthetic-edit?returnTo=%2Finquiries' })
   const detailNavigation = oldLogin.waitForResponse(response => new URL(response.url()).pathname === '/customers/synthetic-edit' && response.request().headers().rsc === '1')
   await oldLogin.locator('a[href^="/customers/synthetic-edit?"]').click()

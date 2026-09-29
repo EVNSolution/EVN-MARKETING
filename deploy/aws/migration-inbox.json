@@ -1,0 +1,147 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Private, short-lived Marketing migration inbox and read-only host access",
+  "Parameters": {
+    "MarketingKmsKeyArn": {
+      "Type": "String",
+      "Default": "arn:aws:kms:ap-northeast-2:902837199612:key/c02f5dbb-a85d-40fa-bd59-e133a0a96cbc",
+      "Description": "Existing Marketing customer-managed KMS key ARN"
+    },
+    "MarketingHostRoleName": {
+      "Type": "String",
+      "Default": "EVN-Marketing-Host",
+      "Description": "Existing Marketing EC2 host IAM role name"
+    }
+  },
+  "Resources": {
+    "MigrationInbox": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": "evn-marketing-migration-902837199612-ap-northeast-2",
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {
+          "Rules": [
+            { "ObjectOwnership": "BucketOwnerEnforced" }
+          ]
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "aws:kms",
+                "KMSMasterKeyID": { "Ref": "MarketingKmsKeyArn" }
+              },
+              "BucketKeyEnabled": true
+            }
+          ]
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "ExpireMigrationObjects",
+              "Status": "Enabled",
+              "ExpirationInDays": 7,
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 7
+              },
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 1
+              }
+            }
+          ]
+        },
+        "Tags": [
+          { "Key": "Service", "Value": "evn-marketing" }
+        ]
+      }
+    },
+    "MigrationInboxTlsOnly": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": { "Ref": "MigrationInbox" },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                { "Fn::GetAtt": ["MigrationInbox", "Arn"] },
+                { "Fn::Sub": "arn:aws:s3:::${MigrationInbox}/*" }
+              ],
+              "Condition": {
+                "Bool": { "aws:SecureTransport": "false" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "MigrationInboxHostRead": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "EVNMarketingMigrationInboxRead",
+        "Roles": [
+          { "Ref": "MarketingHostRoleName" }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "ListIncomingOnly",
+              "Effect": "Allow",
+              "Action": "s3:ListBucket",
+              "Resource": { "Fn::GetAtt": ["MigrationInbox", "Arn"] },
+              "Condition": {
+                "StringLike": { "s3:prefix": "incoming/*" }
+              }
+            },
+            {
+              "Sid": "ReadIncomingObjectsOnly",
+              "Effect": "Allow",
+              "Action": "s3:GetObject",
+              "Resource": { "Fn::Sub": "arn:aws:s3:::${MigrationInbox}/incoming/*" }
+            },
+            {
+              "Sid": "DecryptInboxObjectsViaS3Only",
+              "Effect": "Allow",
+              "Action": "kms:Decrypt",
+              "Resource": { "Ref": "MarketingKmsKeyArn" },
+              "Condition": {
+                "StringEquals": {
+                  "kms:ViaService": "s3.ap-northeast-2.amazonaws.com"
+                },
+                "StringLike": {
+                  "kms:EncryptionContext:aws:s3:arn": [
+                    { "Fn::GetAtt": ["MigrationInbox", "Arn"] },
+                    { "Fn::Sub": "arn:aws:s3:::${MigrationInbox}/*" }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "BucketName": {
+      "Value": { "Ref": "MigrationInbox" }
+    },
+    "BucketUri": {
+      "Value": { "Fn::Sub": "s3://${MigrationInbox}/incoming/" }
+    }
+  }
+}

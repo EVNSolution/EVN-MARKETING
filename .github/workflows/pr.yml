@@ -64,6 +64,7 @@ jobs:
           done
           test "$started" = true
           docker exec marketing-smoke node /src/tests/readiness-http.mjs
+          docker exec marketing-smoke node /src/tests/mvp-browser.mjs
       - name: Two-image browser and concurrent upload compatibility
         if: steps.changes.outputs.compat == 'true'
         timeout-minutes: 12

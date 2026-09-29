@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Marketing-only host release coordinator. No DB restore, migration, or bootstrap."""
+"""Marketing-only host release coordinator. No DB restore or migration."""
 import argparse
 import contextlib
 from datetime import datetime
@@ -48,6 +48,23 @@ def atomic(path, data):
             os.close(fd)
     finally:
         temp.unlink(missing_ok=True)
+
+
+def bootstrap_journal(root, revision, digest):
+    require(SHA.fullmatch(revision) and DIGEST.fullmatch(digest), 'release_identity')
+    path = root / 'state' / 'release.json'
+    require(not path.is_symlink(), 'unsafe_host_permissions')
+    if path.exists():
+        state = json.loads(path.read_text())
+        active = state.get('active', {})
+        require(state.get('phase') == 'bootstrapping' and state.get('format') == 1
+                and active.get('revision') == revision and active.get('digest') == digest
+                and active.get('slot') == 'blue' and not any(
+                    state.get(key) for key in ('previous', 'origin', 'candidate')), 'bootstrap_state')
+        return
+    state = {'format': 1, 'phase': 'bootstrapping', 'active': {
+        'revision': revision, 'digest': digest, 'slot': 'blue', 'owner': str(uuid.uuid4())}, 'previous': None}
+    atomic(path, json.dumps(state, sort_keys=True) + '\n')
 
 
 @contextlib.contextmanager
@@ -134,12 +151,18 @@ class Controller:
 
     def identity(self, name, release):
         container = self.inspect(name)
-        image = json.loads(self.docker('image', 'inspect', self.image(release)))[0]
-        require(container['Image'] == image['Id'] and self.image(release) in image['RepoDigests']
-                and image['Architecture'] == 'amd64', 'image_identity')
+        image = self.image_identity(release)
+        require(container['Image'] == image['Id'], 'image_identity')
         mounts = [m for m in container['Mounts'] if m['Destination'] == '/data']
         require(len(mounts) == 1 and mounts[0].get('Name') == self.config['volume'], 'volume_identity')
         require(not container['State'].get('OOMKilled'), 'container_oom')
+
+    def image_identity(self, release):
+        image = json.loads(self.docker('image', 'inspect', self.image(release)))[0]
+        labels = image.get('Config', {}).get('Labels') or {}
+        require(self.image(release) in image['RepoDigests'] and image['Architecture'] == 'amd64'
+                and labels.get('org.opencontainers.image.revision') == release['revision'], 'image_identity')
+        return image
 
     def probe(self, release, public=False):
         if public:
@@ -234,7 +257,7 @@ class Controller:
             MARKETING_REVISION=release['revision'], MARKETING_IMAGE_DIGEST=release['digest'],
             MARKETING_VOLUME_ID=self.config['volumeId'], AUTH_URL=self.config['publicUrl'],
             NEXTAUTH_URL=self.config['publicUrl'], AUTH_TRUST_HOST='true',
-            WARP_DELIVERY_ENABLED='true' if worker and self.config['warpDeliveryEnabled'] else 'false',
+            WARP_DELIVERY_ENABLED='true' if self.config['warpDeliveryEnabled'] else 'false',
             INQUIRY_COLLECTOR_ENABLED='true' if worker else 'false')
         args = ['run', '-d', '--name', name, '--init', '--restart=no', '--network', self.config['network'],
                 '--label', 'evn.marketing.managed=true', '--label', 'evn.marketing.revision=' + release['revision'], '--memory', '768m' if worker else '384m',
@@ -307,6 +330,69 @@ class Controller:
         if self.config['collectorEnabled']:
             atomic(self.gate(release), 'active\n')
             os.chmod(self.gate(release), 0o644)
+
+    def bootstrap(self):
+        require(self.state['phase'] == 'bootstrapping' and not any(
+            self.state.get(key) for key in ('previous', 'origin', 'candidate')), 'bootstrap_state')
+        require(not self.config['collectorEnabled'] and not self.config['warpDeliveryEnabled'], 'bootstrap_workers_enabled')
+        active = self.state['active']
+        require(active['slot'] == 'blue', 'bootstrap_state')
+        network = json.loads(self.docker('network', 'inspect', self.config['network']))
+        volume = json.loads(self.docker('volume', 'inspect', self.config['volume']))
+        require(len(network) == len(volume) == 1 and network[0]['Name'] == self.config['network']
+                and volume[0]['Name'] == self.config['volume'] and volume[0]['Driver'] == 'local'
+                and not volume[0].get('Options'), 'bootstrap_storage')
+        self.docker('pull', self.image(active), timeout=300)
+        self.docker('pull', self.config['proxyImage'], timeout=300)
+        self.image_identity(active)
+        proxy_image = json.loads(self.docker('image', 'inspect', self.config['proxyImage']))[0]
+        require(self.config['proxyImage'] in proxy_image['RepoDigests']
+                and proxy_image['Architecture'] == 'amd64', 'proxy_identity')
+        names = set(self.docker('ps', '-a', '--format', '{{.Names}}').splitlines())
+        running = set(self.docker('ps', '--format', '{{.Names}}').splitlines())
+        web = self.web_name(active)
+        for name in running:
+            mounts = self.inspect(name).get('Mounts', [])
+            if any(mount.get('Name') == self.config['volume']
+                    or mount.get('Source') == volume[0].get('Mountpoint') for mount in mounts):
+                require(name == web, 'bootstrap_volume_busy')
+        require('evn-marketing-worker' not in names and 'evn-marketing-web-green' not in names,
+                'bootstrap_unknown_container')
+        if web in names:
+            item = self.inspect(web)
+            labels = item['Config'].get('Labels') or {}
+            ports = item['HostConfig'].get('PortBindings') or {}
+            require(labels.get('evn.marketing.managed') == 'true'
+                    and labels.get('evn.marketing.revision') == active['revision']
+                    and ports == {'3000/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3100'}]}
+                    and self.config['network'] in item['NetworkSettings']['Networks'], 'bootstrap_unknown_container')
+            self.identity(web, active)
+        proxy_name = 'evn-marketing-proxy'
+        if proxy_name in names:
+            item = self.inspect(proxy_name)
+            mounts = [mount for mount in item['Mounts'] if mount['Destination'] == '/etc/nginx']
+            require(item['Image'] == proxy_image['Id'] and self.config['proxyImage'] in proxy_image['RepoDigests']
+                    and (item['Config'].get('Labels') or {}).get('evn.marketing.managed') == 'true'
+                    and item['HostConfig'].get('PortBindings') == {'8080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3080'}]}
+                    and self.config['network'] in item['NetworkSettings']['Networks']
+                    and len(mounts) == 1 and mounts[0].get('Source') == str(self.root / 'nginx')
+                    and mounts[0].get('RW') is False, 'bootstrap_unknown_container')
+
+        self.check_schema(active, active)
+        self.lease_clear(active)
+        if web in names:
+            if not self.running(web):
+                self.docker('start', web)
+        else:
+            self.start(active)
+        self.healthy_web(active)
+        if proxy_name not in names:
+            self.docker('create', '--name', proxy_name, '--restart=no', '--network', self.config['network'],
+                        '--label', 'evn.marketing.managed=true', '-p', '127.0.0.1:3080:8080',
+                        '-v', str(self.root / 'nginx') + ':/etc/nginx:ro', self.config['proxyImage'])
+        self.proxy(active)
+        self.healthy_web(active, public=True)
+        self.save(phase='stable')
 
     def proxy_workers(self):
         return self.docker('exec', 'evn-marketing-proxy', 'sh', '-c',
@@ -499,21 +585,39 @@ class Controller:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['release', 'rollback', 'recover', 'expire'])
+    parser.add_argument('operation', choices=['bootstrap', 'release', 'rollback', 'recover', 'expire'])
     parser.add_argument('--revision', default='')
     parser.add_argument('--digest', default='')
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
-        require(args.operation == 'release' or not (args.revision or args.digest), 'arguments')
+        require(args.operation in ('bootstrap', 'release') or not (args.revision or args.digest), 'arguments')
         require(ROOT.is_dir() and (ROOT / 'state').is_dir(), 'bootstrap_required')
         require(os.geteuid() == 0, 'host_administrator_required')
-        for entry in (ROOT, ROOT / 'state', ROOT / 'config.json', ROOT / 'state' / 'release.json'):
+        release_file = ROOT / 'state' / 'release.json'
+        require(not release_file.is_symlink(), 'unsafe_host_permissions')
+        entries = [ROOT, ROOT / 'state', ROOT / 'config.json']
+        if args.operation == 'bootstrap':
+            entries += [ROOT / 'deploy', ROOT / 'deploy' / 'controller.py', ROOT / 'deploy' / 'nginx-config.mjs',
+                        ROOT / 'releases', ROOT / 'nginx']
+        if release_file.exists() or args.operation != 'bootstrap':
+            entries.append(release_file)
+        paths = set(entries)
+        for entry in entries:
+            paths.update(entry.parents)
+        for entry in paths:
             metadata = entry.lstat()
             require(not entry.is_symlink() and metadata.st_uid == 0 and not metadata.st_mode & 0o022, 'unsafe_host_permissions')
         with host_lock(ROOT):
+            if args.operation == 'bootstrap':
+                config = json.loads((ROOT / 'config.json').read_text())
+                require(config.get('collectorEnabled') is False and config.get('warpDeliveryEnabled') is False,
+                        'bootstrap_workers_enabled')
+                bootstrap_journal(ROOT, args.revision, args.digest)
             controller = Controller()
-            if args.operation == 'release':
+            if args.operation == 'bootstrap':
+                controller.bootstrap()
+            elif args.operation == 'release':
                 controller.release(args.revision, args.digest)
             elif args.operation == 'rollback':
                 controller.release('', '', rollback=True)
