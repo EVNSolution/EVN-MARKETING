@@ -10,10 +10,8 @@ type Inquiry = {
   id: string
   inquiryDate: string
   inquiryTime: string
-  sourceStatus: string | null
   name: string | null
   phone: string
-  manualRegistrationAllowed: boolean
   warpDelivery: { status: 'delivered' | 'pending' | 'blocked' | 'retrying' | 'queued'; label: string; reason: string | null }
 }
 
@@ -35,7 +33,6 @@ type InquiryResponse = {
   rows: Inquiry[]
   warp: { configured: boolean; delivered: number; pending: number; failed: number }
   pagination: { page: number; limit: number; total: number; totalPages: number }
-  filters: { statuses: string[]; hasEmptyStatus: boolean }
   sync: {
     currentStatus: string
     lastSuccessfulAt: string | null
@@ -82,7 +79,9 @@ function kst(value: string | null) {
 export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const queryString = searchParams.toString()
+  const queryParams = new URLSearchParams(searchParams.toString())
+  queryParams.delete('status')
+  const queryString = queryParams.toString()
   const [data, setData] = useState<InquiryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -92,7 +91,6 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
   const [registrationMessages, setRegistrationMessages] = useState<Record<string, string>>({})
   const [from, setFrom] = useState(searchParams.get('from') ?? '')
   const [to, setTo] = useState(searchParams.get('to') ?? '')
-  const [status, setStatus] = useState(searchParams.get('status') ?? '')
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
   const registrationRequests = useRef(new Set<string>())
   const request = useRef<{ id: number; controller: AbortController } | null>(null)
@@ -136,7 +134,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
   }, [load])
 
   const navigate = (changes: Record<string, string | null>) => {
-    const next = new URLSearchParams(searchParams.toString())
+    const next = new URLSearchParams(queryString)
     for (const [key, value] of Object.entries(changes)) {
       if (value) next.set(key, value)
       else next.delete(key)
@@ -146,7 +144,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
 
   const submitFilters = (event: FormEvent) => {
     event.preventDefault()
-    navigate({ from, to, status, q: query.trim(), page: '1' })
+    navigate({ from, to, q: query.trim(), page: '1' })
   }
 
   const requestSync = async () => {
@@ -167,7 +165,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
   }
 
   const requestWarpRegistration = async (row: Inquiry) => {
-    if (registrationRequests.current.has(row.id) || !row.manualRegistrationAllowed || row.warpDelivery.status === 'queued') return
+    if (registrationRequests.current.has(row.id) || row.warpDelivery.status === 'queued') return
     registrationRequests.current.add(row.id)
     setRegisteringIds((ids) => [...ids, row.id])
     setRegistrationMessages((messages) => ({ ...messages, [row.id]: '등록 요청 중입니다.' }))
@@ -265,15 +263,6 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
             <input type="date" value={to} onChange={(event) => setTo(event.target.value)}
               className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400" />
           </label>
-          <label className="grid gap-1 text-[11px] font-semibold text-slate-500">
-            상담상태
-            <select value={status} onChange={(event) => setStatus(event.target.value)}
-              className="h-9 min-w-32 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400">
-              <option value="">전체</option>
-              {data?.filters.hasEmptyStatus && <option value="__empty__">상태 없음</option>}
-              {data?.filters.statuses.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-          </label>
           <label className="grid min-w-52 flex-1 gap-1 text-[11px] font-semibold text-slate-500">
             검색
             <span className="relative">
@@ -302,7 +291,6 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                 <tr className="border-b border-slate-200 bg-white text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">
                   <th className="px-4 py-3">문의일자</th>
                   <th className="px-4 py-3">문의시간</th>
-                  <th className="px-4 py-3">상담상태</th>
                   <th className="px-4 py-3">성함</th>
                   <th className="px-4 py-3">연락처</th>
                   <th className="px-4 py-3">WARP CRM</th>
@@ -313,7 +301,6 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                   <tr key={row.id} className="transition-colors hover:bg-slate-50">
                     <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">{row.inquiryDate}</td>
                     <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{row.inquiryTime}</td>
-                    <td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{row.sourceStatus ?? '—'}</span></td>
                     <td className="px-4 py-3 font-medium text-slate-700">{row.name ?? '—'}</td>
                     <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{row.phone}</td>
                     <td className="px-4 py-3">
@@ -321,8 +308,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                         <span className="rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">등록완료</span>
                       ) : isAdmin ? (
                         <button type="button" onClick={() => void requestWarpRegistration(row)}
-                          disabled={registeringIds.includes(row.id) || !row.manualRegistrationAllowed || row.warpDelivery.status === 'queued'}
-                          title={!row.manualRegistrationAllowed ? row.warpDelivery.reason ?? row.warpDelivery.label : undefined}
+                          disabled={registeringIds.includes(row.id) || row.warpDelivery.status === 'queued'}
                           className="rounded-lg bg-slate-800 px-3 py-1.5 font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45">
                           {row.warpDelivery.status === 'queued' ? '등록중' : '등록하기'}
                         </button>

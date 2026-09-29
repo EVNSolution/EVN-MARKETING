@@ -17,11 +17,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (result === 'delivered') return NextResponse.json({ delivered: true })
     const messages = {
       not_found: '문의를 찾을 수 없습니다.',
-      name_required: '이름이 없는 고객은 WARP의 신원미상 이름 처리 적용 후 등록할 수 있습니다.',
       worker_offline: '수집 연결을 확인한 뒤 다시 등록해 주세요.',
       connection_backoff: 'WARP 연결 오류로 등록을 잠시 대기 중입니다. 최근 오류 발생 후 1시간 뒤 다시 시도해 주세요.',
     }
-    return NextResponse.json({ error: messages[result] }, { status: result === 'not_found' ? 404 : result === 'name_required' ? 409 : 503 })
+    return NextResponse.json({ error: messages[result] }, { status: result === 'not_found' ? 404 : 503 })
   } catch {
     return NextResponse.json({ error: '등록 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.' }, { status: 500 })
   }
