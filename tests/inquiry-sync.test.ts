@@ -98,7 +98,11 @@ function testValidation() {
   assert.equal(inquirySyncStatus({ ...waitingForLogin, status: 'success' }, 'pending', now), 'pending')
   assert.equal(inquirySyncStatus({ ...waitingForLogin, status: 'success' }, undefined, now), 'success')
   const row = normalizeInquiry(makeRow(1, { name: '-', sourceStatus: '상태 선택', inquiryDate: '2026-09-15 (화)' }))
-  assert.equal(row.name, null)
+  assert.equal(row.name, '미상(📞 0001)')
+  for (const name of [null, '', '   ', ' - ']) {
+    assert.equal(normalizeInquiry(makeRow(1, { name, phone: '010-1234-5678' })).name, '미상(📞 5678)')
+  }
+  assert.equal(normalizeInquiry(makeRow(1, { name: ' 실제 성함 ' })).name, '실제 성함')
   assert.equal(row.sourceStatus, null)
   assert.equal(row.inquiryDate, '2026-09-15')
   assert.throws(() => normalizeInquiry(makeRow(1, { inquiryDate: '2026-02-30' })), /invalid_date/)
@@ -133,7 +137,7 @@ async function testSync(prisma: PrismaClient) {
   assert.equal(firstResult.updatedCount, 0)
   await finishRun(prisma, claimed.id, claimed.owner, firstResult, new Date('2026-09-15T00:01:00Z'))
   assert.equal(await prisma.inquiry.count(), 205)
-  assert.equal((await prisma.inquiry.findUniqueOrThrow({ where: { source_companyScopeId_homepageScopeId_sourceId: scopeKey(baselineRows[2].sourceId) } })).name, null)
+  assert.equal((await prisma.inquiry.findUniqueOrThrow({ where: { source_companyScopeId_homepageScopeId_sourceId: scopeKey(baselineRows[2].sourceId) } })).name, '미상(📞 0002)')
   assert.equal(await prisma.inquiry.count({ where: { phone: baselineRows[0].phone } }), 2, 'same phone remains two distinct source inquiries')
 
   const repeat = await enqueueSync(prisma, 'manual', '2026-09-15')

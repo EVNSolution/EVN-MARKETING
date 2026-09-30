@@ -14,7 +14,7 @@
     "test:data-recovery": "tsx tests/data-recovery.test.ts",
     "test:backup": "node tests/data-backup.test.mjs && python3 tests/data-ops.test.py",
     "test:warp-recovery": "tsx tests/warp-recovery.test.ts",
-    "test:inquiries": "tsx tests/inquiry-sync.test.ts && tsx tests/mleverage-source.test.ts",
+    "test:inquiries": "tsx tests/inquiry-sync.test.ts && tsx tests/mleverage-source.test.ts && tsx tests/inquiry-management-actions.test.ts",
     "test:server-runtime": "tsx tests/server-runtime.test.ts && tsx tests/readiness.test.ts",
     "test:upload-security": "tsx tests/upload-security.test.ts",
     "test:upload-processes": "tsx tests/upload-processes.test.ts",
@@ -27,7 +27,11 @@
     "test:integration-contract": "node scripts/verify-direct-integration-contract.mjs evn-marketing",
     "worker:inquiries": "tsx workers/inquiry-sync.ts",
     "preview:inquiries": "tsx tests/setup-inquiry-preview.ts",
-    "warp:delivery": "tsx scripts/warp-delivery.ts"
+    "warp:delivery": "tsx scripts/warp-delivery.ts",
+    "deploy:check": "python3 deploy/aws/operator-release.py check",
+    "deploy:publish": "python3 deploy/aws/operator-release.py publish",
+    "deploy": "python3 deploy/aws/operator-release.py release",
+    "deploy:rollback": "python3 deploy/aws/operator-release.py rollback"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

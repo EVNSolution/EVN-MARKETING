@@ -86,7 +86,7 @@
     "Explicit deletion of the receipt activity or its customer ends replay protection and a later delivery can recreate records.",
     "An exact unique normalized primary phone match receives a new activity; do not overwrite its customer profile.",
     "Multiple primary phone matches return ambiguous_phone and create no record.",
-    "For a new customer, use the trimmed source name or WARP's unknownCustomerName with the source phone when blank; preserve the raw source name and source status in activity content. Never overwrite a matching customer's profile.",
+    "Marketing fills missing inquiry names with WARP's unknownCustomerName using the phone before saving or sending, including legacy blanks at read/send time. The receiver uses the supplied name (or its own fallback when blank) and preserves the received name and source status in activity content. Never overwrite a matching customer's profile.",
     "Read and append only within the fixed source scope. No arbitrary customer updates or deletion.",
     "Interpret original date and minute as Asia/Seoul for CRM date fields and preserve the original strings in activity content."
   ]

@@ -42,7 +42,7 @@ async function main() {
     const body = JSON.parse(String(init?.body))
     assert.deepEqual(Object.keys(body).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'sourceId', 'inquiryDate', 'inquiryTime', 'sourceStatus', 'name', 'phone'].sort())
     assert(Object.values(body).every((field) => typeof field === 'string'), 'all nine fields are strings')
-    assert.equal(body.name, '')
+    assert.equal(body.name, '미상(📞 0000)')
     assert.equal(body.sourceStatus, '')
     assert.equal(body.companyScopeId, scope.companyScopeId)
     assert.equal(body.sourceId, body.sourceId.toLowerCase())
@@ -140,8 +140,8 @@ async function main() {
       assert.equal(await db.customer.count(), 1, 'actual receiver attaches both inquiries to one customer')
       assert.equal(await db.customerActivity.count(), 2)
       assert.equal((await db.customer.findFirstOrThrow({ select: { name: true } })).name, '미상(📞 0000)')
-      assert((await db.customerActivity.findMany({ select: { content: true } })).every(activity => activity.content?.includes('성함: \n')),
-        'actual receiver keeps the blank source name in each activity')
+      assert((await db.customerActivity.findMany({ select: { content: true } })).every(activity => activity.content?.includes('성함: 미상(📞 0000)')),
+        'actual receiver keeps the generated sender name in each activity')
       const acknowledged = await db.inquiry.findFirstOrThrow({ where: { ...scope, sourceId: sourceId(8) } })
       await db.inquiry.update({ where: { id: acknowledged.id }, data: { warpDeliveredAt: null, warpAttemptedAt: null } })
       assert.equal((await dispatchPendingWarp(db, owner, connected, env, now)).delivered, 1)

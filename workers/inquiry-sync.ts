@@ -42,6 +42,7 @@ async function main() {
       automaticLogin: source.automaticLogin,
       readSourceCredentials: credentials.readSourceCredentials,
       readSourcePage: source.readSourcePage,
+      markSourceManaging: source.markSourceManaging,
       koreaDate: sync.koreaDate,
     }
     return await runInquiryWorker({ enabled, signal: controller.signal, dependencies, owner, workAllowed: workerActivationAllowed })

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
 import { warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
+import { inquiryCustomerName } from '@/lib/format'
 import {
   INQUIRY_COMPANY_ID,
   INQUIRY_HOMEPAGE_ID,
@@ -94,6 +95,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       rows: rows.map(({ warpDeliveredAt, warpError, ...row }) => ({
         ...row,
+        name: inquiryCustomerName(row.name, row.phone),
         warpDelivery: warpDeliveryState({ warpDeliveredAt, warpError }),
       })),
       warp,

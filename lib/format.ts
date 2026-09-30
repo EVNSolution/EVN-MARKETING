@@ -55,3 +55,9 @@ export function unknownCustomerName(opts: { region?: string; plateNo?: string; p
   if (plate4) return `미상(${regionPart}🚚 ${plate4})`
   return '미상'
 }
+
+/** 원본에 성함이 없으면 WARP와 같은 전화번호 기반 이름을 사용한다. */
+export function inquiryCustomerName(name: string | null | undefined, phone: string): string {
+  const trimmed = name?.trim()
+  return trimmed && trimmed !== '-' ? trimmed : unknownCustomerName({ phone })
+}

@@ -101,7 +101,7 @@ function runPackagedPilot(expectedCalls) {
       assert.equal(init.method, 'POST');
       assert.equal(init.redirect, 'error');
       assert.equal(new Headers(init.headers).get('x-api-key'), process.env.WARP_MARKETING_API_KEY);
-      assert.deepEqual(JSON.parse(init.body), ${JSON.stringify(inquiry)});
+      assert.deepEqual(JSON.parse(init.body), ${JSON.stringify({ ...inquiry, name: '미상(📞 0000)' })});
       return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: ${JSON.stringify(activityId)}, created: calls === 1, duplicate: calls === 2 });
     };
     process.once('exit', () => assert.equal(calls, ${expectedCalls}, 'packaged pilot fetch count'));
@@ -119,6 +119,7 @@ assert.equal(pilot.stderr, '')
 const pilotDb = new Database('/data/marketing.db')
 try {
   const receipt = pilotDb.prepare('SELECT * FROM Inquiry WHERE id = ?').get('synthetic-inquiry')
+  assert.equal(receipt.name, null, 'delivery fills the wire name without rewriting the legacy source record')
   assert.equal(receipt.warpCustomerId, 'synthetic-customer')
   assert.equal(receipt.warpActivityId, activityId)
   assert.ok(receipt.warpDeliveredAt)

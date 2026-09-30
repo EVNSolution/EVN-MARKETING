@@ -7,6 +7,7 @@ import {
   SyncError,
   type ReconcileResult,
   type SourcePage,
+  type RawInquiry,
 } from '@/lib/inquiry-sync'
 
 const POLL_MS = 15_000
@@ -39,6 +40,7 @@ export type WorkerDependencies = {
     fetchPage: (page: number, previousFirstPageIds?: string[]) => Promise<SourcePage>,
     now?: () => Date,
     signal?: AbortSignal,
+    afterSaved?: (row: RawInquiry) => Promise<void>,
   ) => Promise<ReconcileResult>
   finishRun: (db: PrismaClient, runId: string, owner: string, result: ReconcileResult) => Promise<unknown>
   dispatchPendingWarp: (db: PrismaClient, owner: string, signal?: AbortSignal) => Promise<unknown>
@@ -48,6 +50,7 @@ export type WorkerDependencies = {
   automaticLogin: (page: Page, credentials: Credentials) => Promise<boolean>
   readSourceCredentials: () => Promise<Credentials | null>
   readSourcePage: (page: Page, startDate: string, endDate: string, pageNumber: number, previousFirstPageIds?: string[]) => Promise<SourcePage>
+  markSourceManaging?: (page: Page, row: RawInquiry, signal: AbortSignal) => Promise<void>
   koreaDate: () => string
 }
 
@@ -226,6 +229,10 @@ export async function runInquiryWorker({
           ),
           undefined,
           signal,
+          deps.markSourceManaging ? async (row) => {
+            if (!(await workAllowed()) || signal.aborted) throw new SyncError('interrupted')
+            await deps.markSourceManaging!(launched.page, row, signal)
+          } : undefined,
         )
         if (result.errorType === 'lost_lease' || result.errorType === 'lost_worker_lease') throw new SyncError(result.errorType)
         if (signal.aborted) {

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { inquiryCustomerName } from '@/lib/format'
 import type { Prisma, PrismaClient } from '@/app/generated/prisma/client'
 
 export const INQUIRY_SOURCE = 'mleverage-admin'
@@ -59,14 +60,13 @@ export function normalizeInquiry(raw: RawInquiry): RawInquiry {
   const phone = raw.phone.trim()
   if (!phone || phone === '-') throw new SyncError('invalid_phone')
 
-  const name = raw.name?.trim()
   const sourceStatus = raw.sourceStatus?.trim()
   return {
     sourceId,
     inquiryDate: dateMatch[1],
     inquiryTime,
     sourceStatus: !sourceStatus || sourceStatus === '상태 선택' ? null : sourceStatus,
-    name: !name || name === '-' ? null : name,
+    name: inquiryCustomerName(raw.name, phone),
     phone,
   }
 }
@@ -265,6 +265,7 @@ export async function reconcile(
   fetchPage: (page: number, previousFirstPageIds?: string[]) => Promise<SourcePage>,
   now = () => new Date(),
   signal?: AbortSignal,
+  afterSaved?: (row: RawInquiry) => Promise<void>,
 ): Promise<ReconcileResult> {
   const outcomes = new Map<string, Outcome>()
   let pagesRead = 0
@@ -318,6 +319,12 @@ export async function reconcile(
           attemptPages++
           await updateRunCounts(db, runId, owner, expectedCount, pagesRead, outcomes, now())
           if (signal?.aborted) throw new SyncError('interrupted')
+          if (afterSaved) for (const row of rows) {
+            if (row.sourceStatus !== null && row.sourceStatus !== '접수') continue
+            await heartbeat(db, runId, owner, now())
+            if (signal?.aborted) throw new SyncError('interrupted')
+            await afterSaved(row)
+          }
 
           if (saved.reachedCutoff) {
             stoppedAtCutoff = true
