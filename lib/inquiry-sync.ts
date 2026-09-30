@@ -97,10 +97,14 @@ export function manualSyncError(
   if (!origin) return 400
   try {
     const expected = new URL(requestUrl)
-    if (host) expected.host = host.split(',')[0].trim()
     const forwardedProtocol = protocol?.split(',')[0].trim().replace(/:$/, '')
     if (forwardedProtocol && forwardedProtocol !== 'http' && forwardedProtocol !== 'https') return 400
     if (forwardedProtocol) expected.protocol = `${forwardedProtocol}:`
+    if (host) {
+      // URL.host preserves the old port when the public host omits one.
+      expected.port = ''
+      expected.host = host.split(',')[0].trim()
+    }
     return new URL(origin).origin === expected.origin ? null : 400
   } catch {
     return 400
