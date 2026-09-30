@@ -30,7 +30,7 @@ async function main() {
     await assert.rejects(lstat(database), { code: 'ENOENT' }, 'probe must not create an empty database')
     const connection = await new PrismaBetterSqlite3({ url: env.DATABASE_URL! }).connect()
     try {
-      for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
+      for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery', '20260930000100_warp_phone_check']) {
         await connection.executeScript(await readFile(`prisma/migrations/${migration}/migration.sql`, 'utf8'))
       }
       await connection.executeScript('PRAGMA journal_mode = WAL')

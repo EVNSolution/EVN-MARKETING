@@ -50,8 +50,8 @@ cmp "$compat_dir/rehearsal/before.json" "$compat_dir/rehearsal/after.json"
 cp "$compat_dir/data/.marketing-volume-id" "$compat_dir/restored/.marketing-volume-id"
 mv "$compat_dir/data" "$compat_dir/original"
 mv "$compat_dir/restored" "$compat_dir/data"
-docker run --rm --network none -v "$compat_dir/data:/data" -v "$compat_dir/previous-manifest.json:/previous.json:ro" \
-  -e DATABASE_URL=file:/data/marketing.db evn-marketing:ci node schema-check.mjs check schema-manifest.json /previous.json
+docker run --rm --network none -v "$PWD:/src:ro" -v "$compat_dir/data:/data" -v "$compat_dir/previous-manifest.json:/previous.json:ro" \
+  evn-marketing:ci node /src/tests/release-schema-rehearsal.mjs > "$compat_dir/rehearsal/schema-result.json"
 for slot in blue green; do
   image=evn-marketing:compat-a
   revision="$release_a"
@@ -115,7 +115,7 @@ for name in ('marketing-compat-blue','marketing-compat-green','marketing-compat-
 assert all(value > 0 for value in peaks.values())
 summary = {'ok':True,'synthetic':True,'sourceSha':os.environ['GITHUB_SHA'],
            'restore':json.loads((directory/'rehearsal/restore-result.json').read_text()),
-           'migrationUnchanged':True,'restoredBrowserChecks':True,
+           'schemaRehearsal':json.loads((directory/'rehearsal/schema-result.json').read_text()),'restoredBrowserChecks':True,
            'componentPeakBytes':peaks,'sumOfComponentPeaksBytes':sum(peaks.values()),
            'measurement':'cgroup-v2 high-water sum; not simultaneous usage or production sizing',
            'runtimeImage':subprocess.check_output(['docker','image','inspect','evn-marketing:ci','--format','{{.Id}}'],text=True).strip(),
@@ -123,8 +123,8 @@ summary = {'ok':True,'synthetic':True,'sourceSha':os.environ['GITHUB_SHA'],
 (pathlib.Path(os.environ['RUNNER_TEMP'])/'marketing-recovery-summary.json').write_text(json.dumps(summary,indent=2)+'\n')
 print(json.dumps(summary))
 PY
-docker run --rm --network none -v "$compat_dir/data:/data" -v "$compat_dir/previous-manifest.json:/previous.json:ro" \
-  -e DATABASE_URL=file:/data/marketing.db evn-marketing:ci node schema-check.mjs check schema-manifest.json /previous.json
+docker run --rm --network none -v "$PWD:/src:ro" -v "$compat_dir/data:/data" -v "$compat_dir/previous-manifest.json:/previous.json:ro" \
+  evn-marketing:ci node /src/tests/release-schema-rehearsal.mjs
 docker rm -f marketing-compat-blue
 docker exec marketing-compat-proxy nginx -t
 docker restart marketing-compat-proxy

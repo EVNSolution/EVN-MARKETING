@@ -1,24 +1,26 @@
 {
   "schema_version": 1,
   "contract_id": "warp-marketing-inquiries",
-  "status": "follow-up-owner-review-pending",
+  "status": "phone-check-owner-review-pending",
   "owner": "OziinG",
   "review": {
     "issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
-    "pull_request": "https://github.com/EVNSolution/EVN-WARP/pull/50",
+    "pull_request": "https://github.com/EVNSolution/EVN-WARP/pull/51",
     "required_before_production": true,
+    "phone_check_owner_review_required": true,
     "source_review_date": "2026-09-17",
     "activation_required": [
-      "Obtain Owner review of the follow-up generated display-name policy; Issue #48 and PR #49 reviewed the earlier blank-name policy.",
-      "Verify the caller repository uses this follow-up contract and passes its delivery tests.",
+      "Verify the caller repository uses this reviewed contract and passes its delivery tests.",
       "Provision the dedicated key through the approved secret-management path on both sides.",
-      "Verify an authenticated delivery, replay, and CRM readback before processing the backlog."
+      "Verify an authenticated delivery, replay, and CRM readback before processing the backlog.",
+      "Obtain Owner review for the phone-check capability and rejectExistingCustomer guard before deployment."
     ]
   },
   "authentication": {
     "header": "x-api-key",
     "environment": "WARP_MARKETING_API_KEY",
     "scope": "marketing.inquiry.append",
+    "read_scope": "marketing.customer-phone.exists",
     "existing_buildup_key_accepted": false
   },
   "repositories": {
@@ -56,6 +58,24 @@
           "token": "/api/external/marketing-inquiries"
         }
       }
+    },
+    {
+      "id": "warp.marketing-inquiry.check",
+      "method": "POST",
+      "path": "/api/external/marketing-inquiries/check",
+      "provider": "EVN-WARP",
+      "caller": "evn-marketing",
+      "capability": "marketing.customer-phone.exists",
+      "sources": {
+        "EVN-WARP": {
+          "file": "app/api/external/marketing-inquiries/check/route.ts",
+          "token": "export async function POST"
+        },
+        "evn-marketing": {
+          "file": "lib/warp-delivery.ts",
+          "token": "/api/external/marketing-inquiries/check"
+        }
+      }
     }
   ],
   "source_scope": {
@@ -74,6 +94,9 @@
     "name",
     "phone"
   ],
+  "optional_request_fields": {
+    "rejectExistingCustomer": true
+  },
   "response_fields": [
     "ok",
     "customerId",
@@ -81,12 +104,44 @@
     "created",
     "duplicate"
   ],
+  "phone_check": {
+    "request": {
+      "method": "POST",
+      "path": "/api/external/marketing-inquiries/check",
+      "max_body_bytes": 16384,
+      "fields": ["source", "companyScopeId", "homepageScopeId", "items"],
+      "items": {
+        "min": 1,
+        "max": 50,
+        "fields": ["sourceId", "phone"],
+        "sourceId": "unique UUID, case-insensitive",
+        "phone": "string, at most 40 characters, 9 to 15 normalized digits"
+      }
+    },
+    "response": {
+      "success": {
+        "ok": true,
+        "results": [
+          {
+            "sourceId": "lowercase request sourceId",
+            "exists": "boolean",
+            "receipt": "present only for the caller's deterministic retained inquiry activity"
+          }
+        ]
+      },
+      "errors": ["bad_payload", "unauthorized", "not_configured", "temporarily_unavailable"]
+    }
+  },
   "rules": [
     "One source inquiry creates exactly one customer activity while that activity is retained, including on retry; source UUID spelling is case-insensitive.",
     "Explicit deletion of the receipt activity or its customer ends replay protection and a later delivery can recreate records.",
     "An exact unique normalized primary phone match receives a new activity; do not overwrite its customer profile.",
     "Multiple primary phone matches return ambiguous_phone and create no record.",
-    "Marketing fills missing inquiry names with WARP's unknownCustomerName using the phone before saving or sending, including legacy blanks at read/send time. The receiver uses the supplied name (or its own fallback when blank) and preserves the received name and source status in activity content. Never overwrite a matching customer's profile.",
+    "Phone checks scan every Customer primary phone without writing and expose no customer identifiers unless the deterministic source inquiry activity already exists.",
+    "Normalize non-digits and equivalent Korean mobile forms +82 10XXXXXXXX and 010XXXXXXXX for both append matching and checks.",
+    "When rejectExistingCustomer is true, replay lookup runs first and any existing normalized primary phone returns phone_exists without writes inside the writer-reserved transaction.",
+    "Marketing supplies unknownCustomerName(phone) before read, send, and save when its source name is blank; the provider preserves legacy blank names when a blank name is still received.",
+    "Unknown names remain blank; source status remains in activity content.",
     "Read and append only within the fixed source scope. No arbitrary customer updates or deletion.",
     "Interpret original date and minute as Asia/Seoul for CRM date fields and preserve the original strings in activity content."
   ]

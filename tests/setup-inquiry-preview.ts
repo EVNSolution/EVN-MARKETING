@@ -25,6 +25,7 @@ async function main() {
   await sql.executeMultiple(await readFile(path.join(process.cwd(), 'prisma/migrations/20260915000100_baseline/migration.sql'), 'utf8'))
   await sql.executeMultiple(await readFile(path.join(process.cwd(), 'prisma/migrations/20260915000200_inquiry_sync/migration.sql'), 'utf8'))
   await sql.executeMultiple(await readFile(path.join(process.cwd(), 'prisma/migrations/20260915000300_warp_delivery/migration.sql'), 'utf8'))
+  await sql.executeMultiple(await readFile(path.join(process.cwd(), 'prisma/migrations/20260930000100_warp_phone_check/migration.sql'), 'utf8'))
   await sql.close()
 
   const prisma = new PrismaClient({ adapter: new PrismaLibSql({ url: databaseUrl }) })

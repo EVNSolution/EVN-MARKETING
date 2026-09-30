@@ -76,7 +76,7 @@ function matchRows(rows: Row[], expected: PlanRow[]) {
   })
 }
 
-// No remote read API exists: planning reads only explicitly selected local rows and never sends.
+// Recovery planning reads only explicitly selected local rows; it deliberately performs no remote checks or sends.
 export async function planWarpRecovery(db: PrismaClient, sourceIds: unknown, now = new Date()): Promise<RecoveryPlan> {
   validateRecoveryIds(sourceIds)
   const rows = await selectedRows(db, sourceIds)
