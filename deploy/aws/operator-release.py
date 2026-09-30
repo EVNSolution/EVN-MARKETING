@@ -126,7 +126,7 @@ def publish_image(revision):
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
     if archive.returncode:
         raise RuntimeError("cannot archive the pinned source")
-    build = subprocess.run(["docker", "build", "--platform", "linux/amd64", "--build-arg",
+    build = subprocess.run(["docker", "build", "--platform", "linux/amd64", "--provenance=false", "--build-arg",
                             "MARKETING_BUILD_REVISION=" + revision, "--label",
                             "org.opencontainers.image.revision=" + revision, "--label",
                             "org.opencontainers.image.source=https://github.com/" + release.REPOSITORY,
