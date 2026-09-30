@@ -116,6 +116,23 @@ function testValidation() {
   assert.equal(manualSyncError('admin', 'http://localhost:3100/api/inquiries/sync', 'http://127.0.0.1:3100', '127.0.0.1:3100'), null)
   assert.equal(manualSyncError('admin', 'http://localhost:3100/api/inquiries/sync', 'https://other.invalid', '127.0.0.1:3100'), 400)
   assert.equal(manualSyncError('admin', 'http://localhost:3100/api/inquiries/sync', 'http://127.0.0.1:3100', '127.0.0.1:3100', 'file'), 400)
+  // The HTTPS proxy replaces the internal host AND port for both inquiry POST routes.
+  for (const pathname of ['/api/inquiries/sync', '/api/inquiries/example/warp-registration']) {
+    const requestUrl = `http://localhost:3000${pathname}`
+    for (const [host, protocol, origin, result] of [
+      ['marketing.example.invalid', 'https', 'https://marketing.example.invalid', null],
+      ['marketing.example.invalid:443', 'https', 'https://marketing.example.invalid', null],
+      ['marketing.example.invalid:8443', 'https', 'https://marketing.example.invalid:8443', null],
+      ['marketing.example.invalid:80', 'https', 'https://marketing.example.invalid:80', null],
+      ['marketing.example.invalid', 'http', 'http://marketing.example.invalid', null],
+      ['marketing.example.invalid', 'https', 'https://marketing.example.invalid:3000', 400],
+      ['marketing.example.invalid', 'https', 'http://marketing.example.invalid', 400],
+      ['marketing.example.invalid', 'https', 'https://other.invalid', 400],
+    ] as const) {
+      assert.equal(manualSyncError('admin', requestUrl, origin, host, protocol), result, `${pathname}: ${origin}`)
+    }
+    assert.equal(manualSyncError('admin', requestUrl, null, 'marketing.example.invalid', 'https'), 400)
+  }
 }
 
 async function testSync(prisma: PrismaClient) {
