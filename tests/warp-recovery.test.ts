@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import type { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, ensureSyncState, INQUIRY_SCOPE_ID, releaseWorker, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
-import { scope, warpActivityId } from '@/lib/warp-delivery'
+import { MANUAL_CONFIRMATION, scope, warpActivityId } from '@/lib/warp-delivery'
 import { applyWarpRecovery, MAX_RECOVERY_ROWS, parseRecoveryPlan, planWarpRecovery, recoverySha256, type RecoveryEvent } from '@/lib/warp-recovery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
@@ -156,6 +156,12 @@ async function testApprovalAndDrift() {
     ]) assert.notEqual((await apply(JSON.stringify(mutation))).status, 'ok')
     assert.notEqual((await apply(`{"secret":"${privateError}"`)).status, 'ok')
     assert.equal(remote.calls.length, 0)
+
+    const manualPlan = await planFor(db, [sourceId(1)])
+    await db.inquiry.update({ where: { id: first.id }, data: { warpError: MANUAL_CONFIRMATION } })
+    assert.equal((await applyWarpRecovery(db, manualPlan.bytes, manualPlan.hash, { ...log, send: remote.send, env, now })).status, 'warp_recovery_manual_confirmation')
+    assert.equal(remote.calls.length, 0, 'manual confirmation is rejected before recovery sends')
+    await db.inquiry.update({ where: { id: first.id }, data: first })
 
     // Drift in the LAST selected row blocks the entire plan before the FIRST request.
     for (const changes of [{ phone: '010-0000-5678' }, { warpAttemptedAt: new Date(at.getTime() + 1) }, { warpCustomerId: 'changed' }, { homepageScopeId: 'other-homepage' }]) {

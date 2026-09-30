@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { claimNextRun, claimWorker, enqueueSync, finishRun, INQUIRY_SCOPE_ID, reconcile, SyncError } from '@/lib/inquiry-sync'
-import { dispatchPendingWarp, MANUAL_REGISTRATION, requestWarpRegistration, scope, warpActivityId, warpDeliverySummary } from '@/lib/warp-delivery'
+import { dispatchPendingWarp, MANUAL_CONFIRMATION, MANUAL_REGISTRATION, pilotPendingWarp, requestWarpRegistration, scope, warpActivityId, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { markSourceManaging, sourceUrl } from '@/workers/mleverage-source'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
@@ -9,6 +9,45 @@ const owner = 'synthetic-action-worker'
 const row = { sourceId: '00000000-0000-4000-8000-000000000001', inquiryDate: '2026-09-29', inquiryTime: '09:00', name: '합성 문의', phone: '010-0000-0001', sourceStatus: '접수' }
 
 async function main() {
+  await withWorkerDatabase(async db => {
+    const now = new Date('2026-09-30T00:00:00Z')
+    const confirmed = await db.inquiry.create({ data: { ...scope, ...row, lastSeenAt: now, warpError: MANUAL_CONFIRMATION } })
+    const delivered = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '2'), lastSeenAt: now,
+      warpCustomerId: 'authentic-customer', warpActivityId: warpActivityId(row.sourceId.replace(/1$/, '2')), warpDeliveredAt: now, warpAttemptedAt: now } })
+    const confirmedBefore = await db.inquiry.findUniqueOrThrow({ where: { id: confirmed.id } })
+    const deliveredBefore = await db.inquiry.findUniqueOrThrow({ where: { id: delivered.id } })
+    assert.deepEqual(warpDeliveryState(confirmed), { status: 'delivered', label: '등록 완료', reason: '사용자가 WARP에 직접 등록했음을 확인했습니다.' })
+    assert.deepEqual(await warpDeliverySummary(db, key), { configured: false, delivered: 2, pending: 0, failed: 0 })
+    assert.equal(await requestWarpRegistration(db, confirmed.id), 'delivered')
+    await claimWorker(db, owner, now)
+    await db.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { status: 'ready' } })
+    let calls = 0
+    const sent: string[] = []
+    const send: typeof fetch = async (_url, init) => {
+      calls++
+      const payload = JSON.parse(String(init?.body))
+      sent.push(payload.sourceId)
+      return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(payload.sourceId), created: calls % 2 === 1, duplicate: calls % 2 === 0 })
+    }
+    assert.equal(await pilotPendingWarp(db, owner, send, key, () => now), 'warp_no_pending_inquiry')
+    assert.equal(calls, 0, 'manual confirmation is not sent by the pilot')
+
+    const pilotRow = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '3'), lastSeenAt: now } })
+    assert.equal(await pilotPendingWarp(db, owner, send, key, () => now), 'ok')
+    assert.deepEqual(sent, [pilotRow.sourceId, pilotRow.sourceId], 'nullable pending rows remain eligible for the pilot')
+
+    const automatic = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '4'), lastSeenAt: now } })
+    assert.deepEqual(await dispatchPendingWarp(db, owner, send, { ...key, WARP_DELIVERY_ENABLED: 'true' }, () => now), { configured: true, delivered: 1, failed: 0 })
+    assert.equal(sent.at(-1), automatic.sourceId, 'new pending rows remain eligible for automatic delivery')
+
+    const requested = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '5'), lastSeenAt: now } })
+    assert.equal(await requestWarpRegistration(db, requested.id, now), 'queued')
+    assert.deepEqual(await dispatchPendingWarp(db, owner, send, key, () => now), { configured: false, delivered: 1, failed: 0 })
+    assert.equal(sent.at(-1), requested.sourceId, 'manual requests remain eligible while automatic delivery is disabled')
+    assert.deepEqual(await db.inquiry.findUniqueOrThrow({ where: { id: confirmed.id } }), confirmedBefore, 'manual confirmation keeps receipt fields null and is never sent')
+    assert.deepEqual(await db.inquiry.findUniqueOrThrow({ where: { id: delivered.id } }), deliveredBefore, 'authentic delivery receipts remain unchanged')
+  })
+
   await withWorkerDatabase(async (db, inspect) => {
     const now = new Date()
     const named = await db.inquiry.create({ data: { ...scope, ...row, lastSeenAt: now } })

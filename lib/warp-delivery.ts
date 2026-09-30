@@ -7,6 +7,7 @@ const WARP_ENDPOINT = 'https://warp.cleversystem.ai/api/external/marketing-inqui
 const RETRY_MS = 60 * 60_000
 // A durable command in the existing delivery state; only the lease-owning worker sends it.
 export const MANUAL_REGISTRATION = 'warp_manual_requested'
+export const MANUAL_CONFIRMATION = 'warp_manual_confirmed'
 export const scope = { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID }
 const connectionErrors = ['warp_auth_required', 'warp_not_configured', 'warp_endpoint_missing', 'warp_unavailable', 'warp_invalid_receipt']
 export type Env = Readonly<Record<string, string | undefined>>
@@ -25,6 +26,9 @@ export function warpConfigured(env: Env = process.env) {
 
 export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError: string | null }) {
   if (row.warpDeliveredAt) return { status: 'delivered', label: '등록 완료', reason: null }
+  if (row.warpError === MANUAL_CONFIRMATION) return {
+    status: 'delivered', label: '등록 완료', reason: '사용자가 WARP에 직접 등록했음을 확인했습니다.',
+  }
   if (row.warpError === MANUAL_REGISTRATION) return { status: 'queued', label: '등록 요청됨', reason: null }
   if (row.warpError === 'warp_customer_conflict') return {
     status: 'blocked', label: '확인 필요', reason: '동일 연락처 고객이 여러 명이라 자동 등록을 보류했습니다.',
@@ -42,6 +46,7 @@ export async function requestWarpRegistration(db: PrismaClient, id: string, now 
     const row = await tx.inquiry.findFirst({ where: { ...scope, id }, select: { warpDeliveredAt: true, warpError: true } })
     if (!row) return 'not_found' as const
     if (row.warpDeliveredAt) return 'delivered' as const
+    if (row.warpError === MANUAL_CONFIRMATION) return 'delivered' as const
     if (row.warpError === MANUAL_REGISTRATION) return 'queued' as const
     const state = await tx.inquirySyncState.findUnique({ where: { id: INQUIRY_SCOPE_ID } })
     if (!state?.workerOwner || !['ready', 'running', 'success'].includes(state.status) || !state.workerHeartbeatAt || !state.workerLeaseExpiresAt
@@ -110,9 +115,11 @@ export async function checkWarpConnection(send: typeof fetch = fetch, env: Env =
 
 export async function warpDeliverySummary(db: PrismaClient, env: Env = process.env) {
   const [delivered, pending, failed] = await Promise.all([
-    db.inquiry.count({ where: { ...scope, warpDeliveredAt: { not: null } } }),
-    db.inquiry.count({ where: { ...scope, warpDeliveredAt: null } }),
-    db.inquiry.count({ where: { ...scope, warpDeliveredAt: null, warpError: { not: null, notIn: [MANUAL_REGISTRATION] } } }),
+    db.inquiry.count({ where: { ...scope, OR: [{ warpDeliveredAt: { not: null } }, { warpError: MANUAL_CONFIRMATION }] } }),
+    db.inquiry.count({ where: { ...scope, warpDeliveredAt: null,
+      OR: [{ warpError: null }, { warpError: { not: MANUAL_CONFIRMATION } }] } }),
+    db.inquiry.count({ where: { ...scope, warpDeliveredAt: null,
+      warpError: { not: null, notIn: [MANUAL_REGISTRATION, MANUAL_CONFIRMATION] } } }),
   ])
   return { configured: env.WARP_DELIVERY_ENABLED === 'true', delivered, pending, failed }
 }
@@ -123,7 +130,7 @@ async function pendingRows(db: PrismaClient, now: Date, take: number, respectRet
   const retryBefore = new Date(now.getTime() - RETRY_MS)
   return db.inquiry.findMany({
     where: { ...scope, warpDeliveredAt: null, AND: [
-      { OR: [{ warpError: null }, { warpError: { not: 'warp_customer_conflict' } }] },
+      { OR: [{ warpError: null }, { warpError: { notIn: ['warp_customer_conflict', MANUAL_CONFIRMATION] } }] },
       ...(respectRetry ? [{ OR: [{ warpAttemptedAt: null }, { warpAttemptedAt: { lte: retryBefore } }] }] : []),
     ] },
     orderBy: [{ inquiryDate: 'asc' }, { inquiryTime: 'asc' }, { sourceId: 'asc' }],

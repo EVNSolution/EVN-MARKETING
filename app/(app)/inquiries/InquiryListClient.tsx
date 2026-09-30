@@ -241,7 +241,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
           </div>
           <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''}</p>
           <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '자동 등록은 꺼져 있습니다. 문의별 등록하기 버튼으로 요청할 수 있습니다.' : '자동 등록 설정이 켜져 있습니다. 실제 연결 여부는 문의별 전송 결과에서 확인하며, 같은 연락처는 기존 고객 문의 이력에 추가합니다.'}</p>
-          <p className="mt-1 text-[11px] text-slate-400">등록완료는 이 문의의 WARP 고객 연결·문의 이력 등록이 확인된 상태입니다. 같은 연락처의 고객이 있으면 기존 고객에 연결합니다.</p>
+          <p className="mt-1 text-[11px] text-slate-400">등록완료는 WARP 연동으로 등록되었거나 사용자가 직접 등록했음을 확인한 상태입니다. 같은 연락처의 고객이 있으면 기존 고객에 연결합니다.</p>
         </section>
       )}
 
@@ -305,7 +305,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                     <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{row.phone}</td>
                     <td className="px-4 py-3">
                       {row.warpDelivery.status === 'delivered' ? (
-                        <span className="rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">등록완료</span>
+                        <span title={row.warpDelivery.reason ?? undefined} className="rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">등록완료</span>
                       ) : isAdmin ? (
                         <button type="button" onClick={() => void requestWarpRegistration(row)}
                           disabled={registeringIds.includes(row.id) || row.warpDelivery.status === 'queued'}
