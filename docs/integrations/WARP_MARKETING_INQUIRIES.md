@@ -1,23 +1,35 @@
 # 마케팅 문의 수신 연동 검토
 
-2026-09-17 · 운영 담당자: OziinG · 상태: 신규 이름 규칙의 후속 Owner 검토 대기
+2026-09-30 · 운영 담당자: OziinG · 상태: 전화번호 확인 capability Owner 검토 대기
 
-기계 판독 계약은 [WARP_MARKETING_INQUIRIES.json](WARP_MARKETING_INQUIRIES.json)이다. 이 변경은 기존 WARP–BUILDUP 계약과 공유키 권한을 수정하지 않는다. [Issue #48](https://github.com/EVNSolution/EVN-WARP/issues/48)과 [PR #49](https://github.com/EVNSolution/EVN-WARP/pull/49)는 빈 이름을 그대로 두던 이전 계약의 검토 이력이다. 이번 신규 고객 표시 이름 규칙은 후속 Owner 검토가 필요하다. 2026-09-17 기존 Owner 검토에서는 UUID 대소문자 중복 및 독립 DB 연결의 잠금 경합을 재현해 수정했다. 최종 승인·배포 Revision과 결과는 [후속 PR #50](https://github.com/EVNSolution/EVN-WARP/pull/50)에 기록한다.
+기계 판독 계약은 [WARP_MARKETING_INQUIRIES.json](WARP_MARKETING_INQUIRIES.json)이다. 이 변경은 기존 WARP–BUILDUP 계약과 공유키 권한을 수정하지 않는다. [검토 Issue #48](https://github.com/EVNSolution/EVN-WARP/issues/48)과 [검토 PR #49](https://github.com/EVNSolution/EVN-WARP/pull/49)에 연결한다. 2026-09-17 Owner 검토에서 UUID 대소문자 중복 및 독립 DB 연결의 잠금 경합을 재현해 수정하고 회귀 검사를 추가했다. 최종 승인·배포 Revision과 결과는 PR에 기록한다. 발신측 저장소는 이번 검토 환경에 없으므로 활성화 전에 수정된 계약의 일치와 발신측 검증을 확인해야 한다.
+
+2026-09-30 추가한 전화번호 확인 capability와 `rejectExistingCustomer` 경쟁 방지 guard는 새 Owner 검토 대상이며 아직 승인·배포되지 않았다. 기존 BUILDUP endpoint와 `WARP_LOOKUP_API_KEY` 계약은 변경하지 않는다.
 
 ## 변경 결과
 
 `POST /api/external/marketing-inquiries`는 전용 `WARP_MARKETING_API_KEY`로 고정된 mleverage-admin 회사·홈페이지 문의만 받는다. 키는 32자 이상·공백 없음이어야 하며, 비어 있으면 503으로 비활성화한다. 요청은 16KB까지만 읽는다.
 
-기본 연락처를 숫자로 정규화한 완전일치 고객이 한 명이면 문의 이력만 추가한다. 기존 이름·상태·담당자·메모는 바꾸지 않는다. 일치 고객이 없으면 B2C 잠재고객을 만들고, 원본 성함을 다듬은 값이 비어 있을 때 WARP의 `unknownCustomerName({ phone })`으로 표시 이름을 생성한다(예: `미상(📞 8888)`). 이름이 같고 연락처가 다르면 별도 고객이다. 같은 연락처의 고객이 여러 명이면 409로 보류한다.
+기본 연락처를 숫자로 정규화한 완전일치 고객이 한 명이면 문의 이력만 추가한다. 기존 이름·상태·담당자·메모는 바꾸지 않는다. 일치 고객이 없으면 성함·연락처를 입력한 B2C 잠재고객을 만들며 빈 이름을 허용한다. 이름이 같고 연락처가 다르면 별도 고객이다. 같은 연락처의 고객이 여러 명이면 409로 보류한다.
+
+Marketing 발신측은 원본 이름이 비어 있을 때 읽기·전송·저장 전에 `unknownCustomerName(phone)`으로 fallback 이름을 채운다. Provider는 호환성을 위해 빈 이름이 실제로 수신되면 기존 계약대로 빈 값으로 보존한다. 미병합된 provider 측 fallback 이름 변경은 이 작업에 포함하지 않는다.
 
 활동 ID는 `mleverage_` 접두사와 출처·회사·홈페이지·소문자로 정규화한 원본 UUID의 SHA-256이다. 고객 생성과 활동 추가를 같은 트랜잭션에서 처리하고, 활동이 보존된 동안의 재전송은 기존 receipt를 돌려준다. 새로운 DB 테이블·열은 없고 기존 Customer/CustomerActivity를 사용한다. 조회 전에 행을 변경하지 않는 UPDATE로 SQLite 쓰기 잠금을 확보해 독립 연결의 read-to-write 잠금 교착을 막는다. 해당 트랜잭션 연결의 busy timeout은 0으로 두고 기존 비동기 재시도를 사용한다. 동일 문의·같은 연락처의 별도 문의 병렬 전송과 경합 이후 쓰기를 합성 SQLite로 검증한다.
 
-활동 내용에는 원본 문의일자·문의시간·상담상태·성함·연락처와 문의 ID를 읽을 수 있는 문장으로 저장한다. 수신기는 받은 성함을 활동에 보존한다. 2026-09-29 Marketing 후속 변경은 이름이 없는 문의를 저장·조회·발신할 때 동일한 신원미상 규칙으로 채우므로 해당 요청의 활동에도 생성된 이름이 남는다. WARP 자체의 빈 이름 처리와 구분하여 Marketing PR #21에서 검토한다. 원본 날짜·시간은 분 단위 문자열로 보존하고 CRM 날짜는 한국 시간으로 해석한다. 원본 화면에 시간대 표기가 없으므로 한국 시간 해석은 확인이 필요한 가정이다.
+활동 내용에는 원본 문의일자·문의시간·상담상태·성함·연락처와 문의 ID를 읽을 수 있는 문장으로 저장한다. 원본 날짜·시간은 분 단위 문자열로 보존하고 CRM 날짜는 한국 시간으로 해석한다. 원본 화면에 시간대 표기가 없으므로 한국 시간 해석은 확인이 필요한 가정이다.
+
+## 전화번호 확인과 등록 guard
+
+`POST /api/external/marketing-inquiries/check`는 같은 `WARP_MARKETING_API_KEY`와 고정된 source/company/homepage scope를 요구한다. 본문은 16KB 이하이며 `items` 1~50개를 받는다. 각 항목은 대소문자를 무시해 고유한 UUID `sourceId`와 40자 이하 `phone`만 가진다. 숫자 외 문자를 제거한 결과는 9~15자리여야 하며 `+82 10XXXXXXXX`를 `010XXXXXXXX`와 같은 번호로 본다.
+
+응답은 요청 순서대로 `{sourceId, exists}`를 반환하며 `sourceId`는 소문자로 정규화한다. 해당 `sourceId`의 결정적 문의 활동이 이미 남아 있을 때만 기존 등록 receipt를 함께 반환한다. 다른 고객의 전화번호가 일치할 때는 `exists: true`만 반환하며 고객 ID, 이름, 일치 건수는 내보내지 않는다. 조회는 모든 `Customer.phone` 기본 연락처를 대상으로 하며 회사 대표번호와 관계자 연락처는 포함하지 않고 DB를 변경하지 않는다.
+
+기존 등록 payload는 그대로 동작한다. 선택 필드 `rejectExistingCustomer: true`를 보낸 경우에는 기존 문의 replay를 먼저 확인한 뒤, 쓰기 잠금을 확보한 같은 트랜잭션에서 기본 연락처가 하나라도 일치하면 아무것도 만들지 않고 `409 {"error":"phone_exists"}`를 반환한다. 이 guard가 check와 등록 사이에 생길 수 있는 경쟁을 막는다. `false` 등 다른 선택 필드 값은 `bad_payload`로 거부한다.
 
 ## 로컬 검증
 
-- `npm run test:marketing-inquiries`: UUID 대소문자 재전송, 독립 연결 경합/후속 쓰기, append 실패의 rollback과 비밀정보 없는 오류 로그를 포함한 합성 시나리오 12개.
-- `npm run test:integration-contract`: 기존 6개와 신규 1개, 총 7개 계약 통과.
+- `npm run test:marketing-inquiries`: 기존 등록 회귀와 함께 check 인증·scope·입력 제한·읽기 전용 batch·이름 무관 일치·국가번호 정규화·receipt 제한·등록 guard 경쟁/replay를 검증한다.
+- `npm run test:integration-contract`: 기존 계약과 신규 check endpoint의 method/path/source 선언 일치를 검증한다.
 - 타입 검사, 수정 파일 ESLint, 로컬 프로덕션 빌드 통과. 빌드의 DB 주소는 합성 로컬 경로를 사용했다.
 - 마케팅 sender와 실제 receiver 함수를 연결한 합성 DB 검사 통과: 이름 공란, 같은 연락처로 문의 이력 추가, 응답 재처리 중복 방지.
 - PR 검증과 운영 배포의 소스 검사에 문의 수신 테스트를 추가했다. 배포 워크플로 계약 검사 8개와 기존 정책에 따른 보안 검사를 통과했다.

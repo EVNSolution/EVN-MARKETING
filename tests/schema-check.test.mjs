@@ -31,6 +31,17 @@ function reject(change, reason) {
   assert.deepEqual(readFileSync(file), before, 'failure must not repair or initialize data')
 }
 try {
+  const expanded = new Database(':memory:')
+  try {
+    for (const { name } of current.migrations.slice(0, -1)) expanded.exec(readFileSync(path.join(root, 'prisma/migrations', name, 'migration.sql'), 'utf8'))
+    expanded.exec("INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,phone,lastSeenAt,warpCustomerId,warpActivityId,warpDeliveredAt) VALUES('synthetic','source','company','homepage','source-id','2026-09-30','09:00','010-0000-0000','2026-09-30','customer','receipt','2026-09-30')")
+    const beforeExpansion = expanded.prepare('SELECT * FROM Inquiry').get()
+    expanded.exec(readFileSync(path.join(root, 'prisma/migrations', current.migrations.at(-1).name, 'migration.sql'), 'utf8'))
+    const { warpPhoneStatus, warpPhoneCheckedAt, ...preserved } = expanded.prepare('SELECT * FROM Inquiry').get()
+    assert.equal(warpPhoneStatus, null); assert.equal(warpPhoneCheckedAt, null)
+    assert.deepEqual(preserved, beforeExpansion, 'nullable expansion preserves every inquiry/receipt field')
+    assert.equal(expanded.prepare('SELECT warpActivityId FROM Inquiry').get().warpActivityId, 'receipt', 'old readers work after expansion')
+  } finally { expanded.close() }
   const file = fixture()
   const before = readFileSync(file)
   assert.equal(checkSchema(file, current, previous).ok, true)

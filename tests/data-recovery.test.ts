@@ -26,7 +26,7 @@ function open(url: string) {
 async function migrate(url: string) {
   const sql = createClient({ url })
   try {
-    for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
+    for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery', '20260930000100_warp_phone_check']) {
       await sql.executeMultiple(await readFile(path.join('prisma/migrations', migration, 'migration.sql'), 'utf8'))
     }
   } finally { sql.close() }

@@ -41,6 +41,7 @@ async function main() {
   })
   await sql.executeMultiple(await readFile(additive, 'utf8'))
   await sql.executeMultiple(await readFile(warpDelivery, 'utf8'))
+  await sql.executeMultiple(await readFile(path.join(root, 'prisma/migrations/20260930000100_warp_phone_check/migration.sql'), 'utf8'))
   await sql.close()
 
   const prisma = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: databaseUrl, timeout: 5000 }, { timestampFormat: 'iso8601' }) })

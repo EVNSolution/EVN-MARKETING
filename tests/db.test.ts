@@ -16,7 +16,7 @@ async function main() {
   try {
     const sql = await new PrismaBetterSqlite3({ url }).connect()
     try {
-      for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
+      for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery', '20260930000100_warp_phone_check']) {
         await sql.executeScript(await readFile(path.join(process.cwd(), 'prisma/migrations', migration, 'migration.sql'), 'utf8'))
       }
       await sql.executeScript('PRAGMA journal_mode = DELETE')

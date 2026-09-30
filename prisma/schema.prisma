@@ -148,6 +148,8 @@ model Inquiry {
   warpDeliveredAt DateTime?
   warpAttemptedAt DateTime?
   warpError       String?
+  warpPhoneStatus String?
+  warpPhoneCheckedAt DateTime?
 
   @@unique([source, companyScopeId, homepageScopeId, sourceId])
   @@index([inquiryDate, inquiryTime])

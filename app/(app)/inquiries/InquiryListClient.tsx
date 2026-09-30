@@ -12,7 +12,7 @@ type Inquiry = {
   inquiryTime: string
   name: string | null
   phone: string
-  warpDelivery: { status: 'delivered' | 'pending' | 'blocked' | 'retrying' | 'queued'; label: string; reason: string | null }
+  warpDelivery: { status: 'delivered' | 'pending' | 'duplicate' | 'checking' | 'retrying' | 'queued'; label: string; reason: string | null }
 }
 
 type SyncRun = {
@@ -165,7 +165,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
   }
 
   const requestWarpRegistration = async (row: Inquiry) => {
-    if (registrationRequests.current.has(row.id) || row.warpDelivery.status === 'queued') return
+    if (registrationRequests.current.has(row.id) || !['pending', 'retrying'].includes(row.warpDelivery.status)) return
     registrationRequests.current.add(row.id)
     setRegisteringIds((ids) => [...ids, row.id])
     setRegistrationMessages((messages) => ({ ...messages, [row.id]: '등록 요청 중입니다.' }))
@@ -185,6 +185,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
         ...messages,
         [row.id]: registrationError instanceof Error && registrationError.message ? registrationError.message : '등록 요청을 처리하지 못했습니다.',
       }))
+      await load()
     } finally {
       registrationRequests.current.delete(row.id)
       setRegisteringIds((ids) => ids.filter((id) => id !== row.id))
@@ -240,8 +241,8 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
             <a className="font-semibold underline underline-offset-2" href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer">WARP 고객관리 열기</a>
           </div>
           <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''}</p>
-          <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '자동 등록은 꺼져 있습니다. 문의별 등록하기 버튼으로 요청할 수 있습니다.' : '자동 등록 설정이 켜져 있습니다. 실제 연결 여부는 문의별 전송 결과에서 확인하며, 같은 연락처는 기존 고객 문의 이력에 추가합니다.'}</p>
-          <p className="mt-1 text-[11px] text-slate-400">등록완료는 WARP 연동으로 등록되었거나 사용자가 직접 등록했음을 확인한 상태입니다. 같은 연락처의 고객이 있으면 기존 고객에 연결합니다.</p>
+          <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '자동 등록은 꺼져 있습니다. 중복 확인이 끝난 문의는 등록하기 버튼으로 요청할 수 있습니다.' : '자동 등록 설정이 켜져 있습니다. 중복 연락처는 등록을 보류하고 사유를 표시합니다.'}</p>
+          <p className="mt-1 text-[11px] text-slate-400">등록완료는 WARP 연동으로 등록되었거나 사용자가 직접 등록했음을 확인한 상태입니다. 새 문의의 연락처가 겹치면 중복으로 표시합니다.</p>
         </section>
       )}
 
@@ -306,6 +307,10 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                     <td className="px-4 py-3">
                       {row.warpDelivery.status === 'delivered' ? (
                         <span title={row.warpDelivery.reason ?? undefined} className="rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">등록완료</span>
+                      ) : row.warpDelivery.status === 'duplicate' ? (
+                        <span className="inline-block rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-800">중복</span>
+                      ) : row.warpDelivery.status === 'checking' ? (
+                        <span className="inline-block rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-500">{row.warpDelivery.label}</span>
                       ) : isAdmin ? (
                         <button type="button" onClick={() => void requestWarpRegistration(row)}
                           disabled={registeringIds.includes(row.id) || row.warpDelivery.status === 'queued'}

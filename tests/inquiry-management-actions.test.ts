@@ -32,15 +32,15 @@ async function main() {
     assert.equal(await pilotPendingWarp(db, owner, send, key, () => now), 'warp_no_pending_inquiry')
     assert.equal(calls, 0, 'manual confirmation is not sent by the pilot')
 
-    const pilotRow = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '3'), lastSeenAt: now } })
+    const pilotRow = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '3'), phone: '010-0000-0003', lastSeenAt: now } })
     assert.equal(await pilotPendingWarp(db, owner, send, key, () => now), 'ok')
     assert.deepEqual(sent, [pilotRow.sourceId, pilotRow.sourceId], 'nullable pending rows remain eligible for the pilot')
 
-    const automatic = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '4'), lastSeenAt: now } })
+    const automatic = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '4'), phone: '010-0000-0004', lastSeenAt: now } })
     assert.deepEqual(await dispatchPendingWarp(db, owner, send, { ...key, WARP_DELIVERY_ENABLED: 'true' }, () => now), { configured: true, delivered: 1, failed: 0 })
     assert.equal(sent.at(-1), automatic.sourceId, 'new pending rows remain eligible for automatic delivery')
 
-    const requested = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '5'), lastSeenAt: now } })
+    const requested = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '5'), phone: '010-0000-0005', warpPhoneStatus: 'clear', warpPhoneCheckedAt: now, lastSeenAt: now } })
     assert.equal(await requestWarpRegistration(db, requested.id, now), 'queued')
     assert.deepEqual(await dispatchPendingWarp(db, owner, send, key, () => now), { configured: false, delivered: 1, failed: 0 })
     assert.equal(sent.at(-1), requested.sourceId, 'manual requests remain eligible while automatic delivery is disabled')
@@ -50,8 +50,8 @@ async function main() {
 
   await withWorkerDatabase(async (db, inspect) => {
     const now = new Date()
-    const named = await db.inquiry.create({ data: { ...scope, ...row, lastSeenAt: now } })
-    const unnamed = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '2'), name: null, lastSeenAt: now } })
+    const named = await db.inquiry.create({ data: { ...scope, ...row, warpPhoneStatus: 'clear', warpPhoneCheckedAt: now, lastSeenAt: now } })
+    const unnamed = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '2'), phone: '010-0000-0002', name: null, warpPhoneStatus: 'clear', warpPhoneCheckedAt: now, lastSeenAt: now } })
     const foreign = await db.inquiry.create({ data: { ...scope, ...row, companyScopeId: 'other-company', lastSeenAt: now } })
     assert.equal(await requestWarpRegistration(db, foreign.id), 'not_found')
     assert.equal(await requestWarpRegistration(db, named.id), 'worker_offline')
@@ -66,7 +66,7 @@ async function main() {
       calls++
       const payload = JSON.parse(String(init?.body))
       assert.equal(payload.sourceId, calls === 1 ? named.sourceId : unnamed.sourceId, 'only the requested row is sent')
-      assert.equal(payload.name, calls === 1 ? row.name : '미상(📞 0001)', 'legacy blank names use the WARP naming rule before transmission')
+      assert.equal(payload.name, calls === 1 ? row.name : '미상(📞 0002)', 'legacy blank names use the WARP naming rule before transmission')
       return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(payload.sourceId), created: true, duplicate: false })
     }
     assert.deepEqual(await dispatchPendingWarp(db, owner, send, key), { configured: false, delivered: 1, failed: 0 })

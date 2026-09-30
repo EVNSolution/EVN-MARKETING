@@ -6,7 +6,7 @@ const require = createRequire('/app/package.json')
 const Database = require('better-sqlite3')
 const bcrypt = createRequire('/src/package.json')('bcryptjs')
 const db = new Database('/data/marketing.db')
-for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
+for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery', '20260930000100_warp_phone_check']) {
   db.exec(readFileSync(`/src/prisma/migrations/${migration}/migration.sql`, 'utf8'))
 }
 recordSyntheticMigrations(db, '/src')

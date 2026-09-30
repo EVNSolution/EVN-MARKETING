@@ -10,7 +10,7 @@ export async function withWorkerDatabase(run: (worker: PrismaClient, inspect: Pr
   const url = `file:${path.join(temp, 'test.db')}`
   const setup = createClient({ url })
   try {
-    for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
+    for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery', '20260930000100_warp_phone_check']) {
       await setup.executeMultiple(await readFile(path.join('prisma/migrations', migration, 'migration.sql'), 'utf8'))
     }
   } finally {
