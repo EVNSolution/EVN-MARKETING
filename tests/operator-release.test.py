@@ -74,6 +74,7 @@ with patch.dict(os.environ, {"MARKETING_AWS_ACCOUNT_ID": "000000000000",
 archive, build = process.call_args_list
 assert archive.args[0] == ["git", "archive", "--format=tar", SHA]
 assert build.args[0][0:4] == ["docker", "build", "--platform", "linux/amd64"]
+assert build.args[0][4] == "--provenance=false"
 assert build.args[0][-1] == "-" and build.kwargs["input"] == b"source archive"
 source.assert_called_once_with(manual=True)
 target.assert_called_once_with()
