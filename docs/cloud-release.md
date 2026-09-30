@@ -47,6 +47,8 @@ The operations findings include Debian Bookworm `perl`, `util-linux` and `zlib`;
 
 ## Administrator deployment on GitHub Free
 
+The local [operator commands](self-service-deployment.md) reuse this manual path for image publication, validation, release and rollback. They do not grant deployment authority. The proposed one-time delegation in that guide would let the named operator choose routine Marketing app release times within an agreed scope; until it is recorded, the existing administrator approval procedure below still applies. No GitHub plan change or activation of the OIDC workflow is required.
+
 This is the selected activation route. Keep `EnableGitHubRelease=false` (the default) when applying `cloudformation.json`: it creates ECR, the bounded SSM document and the host role/profile, **without the GitHub release role or its OIDC trust**. No GitHub OIDC provider or protected environment is needed for this route. Do not change a previously active stack to false without reviewing removal of its existing role. The optional GitHub workflow below remains inactive; do not populate its activation settings.
 
 The administrator reviews and records the repository/source SHA, action, image digest (or `previous`), controller checksum, AWS account, instance, pinned SSM document version/hash, backup/restore evidence and execution window before dispatch. Record approver and executor separately; obtain a new decision if any approved input changes. The helper verifies technical inputs, **not** the person's business authority or the approval record. On Free private repositories, this is a documented human control rather than protected-branch/environment enforcement. Runtime host locking, source/digest checks and recovery gates remain enforced.
