@@ -101,7 +101,7 @@ function runPackagedPilot(expectedCalls) {
       assert.equal(init.method, 'POST');
       assert.equal(init.redirect, 'error');
       assert.equal(new Headers(init.headers).get('x-api-key'), process.env.WARP_MARKETING_API_KEY);
-      assert.deepEqual(JSON.parse(init.body), ${JSON.stringify({ ...inquiry, name: '미상(📞 0000)' })});
+      assert.deepEqual(JSON.parse(init.body), ${JSON.stringify({ ...inquiry, name: '미상(📞 0000)', rejectExistingCustomer: true })});
       return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: ${JSON.stringify(activityId)}, created: calls === 1, duplicate: calls === 2 });
     };
     process.once('exit', () => assert.equal(calls, ${expectedCalls}, 'packaged pilot fetch count'));
