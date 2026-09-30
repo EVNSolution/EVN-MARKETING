@@ -37,7 +37,7 @@ try {
     db.prepare('INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,sourceStatus,name,phone,lastSeenAt,warpDeliveredAt,warpError) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(`synthetic-${i}`, ...scope, `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
         '2026-09-28', '09:30', '접수', `합성 문의 ${i}`, `010-0000-${String(i).padStart(4, '0')}`, at,
-        i === 1 ? at : null, i === 2 ? 'warp_customer_conflict' : i === 3 ? 'warp_unavailable' : null)
+        i === 1 ? at : null, i === 2 ? 'warp_customer_conflict' : i === 3 ? 'warp_unavailable' : i === 4 ? 'warp_manual_confirmed' : null)
   }
   db.prepare('INSERT INTO InquirySyncState(id,source,companyScopeId,homepageScopeId,status,lastSuccessfulAt,nextRunAt,workerHeartbeatAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)')
     .run(scope.join(':'), ...scope, 'ready', at, new Date(Date.now() + 3_600_000).toISOString(), at, at)
@@ -92,8 +92,13 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 23)
   const payload = await (await context.request.get(base + '/api/inquiries?limit=200')).json()
   assert.equal(payload.warp.configured, true, 'web reports enabled intent without receiving a WARP key')
-  assert.equal(payload.warp.delivered, 1)
+  assert.equal(payload.warp.delivered, 2)
+  assert.equal(payload.warp.pending, 21)
   assert.equal(payload.warp.failed, 2)
+  const manuallyConfirmed = page.getByRole('row').filter({ hasText: '010-0000-0004' })
+  assert.match(await manuallyConfirmed.innerText(), /등록완료/)
+  assert.equal(await manuallyConfirmed.getByRole('button', { name: '등록하기' }).count(), 0)
+  assert.match(await manuallyConfirmed.getByText('등록완료').getAttribute('title'), /직접 등록/)
   assert.ok(!JSON.stringify(payload).includes(password))
   const search = page.getByPlaceholder('성함 또는 연락처')
   await search.fill('010-0000-0002')

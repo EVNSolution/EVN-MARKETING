@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, heartbeatWorker, INQUIRY_SCOPE_ID, releaseWorker, SyncError } from '@/lib/inquiry-sync'
-import { acknowledge, deliver, keyConfigured, payloadFor, rowSelect, scope, warpActivityId, type Env } from '@/lib/warp-delivery'
+import { acknowledge, deliver, keyConfigured, MANUAL_CONFIRMATION, payloadFor, rowSelect, scope, warpActivityId, type Env } from '@/lib/warp-delivery'
 
 export const MAX_RECOVERY_ROWS = 20
 export const MAX_PLAN_BYTES = 32_768
@@ -67,7 +67,9 @@ function matchRows(rows: Row[], expected: PlanRow[]) {
   if (rows.length !== expected.length) fail('warp_recovery_row_changed')
   return expected.map(entry => {
     const row = rows.find(row => row.sourceId === entry.sourceId)
-    if (!row || JSON.stringify(fingerprint(row)) !== JSON.stringify(entry)) fail('warp_recovery_row_changed')
+    if (!row) fail('warp_recovery_row_changed')
+    if (row.warpError === MANUAL_CONFIRMATION) fail('warp_recovery_manual_confirmation')
+    if (JSON.stringify(fingerprint(row)) !== JSON.stringify(entry)) fail('warp_recovery_row_changed')
     if ((row.warpActivityId && row.warpActivityId !== warpActivityId(row.sourceId))
       || (row.warpDeliveredAt && (!row.warpActivityId || !row.warpCustomerId))) fail('warp_recovery_invalid_local_receipt')
     return row
