@@ -31,7 +31,7 @@ type SyncRun = {
 
 type InquiryResponse = {
   rows: Inquiry[]
-  warp: { configured: boolean; delivered: number; pending: number; failed: number }
+  warp: { configured: boolean; delivered: number; pending: number; failed: number; duplicates: number }
   pagination: { page: number; limit: number; total: number; totalPages: number }
   sync: {
     currentStatus: string
@@ -240,7 +240,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
             <b className="text-slate-800">WARP 고객관리 자동 등록</b>
             <a className="font-semibold underline underline-offset-2" href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer">WARP 고객관리 열기</a>
           </div>
-          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''}</p>
+          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''} · 중복 {data.warp.duplicates ?? 0}건</p>
           <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '자동 등록은 꺼져 있습니다. 중복 확인이 끝난 문의는 등록하기 버튼으로 요청할 수 있습니다.' : '자동 등록 설정이 켜져 있습니다. 중복 연락처는 등록을 보류하고 사유를 표시합니다.'}</p>
           <p className="mt-1 text-[11px] text-slate-400">등록완료는 WARP 연동으로 등록되었거나 사용자가 직접 등록했음을 확인한 상태입니다. 새 문의의 연락처가 겹치면 중복으로 표시합니다.</p>
         </section>

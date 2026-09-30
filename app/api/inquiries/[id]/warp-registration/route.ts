@@ -17,12 +17,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (result === 'delivered') return NextResponse.json({ delivered: true })
     const messages = {
       duplicate: '연락처가 중복된 문의입니다. 목록의 중복 사유를 확인해 주세요.',
+      invalid_phone: '연락처 형식을 확인해 주세요.',
       duplicate_check_pending: 'WARP 고객 중복 여부를 확인 중입니다. 잠시 후 다시 확인해 주세요.',
       not_found: '문의를 찾을 수 없습니다.',
       worker_offline: '수집 연결을 확인한 뒤 다시 등록해 주세요.',
       connection_backoff: 'WARP 연결 오류로 등록을 잠시 대기 중입니다. 최근 오류 발생 후 1시간 뒤 다시 시도해 주세요.',
     }
-    return NextResponse.json({ error: messages[result] }, { status: result === 'not_found' ? 404 : result === 'duplicate' ? 409 : 503 })
+    return NextResponse.json({ error: messages[result] }, { status: result === 'not_found' ? 404 : result === 'duplicate' ? 409 : result === 'invalid_phone' ? 400 : 503 })
   } catch {
     return NextResponse.json({ error: '등록 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.' }, { status: 500 })
   }

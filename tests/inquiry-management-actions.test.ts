@@ -17,7 +17,7 @@ async function main() {
     const confirmedBefore = await db.inquiry.findUniqueOrThrow({ where: { id: confirmed.id } })
     const deliveredBefore = await db.inquiry.findUniqueOrThrow({ where: { id: delivered.id } })
     assert.deepEqual(warpDeliveryState(confirmed), { status: 'delivered', label: '등록 완료', reason: '사용자가 WARP에 직접 등록했음을 확인했습니다.' })
-    assert.deepEqual(await warpDeliverySummary(db, key), { configured: false, delivered: 2, pending: 0, failed: 0 })
+    assert.deepEqual(await warpDeliverySummary(db, key), { configured: false, delivered: 2, pending: 0, failed: 0, duplicates: 0 })
     assert.equal(await requestWarpRegistration(db, confirmed.id), 'delivered')
     await claimWorker(db, owner, now)
     await db.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { status: 'ready' } })

@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { normalizeInquiryPhone } from '@/lib/format'
 import { claimWorker, INQUIRY_SCOPE_ID, releaseWorker } from '@/lib/inquiry-sync'
-import { deliver, dispatchPendingWarp, duplicateInquiryIds, MANUAL_CONFIRMATION, MANUAL_REGISTRATION, refreshWarpPhoneChecks, requestWarpRegistration, scope, warpActivityId, warpDeliveryState } from '@/lib/warp-delivery'
+import { deliver, dispatchPendingWarp, duplicateInquiryIds, MANUAL_CONFIRMATION, MANUAL_REGISTRATION, refreshWarpPhoneChecks, requestWarpRegistration, scope, warpActivityId, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
 const env = { WARP_MARKETING_API_KEY: 'synthetic-duplicate-check-key-not-production', WARP_DELIVERY_ENABLED: 'false' }
@@ -50,13 +50,14 @@ async function main() {
     assert.deepEqual(sent, [unique.sourceId])
     assert.equal(result.failed, 1)
     assert.equal(warpDeliveryState(await db.inquiry.findUniqueOrThrow({ where: { id: unique.id } }), false, at).status, 'duplicate')
+    assert.deepEqual(await warpDeliverySummary(db, env), { configured: false, delivered: 1, pending: 1, failed: 0, duplicates: 3 }, 'duplicates do not inflate the pending/error backlog')
     assert.equal(await db.inquiry.count(), 6, 'duplicates are preserved')
   })
 
   await withWorkerDatabase(async db => {
     await claimWorker(db, owner, at)
     const rows = await Promise.all([1, 2, 3].map(n => db.inquiry.create({ data: input(n) })))
-    const invalidPhone = await db.inquiry.create({ data: { ...input(4), phone: '-' } })
+    const invalidPhone = await db.inquiry.create({ data: { ...input(4), phone: '-', warpError: MANUAL_REGISTRATION } })
     let calls = 0
     const send: typeof fetch = async (url, init) => {
       calls++
@@ -77,6 +78,8 @@ async function main() {
     assert.equal(checked[0].warpPhoneStatus, 'clear')
     assert.equal(checked[1].warpPhoneStatus, 'duplicate')
     assert.equal(checked[3].warpPhoneStatus, 'invalid', 'one invalid legacy phone cannot poison the rest of a batch')
+    assert.equal(warpDeliveryState(checked[3], false, at).label, '연락처 확인 필요', 'invalid queued inquiry must not stay registered-as-queued')
+    assert.equal(await requestWarpRegistration(db, invalidPhone.id, at), 'invalid_phone')
     assert.equal(warpDeliveryState(checked[2], true, at).status, 'delivered', 'our own receipt is restored, not classified as a different customer')
     assert.equal(checked[2].warpActivityId, warpActivityId(sourceId(3)))
     assert.equal(await db.customer.count(), 0, 'lookup does not create local CRM data')

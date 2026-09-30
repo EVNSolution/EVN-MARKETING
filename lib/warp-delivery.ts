@@ -61,8 +61,8 @@ export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError
     status: 'duplicate', label: '중복',
     reason: localDuplicate && warpDuplicate ? '수집된 문의 및 WARP 고객과 연락처 중복' : localDuplicate ? '수집된 문의와 연락처 중복' : 'WARP 고객과 연락처 중복',
   }
-  if (row.warpError === MANUAL_REGISTRATION) return { status: 'queued', label: '등록 요청됨', reason: null }
   if (row.warpPhoneStatus === 'invalid') return { status: 'checking', label: '연락처 확인 필요', reason: '연락처 형식을 확인해 주세요.' }
+  if (row.warpError === MANUAL_REGISTRATION) return { status: 'queued', label: '등록 요청됨', reason: null }
   if (!phoneCheckClear(row, now)) return { status: 'checking', label: '중복 확인 중', reason: row.warpPhoneStatus === 'unavailable'
     ? 'WARP 조회에 실패해 다시 확인 중입니다.' : 'WARP 고객과 연락처를 비교하고 있습니다.' }
   if (row.warpError) return { status: 'retrying', label: '재시도 대기', reason: '등록에 실패했습니다. 자동 등록이 꺼져 있으면 등록하기로 다시 요청해 주세요.' }
@@ -80,6 +80,7 @@ export async function requestWarpRegistration(db: PrismaClient, id: string, now 
     if (row.warpDeliveredAt) return 'delivered' as const
     if (row.warpError === MANUAL_CONFIRMATION) return 'delivered' as const
     if (warpDeliveryState(row, (await duplicateInquiryIds(tx)).has(id), now).status === 'duplicate') return 'duplicate' as const
+    if (row.warpPhoneStatus === 'invalid') return 'invalid_phone' as const
     if (row.warpError === MANUAL_REGISTRATION) return 'queued' as const
     const state = await tx.inquirySyncState.findUnique({ where: { id: INQUIRY_SCOPE_ID } })
     if (!state?.workerOwner || !['ready', 'running', 'success'].includes(state.status) || !state.workerHeartbeatAt || !state.workerLeaseExpiresAt
@@ -148,14 +149,21 @@ export async function checkWarpConnection(send: typeof fetch = fetch, env: Env =
 }
 
 export async function warpDeliverySummary(db: PrismaClient, env: Env = process.env) {
-  const [delivered, pending, failed] = await Promise.all([
-    db.inquiry.count({ where: { ...scope, OR: [{ warpDeliveredAt: { not: null } }, { warpError: MANUAL_CONFIRMATION }] } }),
-    db.inquiry.count({ where: { ...scope, warpDeliveredAt: null,
-      OR: [{ warpError: null }, { warpError: { not: MANUAL_CONFIRMATION } }] } }),
-    db.inquiry.count({ where: { ...scope, warpDeliveredAt: null,
-      warpError: { not: null, notIn: [MANUAL_REGISTRATION, MANUAL_CONFIRMATION, ...duplicateErrors] } } }),
+  const [rows, localDuplicates] = await Promise.all([
+    db.inquiry.findMany({ where: scope, select: { id: true, warpDeliveredAt: true, warpError: true, warpPhoneStatus: true } }),
+    duplicateInquiryIds(db),
   ])
-  return { configured: env.WARP_DELIVERY_ENABLED === 'true', delivered, pending, failed }
+  const counts = { delivered: 0, pending: 0, failed: 0, duplicates: 0 }
+  for (const row of rows) {
+    const status = warpDeliveryState(row, localDuplicates.has(row.id)).status
+    if (status === 'delivered') counts.delivered++
+    else if (status === 'duplicate') counts.duplicates++
+    else {
+      counts.pending++
+      if (row.warpError && row.warpError !== MANUAL_REGISTRATION) counts.failed++
+    }
+  }
+  return { configured: env.WARP_DELIVERY_ENABLED === 'true', ...counts }
 }
 
 export const rowSelect = { id: true, sourceId: true, inquiryDate: true, inquiryTime: true, sourceStatus: true, name: true, phone: true } as const
