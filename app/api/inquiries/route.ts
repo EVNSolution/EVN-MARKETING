@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
-import { warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
+import { duplicateInquiryIds, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { inquiryCustomerName } from '@/lib/format'
 import {
   INQUIRY_COMPANY_ID,
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
 
   try {
     const now = new Date()
-    const [total, rows, state, latestRun, statusRows, emptyStatusCount, activeRun, warp] = await Promise.all([
+    const [total, rows, state, latestRun, statusRows, emptyStatusCount, activeRun, warp, duplicates] = await Promise.all([
       prisma.inquiry.count({ where }),
       prisma.inquiry.findMany({
         where,
@@ -88,6 +88,7 @@ export async function GET(request: Request) {
         select: { status: true, createdAt: true, heartbeatAt: true },
       }),
       warpDeliverySummary(prisma),
+      duplicateInquiryIds(prisma),
     ])
 
     const currentStatus = inquirySyncStatus(state, activeRun?.status, now)
@@ -96,7 +97,7 @@ export async function GET(request: Request) {
       rows: rows.map(({ warpDeliveredAt, warpError, ...row }) => ({
         ...row,
         name: inquiryCustomerName(row.name, row.phone),
-        warpDelivery: warpDeliveryState({ warpDeliveredAt, warpError }),
+        warpDelivery: warpDeliveryState({ warpDeliveredAt, warpError }, duplicates.has(row.id)),
       })),
       warp,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },

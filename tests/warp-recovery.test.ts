@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import type { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, ensureSyncState, INQUIRY_SCOPE_ID, releaseWorker, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
-import { MANUAL_CONFIRMATION, scope, warpActivityId } from '@/lib/warp-delivery'
+import { MANUAL_CONFIRMATION, scope, WARP_RECEIPT_UNVERIFIED, warpActivityId } from '@/lib/warp-delivery'
 import { applyWarpRecovery, MAX_RECOVERY_ROWS, parseRecoveryPlan, planWarpRecovery, recoverySha256, type RecoveryEvent } from '@/lib/warp-recovery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
@@ -49,7 +49,8 @@ function receiver() {
     assert.equal(new Headers(init.headers).get('x-api-key'), env.WARP_MARKETING_API_KEY)
     assert.equal(init.signal?.aborted, false)
     const payload = JSON.parse(String(init.body))
-    assert.deepEqual(Object.keys(payload).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'sourceId', 'inquiryDate', 'inquiryTime', 'sourceStatus', 'name', 'phone'].sort())
+    assert.deepEqual(Object.keys(payload).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'sourceId', 'inquiryDate', 'inquiryTime', 'sourceStatus', 'name', 'phone', 'rejectExistingCustomer'].sort())
+    assert.equal(payload.rejectExistingCustomer, true)
     assert.equal(payload.phone, customer.phone)
     assert.equal(payload.companyScopeId, scope.companyScopeId)
     calls.push(payload.sourceId)
@@ -103,6 +104,7 @@ async function testAsymmetricRecovery() {
     assert.equal(restored.warpCustomerId, customerId)
     assert.equal(restored.warpActivityId, warpActivityId(originalId))
     assert.ok(restored.warpDeliveredAt)
+    assert.equal(restored.warpError, WARP_RECEIPT_UNVERIFIED, 'replay alone is retained as confirmation-needed evidence')
     assert.deepEqual(await db.inquiry.findUniqueOrThrow({ where: { id: olderWarp.id } }), olderWarp, 'already-delivered receipt remains original historical evidence')
     for (const row of [unselected, unselectedDelivered, otherScope]) assert.deepEqual(await db.inquiry.findUniqueOrThrow({ where: { id: row.id } }), row)
     assert.deepEqual(await db.customer.findMany(), originalCustomers)

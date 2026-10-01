@@ -4,6 +4,8 @@
 
 기계 판독 계약은 [WARP_MARKETING_INQUIRIES.json](WARP_MARKETING_INQUIRIES.json)이다. 이 변경은 기존 WARP–BUILDUP 계약과 공유키 권한을 수정하지 않는다. [Issue #48](https://github.com/EVNSolution/EVN-WARP/issues/48)과 [PR #49](https://github.com/EVNSolution/EVN-WARP/pull/49)는 빈 이름을 그대로 두던 이전 계약의 검토 이력이다. 이번 신규 고객 표시 이름 규칙은 후속 Owner 검토가 필요하다. 2026-09-17 기존 Owner 검토에서는 UUID 대소문자 중복 및 독립 DB 연결의 잠금 경합을 재현해 수정했다. 최종 승인·배포 Revision과 결과는 [후속 PR #50](https://github.com/EVNSolution/EVN-WARP/pull/50)에 기록한다.
 
+2026-10-01 Marketing 임시 보호는 기존 9개 문자열 필드에 `rejectExistingCustomer: true`를 추가한다. 이를 지원하는 [WARP PR #51](https://github.com/EVNSolution/EVN-WARP/pull/51)은 아직 승인·배포되지 않았으며 현재 수신기는 guarded payload를 HTTP 400 `bad_payload`로 거부한다. Marketing은 이를 `warp_registration_guard_unavailable`로 보관하고 신규 등록을 닫힌 상태로 보류한다. WARP #51 배포 전에는 새 등록을 재개하지 않는다.
+
 ## 변경 결과
 
 `POST /api/external/marketing-inquiries`는 전용 `WARP_MARKETING_API_KEY`로 고정된 mleverage-admin 회사·홈페이지 문의만 받는다. 키는 32자 이상·공백 없음이어야 하며, 비어 있으면 503으로 비활성화한다. 요청은 16KB까지만 읽는다.
@@ -58,4 +60,4 @@ console.log('Authentication and public HTTPS access passed; no CRM records writt
 JS
 ```
 
-다음 단계에서는 계약의 9개 필드에 맞는 실제 원본 문의 한 건을 발신기에서 전송한다. 첫 응답은 200과 `created: true`, 같은 `sourceId`의 재전송은 200과 `duplicate: true`여야 한다. CRM의 고객 및 문의 이력을 확인한 후 미전달 문의 처리를 시작한다. 409 `ambiguous_phone`은 자동 재시도하지 말고 담당자가 중복 연락처를 확인한다. 503 `temporarily_unavailable`은 같은 `sourceId`를 유지한 채 지연 재시도한다. 서버 로그에는 `marketing_inquiry_failed`와 허용된 오류 코드·재시도 여부만 남는다.
+다음 단계에서는 계약의 9개 문자열 필드와 `rejectExistingCustomer: true`에 맞는 실제 원본 문의 한 건을 발신기에서 전송한다. 첫 응답은 200과 `created: true`, 같은 `sourceId`의 재전송은 200과 `duplicate: true`여야 한다. CRM의 고객 및 문의 이력을 확인한 후 미전달 문의 처리를 시작한다. 409 `phone_exists`와 `ambiguous_phone`은 자동 재시도하지 말고 담당자가 중복 연락처를 확인한다. 400 `bad_payload`는 WARP #51 미배포로 보고 등록을 보류한다. 503 `temporarily_unavailable`은 같은 `sourceId`를 유지한 채 지연 재시도한다. 서버 로그에는 `marketing_inquiry_failed`와 허용된 오류 코드·재시도 여부만 남는다.
