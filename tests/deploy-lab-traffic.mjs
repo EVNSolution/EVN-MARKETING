@@ -11,7 +11,7 @@ const cookie = '__Secure-authjs.session-token'
 const token = await encode({ secret: 'synthetic-lab-secret-at-least-32-characters', salt: cookie,
   token: { sub: 'synthetic-user', id: 'synthetic-user', role: 'admin', email: 'synthetic@example.invalid' } })
 const headers = { Host: 'localhost:3443', Cookie: `${cookie}=${token}` }
-const counters = { reads: 0, saves: 0, uploads: 0, downloads: 0, errors: 0, maxRequestMs: 0 }
+const counters = { reads: 0, saves: 0, uploads: 0, downloads: 0, errors: 0, expiredReleaseReloads: 0, maxRequestMs: 0 }
 let failedStatus = null
 
 function request(path, method = 'GET', body, extra = {}, hold = false) {
@@ -26,7 +26,11 @@ function request(path, method = 'GET', body, extra = {}, hold = false) {
         counters.maxRequestMs = Math.max(counters.maxRequestMs, performance.now() - started)
         if (response.statusCode !== 200) {
           failedStatus = response.statusCode
-          return reject(new Error('synthetic_http_failure'))
+          const error = new Error('synthetic_http_failure')
+          error.releaseExpired = response.statusCode === 409
+            && response.headers['x-marketing-release-error'] === 'expired'
+            && Buffer.concat(chunks).toString().includes('"code":"release_expired"')
+          return reject(error)
         }
         resolve({ body: Buffer.concat(chunks), headers: response.headers })
       })
@@ -46,6 +50,21 @@ function request(path, method = 'GET', body, extra = {}, hold = false) {
       req.flushHeaders()
     }
   })
+}
+
+// A failed candidate is retired immediately on rollback. Model one explicit page
+// reload after its proxy rejects an unexecuted write; all other failures remain fatal.
+async function writeRequest(path, method, body, extra) {
+  try {
+    return await request(path, method, body, extra)
+  } catch (error) {
+    if (!error.releaseExpired) throw error
+    const revision = JSON.parse((await request('/api/readyz')).body).revision
+    assert.match(revision, /^[ab]{40}$/)
+    assert.notEqual(revision, extra['x-deployment-id'])
+    counters.expiredReleaseReloads++
+    return request(path, method, body, { ...extra, 'x-deployment-id': revision })
+  }
 }
 
 function multipart(payload) {
@@ -73,14 +92,14 @@ try {
       assert.match(revision, /^[ab]{40}$/)
       await Promise.all([0, 1].map(async index => {
         const id = `synthetic-load-${index}`, memo = `synthetic-cycle-${cycle}`
-        await request(`/api/customers/${id}`, 'PUT', Buffer.from(JSON.stringify({ memo })),
+        await writeRequest(`/api/customers/${id}`, 'PUT', Buffer.from(JSON.stringify({ memo })),
           { 'content-type': 'application/json', 'x-deployment-id': revision })
         counters.saves++
         assert.equal(JSON.parse((await request(`/api/customers/${id}`)).body).memo, memo)
         counters.reads++
         const payload = `%PDF-synthetic-${index}-${cycle}`
         const { body, headers: extra } = multipart(payload)
-        const uploaded = JSON.parse((await request(`/api/customers/${id}/documents`, 'POST', body,
+        const uploaded = JSON.parse((await writeRequest(`/api/customers/${id}/documents`, 'POST', body,
           { ...extra, 'x-deployment-id': revision })).body).doc
         counters.uploads++
         assert.equal((await request(uploaded.path)).body.toString(), payload)

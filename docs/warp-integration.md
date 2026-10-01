@@ -43,13 +43,15 @@
 
 1. 원본 문의는 각각 보존한다. 정기 수집은 마지막 성공 수집 경계까지의 신규 문의만 추가한다.
 2. `WARP_MARKETING_API_KEY`와 `WARP_DELIVERY_ENABLED=true`가 함께 설정돼야 자동 전송한다. 키만 설정하면 비활성 상태를 유지한다.
-3. `POST https://warp.cleversystem.ai/api/external/marketing-inquiries`로 한 번에 최대 50건을 순차 전송하고 다음 순회에서 나머지를 이어간다. 계약에 정한 문자열 9개만 보낸다.
+3. `POST https://warp.cleversystem.ai/api/external/marketing-inquiries`로 한 번에 최대 50건을 순차 전송하고 다음 순회에서 나머지를 이어간다. 기존 문자열 9개와 `rejectExistingCustomer: true`를 보낸다. 이 guard를 지원하는 [WARP PR #51](https://github.com/EVNSolution/EVN-WARP/pull/51)은 승인·배포 전이다.
 4. 기본 연락처의 숫자가 완전히 일치하는 기존 고객 한 명이면 기존 프로필을 유지하고 새 문의 이력만 추가한다. 일치 고객이 없으면 B2C 잠재고객을 만든다. 회사 대표번호·추가 연락처로 매칭을 확대하지 않는다.
 5. 여러 고객의 연락처가 같으면 `warp_customer_conflict`로 보류하고 자동 재시도하지 않는다. 운영자가 중복 고객을 확인한 뒤 재개 여부를 결정해야 한다.
 6. 원본 UUID를 소문자로 정규화해 결정적인 활동 ID를 검증한다. 성공 응답의 고객·활동 ID와 `created`/`duplicate` 조합이 유효해야 완료 처리한다. `created`는 문의 활동 생성 여부이며 신규 고객 생성 여부가 아니다.
 7. 날짜·시간 문자열은 보존하고 CRM 날짜는 한국 시간으로 해석한다. 고객 또는 활동 삭제 시 해당 중복 방지 기록도 삭제되므로 완료 문의의 임의 재전송 기능은 제공하지 않는다.
 
 원본 다섯 필드는 CRM 활동 내용에서 확인한다. 화면의 대기 건수에는 오류 건수도 포함된다. 인증·접속·응답 규격 오류는 전체 전송을 1시간 멈춘다. 그 외 개별 실패는 1시간 후 다시 시도하지만 연락처 충돌은 계속 보류한다. 고객 정보, 실제 키, 응답 본문은 로그로 남기지 않는다.
+
+WARP #51이 승인·배포된 뒤에는 guarded payload가 더 이상 400 `bad_payload`로 거부되지 않는지 먼저 확인한다. worker를 멈추고 새 백업을 확보한 상태에서 `warpError = 'warp_registration_guard_unavailable'`인 행만 집계한 뒤, 그 행의 `warpError`와 `warpAttemptedAt`만 `null`로 되돌려 재개한다. receipt ID와 전달 시각, `warp_existing_customer`, `warp_receipt_unverified`, 다른 오류는 수정하지 않는다. 변경 건수를 사전 집계와 대조한 뒤 pilot과 CRM 확인을 거쳐 자동 전송을 다시 켠다.
 
 ## 활성화 순서
 
@@ -58,7 +60,7 @@
 1. 전용 키를 승인된 보안 경로로 전달받아 실행 프로세스의 환경변수로 주입한다. 키는 채팅, 명령 인자, `.env`, Git, 문서, 로그, 브라우저에 넣지 않는다. 자동 전송은 계속 비활성으로 둔다.
 2. `npm run warp:delivery -- check`를 실행한다. 인증된 빈 요청이 HTTP 400 `bad_payload`를 반환하면 `ok`다. CRM에는 쓰지 않는다.
 3. 실행 중인 수집 worker를 정상 종료한 뒤 `npm run warp:delivery -- pilot`을 실행한다. 같은 worker lease로 보호하며, 대기 문의 1건과 동일 문의의 재전송만 검사한다. 첫 응답은 `created=true, duplicate=false`, 재전송은 `created=false, duplicate=true`여야 하고 고객·활동 ID가 같아야 한다.
-4. 첫 전송의 응답 유실 후 다시 실행해 이미 등록된 문의를 확인한 경우는 `ok_recovered_duplicate`로 신규 생성 확인과 구분한다. 이 경우에도 동일 고객·활동의 중복 응답을 확인해야 완료 처리한다. 재시도 대기 시간과 무관하게 같은 가장 오래된 미완료 문의를 선택한다. 연락처 충돌로 보류된 문의는 제외한다.
+4. 첫 전송에서 `created: true`를 확인하고 같은 실행의 replay가 일치하면 정상 완료한다. 최초 응답 증거 없이 replay receipt만 확인한 경우는 `ok_recovered_receipt_unverified`와 `등록 확인 필요`로 남긴다. 재시도 대기 시간과 무관하게 같은 가장 오래된 미완료 문의를 선택하며 연락처 중복과 guard 보류는 제외한다.
 5. WARP 고객관리에서 신규 고객 또는 기존 고객 프로필 보존과 문의 이력의 날짜·시간·상태를 직접 확인한다. CLI 성공만으로 이 확인을 대신하지 않는다.
 6. 위 확인 후에만 `WARP_DELIVERY_ENABLED=true`로 worker를 재시작해 나머지를 순차 처리한다. 로컬 화면에도 상태를 반영하려면 앱 프로세스에 같은 활성화 설정이 필요하다.
 7. Issue #48에 발신기 커밋, 합성 검사, 인증 검사, 최초·재전송 결과, CRM 확인, 완료·대기·오류 집계를 남긴다. 키나 고객 식별정보는 포함하지 않는다.

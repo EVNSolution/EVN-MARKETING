@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { claimNextRun, claimWorker, enqueueSync, finishRun, INQUIRY_SCOPE_ID, reconcile, SyncError } from '@/lib/inquiry-sync'
-import { dispatchPendingWarp, MANUAL_CONFIRMATION, MANUAL_REGISTRATION, pilotPendingWarp, requestWarpRegistration, scope, warpActivityId, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
+import { dispatchPendingWarp, MANUAL_CONFIRMATION, MANUAL_REGISTRATION, pilotPendingWarp, requestWarpRegistration, scope, WARP_EXISTING_CUSTOMER, WARP_RECEIPT_UNVERIFIED, warpActivityId, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { markSourceManaging, sourceUrl } from '@/workers/mleverage-source'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
@@ -13,12 +13,22 @@ async function main() {
     const now = new Date('2026-09-30T00:00:00Z')
     const confirmed = await db.inquiry.create({ data: { ...scope, ...row, lastSeenAt: now, warpError: MANUAL_CONFIRMATION } })
     const delivered = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '2'), lastSeenAt: now,
-      warpCustomerId: 'authentic-customer', warpActivityId: warpActivityId(row.sourceId.replace(/1$/, '2')), warpDeliveredAt: now, warpAttemptedAt: now } })
+      phone: '010-0000-0002', warpCustomerId: 'authentic-customer', warpActivityId: warpActivityId(row.sourceId.replace(/1$/, '2')), warpDeliveredAt: now, warpAttemptedAt: now } })
+    const existing = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '6'), phone: '010-0000-0006', lastSeenAt: now,
+      warpCustomerId: 'existing-customer', warpActivityId: warpActivityId(row.sourceId.replace(/1$/, '6')), warpDeliveredAt: now, warpAttemptedAt: now, warpError: WARP_EXISTING_CUSTOMER } })
+    const unverified = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '7'), phone: '010-0000-0007', lastSeenAt: now,
+      warpCustomerId: 'receipt-customer', warpActivityId: warpActivityId(row.sourceId.replace(/1$/, '7')), warpDeliveredAt: now, warpAttemptedAt: now, warpError: WARP_RECEIPT_UNVERIFIED } })
     const confirmedBefore = await db.inquiry.findUniqueOrThrow({ where: { id: confirmed.id } })
     const deliveredBefore = await db.inquiry.findUniqueOrThrow({ where: { id: delivered.id } })
     assert.deepEqual(warpDeliveryState(confirmed), { status: 'delivered', label: '등록 완료', reason: '사용자가 WARP에 직접 등록했음을 확인했습니다.' })
-    assert.deepEqual(await warpDeliverySummary(db, key), { configured: false, delivered: 2, pending: 0, failed: 0 })
+    assert.deepEqual(await warpDeliverySummary(db, key), { configured: false, delivered: 2, pending: 1, failed: 1, duplicates: 1 })
     assert.equal(await requestWarpRegistration(db, confirmed.id), 'delivered')
+    const existingBefore = await db.inquiry.findUniqueOrThrow({ where: { id: existing.id } })
+    assert.equal(await requestWarpRegistration(db, existing.id), 'duplicate')
+    assert.deepEqual(await db.inquiry.findUniqueOrThrow({ where: { id: existing.id } }), existingBefore, 'resolved duplicate receipt cannot be requeued or cleared')
+    const unverifiedBefore = await db.inquiry.findUniqueOrThrow({ where: { id: unverified.id } })
+    assert.equal(await requestWarpRegistration(db, unverified.id), 'blocked')
+    assert.deepEqual(await db.inquiry.findUniqueOrThrow({ where: { id: unverified.id } }), unverifiedBefore, 'unverified receipt cannot be requeued or cleared')
     await claimWorker(db, owner, now)
     await db.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { status: 'ready' } })
     let calls = 0
@@ -32,15 +42,15 @@ async function main() {
     assert.equal(await pilotPendingWarp(db, owner, send, key, () => now), 'warp_no_pending_inquiry')
     assert.equal(calls, 0, 'manual confirmation is not sent by the pilot')
 
-    const pilotRow = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '3'), lastSeenAt: now } })
+    const pilotRow = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '3'), phone: '010-0000-0003', lastSeenAt: now } })
     assert.equal(await pilotPendingWarp(db, owner, send, key, () => now), 'ok')
     assert.deepEqual(sent, [pilotRow.sourceId, pilotRow.sourceId], 'nullable pending rows remain eligible for the pilot')
 
-    const automatic = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '4'), lastSeenAt: now } })
+    const automatic = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '4'), phone: '010-0000-0004', lastSeenAt: now } })
     assert.deepEqual(await dispatchPendingWarp(db, owner, send, { ...key, WARP_DELIVERY_ENABLED: 'true' }, () => now), { configured: true, delivered: 1, failed: 0 })
     assert.equal(sent.at(-1), automatic.sourceId, 'new pending rows remain eligible for automatic delivery')
 
-    const requested = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '5'), lastSeenAt: now } })
+    const requested = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '5'), phone: '010-0000-0005', lastSeenAt: now } })
     assert.equal(await requestWarpRegistration(db, requested.id, now), 'queued')
     assert.deepEqual(await dispatchPendingWarp(db, owner, send, key, () => now), { configured: false, delivered: 1, failed: 0 })
     assert.equal(sent.at(-1), requested.sourceId, 'manual requests remain eligible while automatic delivery is disabled')
@@ -51,7 +61,7 @@ async function main() {
   await withWorkerDatabase(async (db, inspect) => {
     const now = new Date()
     const named = await db.inquiry.create({ data: { ...scope, ...row, lastSeenAt: now } })
-    const unnamed = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '2'), name: null, lastSeenAt: now } })
+    const unnamed = await db.inquiry.create({ data: { ...scope, ...row, sourceId: row.sourceId.replace(/1$/, '2'), name: null, phone: '010-0000-0002', lastSeenAt: now } })
     const foreign = await db.inquiry.create({ data: { ...scope, ...row, companyScopeId: 'other-company', lastSeenAt: now } })
     assert.equal(await requestWarpRegistration(db, foreign.id), 'not_found')
     assert.equal(await requestWarpRegistration(db, named.id), 'worker_offline')
@@ -66,7 +76,7 @@ async function main() {
       calls++
       const payload = JSON.parse(String(init?.body))
       assert.equal(payload.sourceId, calls === 1 ? named.sourceId : unnamed.sourceId, 'only the requested row is sent')
-      assert.equal(payload.name, calls === 1 ? row.name : '미상(📞 0001)', 'legacy blank names use the WARP naming rule before transmission')
+      assert.equal(payload.name, calls === 1 ? row.name : '미상(📞 0002)', 'legacy blank names use the WARP naming rule before transmission')
       return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(payload.sourceId), created: true, duplicate: false })
     }
     assert.deepEqual(await dispatchPendingWarp(db, owner, send, key), { configured: false, delivered: 1, failed: 0 })

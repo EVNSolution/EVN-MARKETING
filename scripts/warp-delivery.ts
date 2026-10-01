@@ -30,7 +30,7 @@ async function main() {
 
 main().then((result) => {
   console.log(result)
-  if (result !== 'ok' && result !== 'ok_recovered_duplicate') process.exitCode = 1
+  if (result !== 'ok' && result !== 'ok_recovered_receipt_unverified') process.exitCode = 1
 }).catch(() => {
   console.error('warp_delivery_command_failed')
   process.exitCode = 1

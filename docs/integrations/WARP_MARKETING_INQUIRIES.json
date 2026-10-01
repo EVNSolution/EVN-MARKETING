@@ -1,18 +1,19 @@
 {
   "schema_version": 1,
   "contract_id": "warp-marketing-inquiries",
-  "status": "follow-up-owner-review-pending",
+  "status": "existing-customer-guard-provider-review-pending",
   "owner": "OziinG",
   "review": {
     "issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
-    "pull_request": "https://github.com/EVNSolution/EVN-WARP/pull/50",
+    "pull_request": "https://github.com/EVNSolution/EVN-WARP/pull/51",
     "required_before_production": true,
     "source_review_date": "2026-09-17",
     "activation_required": [
       "Obtain Owner review of the follow-up generated display-name policy; Issue #48 and PR #49 reviewed the earlier blank-name policy.",
       "Verify the caller repository uses this follow-up contract and passes its delivery tests.",
       "Provision the dedicated key through the approved secret-management path on both sides.",
-      "Verify an authenticated delivery, replay, and CRM readback before processing the backlog."
+      "Verify an authenticated delivery, replay, and CRM readback before processing the backlog.",
+      "Obtain Owner approval and deploy WARP PR #51 before guarded Marketing delivery is enabled."
     ]
   },
   "authentication": {
@@ -74,6 +75,9 @@
     "name",
     "phone"
   ],
+  "optional_request_fields": {
+    "rejectExistingCustomer": true
+  },
   "response_fields": [
     "ok",
     "customerId",
@@ -86,6 +90,7 @@
     "Explicit deletion of the receipt activity or its customer ends replay protection and a later delivery can recreate records.",
     "An exact unique normalized primary phone match receives a new activity; do not overwrite its customer profile.",
     "Multiple primary phone matches return ambiguous_phone and create no record.",
+    "When rejectExistingCustomer is true, replay lookup runs first and any existing normalized primary phone returns phone_exists without writes.",
     "Marketing fills missing inquiry names with WARP's unknownCustomerName using the phone before saving or sending, including legacy blanks at read/send time. The receiver uses the supplied name (or its own fallback when blank) and preserves the received name and source status in activity content. Never overwrite a matching customer's profile.",
     "Read and append only within the fixed source scope. No arbitrary customer updates or deletion.",
     "Interpret original date and minute as Asia/Seoul for CRM date fields and preserve the original strings in activity content."

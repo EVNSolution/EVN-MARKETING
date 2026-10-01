@@ -7,7 +7,7 @@ import { createClient } from '@libsql/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, releaseWorker, INQUIRY_SOURCE, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID } from '@/lib/inquiry-sync'
-import { checkWarpConnection, dispatchPendingWarp, pilotPendingWarp, warpActivityId, warpConfigured, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
+import { checkWarpConnection, deliver, dispatchPendingWarp, duplicateInquiryIds, pilotPendingWarp, requestWarpRegistration, WARP_EXISTING_CUSTOMER, WARP_RECEIPT_UNVERIFIED, warpActivityId, warpConfigured, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
 const keyOnly = { WARP_MARKETING_API_KEY: 'synthetic-test-key-never-used-in-production' }
@@ -18,6 +18,7 @@ const sourceId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12
 
 async function main() {
   await testStopDuringHeartbeat()
+  await testLocalDuplicates()
   const temp = await mkdtemp(path.join(tmpdir(), 'evn-warp-delivery-test-'))
   const url = `file:${path.join(temp, 'test.db')}`
   const sql = createClient({ url })
@@ -30,7 +31,7 @@ async function main() {
   const now = () => time
   const add = (n: number, overrides = {}) => db.inquiry.create({ data: {
     ...scope, sourceId: sourceId(n), inquiryDate: '2026-09-15', inquiryTime: '09:07',
-    name: null, sourceStatus: null, phone: '010-0000-0000', lastSeenAt: now(), ...overrides,
+    name: null, sourceStatus: null, phone: `010-0000-${String(n).padStart(4, '0')}`, lastSeenAt: now(), ...overrides,
   } })
   let calls = 0
   const receipts = new Set<string>()
@@ -40,9 +41,10 @@ async function main() {
     assert.equal(init?.redirect, 'error')
     assert.equal(new Headers(init?.headers).get('x-api-key'), env.WARP_MARKETING_API_KEY)
     const body = JSON.parse(String(init?.body))
-    assert.deepEqual(Object.keys(body).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'sourceId', 'inquiryDate', 'inquiryTime', 'sourceStatus', 'name', 'phone'].sort())
-    assert(Object.values(body).every((field) => typeof field === 'string'), 'all nine fields are strings')
-    assert.equal(body.name, '미상(📞 0000)')
+    assert.deepEqual(Object.keys(body).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'sourceId', 'inquiryDate', 'inquiryTime', 'sourceStatus', 'name', 'phone', 'rejectExistingCustomer'].sort())
+    assert.equal(body.rejectExistingCustomer, true)
+    assert(Object.entries(body).filter(([key]) => key !== 'rejectExistingCustomer').every(([, field]) => typeof field === 'string'), 'all nine inquiry fields are strings')
+    assert.equal(body.name, `미상(📞 ${body.phone.slice(-4)})`)
     assert.equal(body.sourceStatus, '')
     assert.equal(body.companyScopeId, scope.companyScopeId)
     assert.equal(body.sourceId, body.sourceId.toLowerCase())
@@ -55,8 +57,13 @@ async function main() {
     assert.equal(warpConfigured({ WARP_DELIVERY_ENABLED: 'true' }), false)
     assert.equal(warpConfigured({ ...env, WARP_MARKETING_API_KEY: ` ${env.WARP_MARKETING_API_KEY}` }), false)
     assert.deepEqual(warpDeliveryState({ warpDeliveredAt: now(), warpError: 'ignored' }), { status: 'delivered', label: '등록 완료', reason: null })
+    assert.equal(warpDeliveryState({ warpDeliveredAt: now(), warpError: null }, true).status, 'delivered', 'local duplicate does not rewrite historical delivery evidence')
+    assert.equal(warpDeliveryState({ warpDeliveredAt: null, warpError: 'warp_manual_confirmed' }, true).status, 'delivered', 'local duplicate does not rewrite manual confirmation')
+    assert.equal(warpDeliveryState({ warpDeliveredAt: now(), warpError: WARP_EXISTING_CUSTOMER }).status, 'duplicate', 'existing-customer marker wins before delivered timestamp')
+    assert.equal(warpDeliveryState({ warpDeliveredAt: now(), warpError: WARP_RECEIPT_UNVERIFIED }).label, '등록 확인 필요')
     assert.deepEqual(warpDeliveryState({ warpDeliveredAt: null, warpError: null }), { status: 'pending', label: '등록 대기', reason: null })
-    assert.equal(warpDeliveryState({ warpDeliveredAt: null, warpError: 'warp_customer_conflict' }).status, 'blocked')
+    assert.equal(warpDeliveryState({ warpDeliveredAt: null, warpError: 'warp_customer_conflict' }).status, 'duplicate')
+    assert.equal(warpDeliveryState({ warpDeliveredAt: null, warpError: 'warp_registration_guard_unavailable' }).label, '등록 보류')
     const retryState = warpDeliveryState({ warpDeliveredAt: null, warpError: 'private upstream body' })
     assert.equal(retryState.status, 'retrying')
     assert.doesNotMatch(retryState.reason!, /private|upstream/)
@@ -78,6 +85,14 @@ async function main() {
     }, keyOnly), 'ok')
     assert.equal(await checkWarpConnection(async () => Response.json({ error: 'unauthorized' }, { status: 401 }), keyOnly), 'warp_auth_required')
     assert.equal(await db.inquiry.count(), beforeCheck, 'connectivity check does not touch inquiry DB')
+    const guardedPayload = { ...scope, sourceId: sourceId(99), inquiryDate: '2026-09-15', inquiryTime: '09:07', sourceStatus: '', name: '합성', phone: '010-9999-9999' }
+    assert.equal((await deliver(guardedPayload, async (_url, init) => {
+      assert.equal(JSON.parse(String(init?.body)).rejectExistingCustomer, true)
+      return Response.json({ error: 'bad_payload' }, { status: 400 })
+    }, keyOnly)).error, 'warp_registration_guard_unavailable', 'old provider rejects guarded payload without a write')
+    assert.equal((await deliver(guardedPayload, async () => Response.json({ error: 'invalid_phone' }, { status: 400 }), keyOnly)).error, 'warp_invalid_inquiry')
+    assert.equal((await deliver(guardedPayload, async () => Response.json({ error: 'phone_exists' }, { status: 409 }), keyOnly)).error, 'warp_phone_duplicate')
+    assert.equal((await deliver(guardedPayload, async () => Response.json({ error: 'ambiguous_phone' }, { status: 409 }), keyOnly)).error, 'warp_customer_conflict')
 
     assert.equal(await pilotPendingWarp(db, owner, send, keyOnly, now), 'ok')
     assert.equal(calls, 2, 'pilot sends one row and its replay only')
@@ -136,17 +151,10 @@ async function main() {
       await add(8)
       await add(9)
       const connected: typeof fetch = async (url, init) => handleMarketingInquiryRequest(new Request(String(url), init), db, env)
-      assert.equal((await dispatchPendingWarp(db, owner, connected, env, now)).delivered, 2)
-      assert.equal(await db.customer.count(), 1, 'actual receiver attaches both inquiries to one customer')
-      assert.equal(await db.customerActivity.count(), 2)
-      assert.equal((await db.customer.findFirstOrThrow({ select: { name: true } })).name, '미상(📞 0000)')
-      assert((await db.customerActivity.findMany({ select: { content: true } })).every(activity => activity.content?.includes('성함: 미상(📞 0000)')),
-        'actual receiver keeps the generated sender name in each activity')
-      const acknowledged = await db.inquiry.findFirstOrThrow({ where: { ...scope, sourceId: sourceId(8) } })
-      await db.inquiry.update({ where: { id: acknowledged.id }, data: { warpDeliveredAt: null, warpAttemptedAt: null } })
-      assert.equal((await dispatchPendingWarp(db, owner, connected, env, now)).delivered, 1)
-      assert.equal(await db.customerActivity.count(), 2, 'receiver replay preserves one activity')
-      console.log('actual marketing sender / WARP receiver compatibility check passed')
+      assert.deepEqual(await dispatchPendingWarp(db, owner, connected, env, now), { configured: true, delivered: 0, failed: 1 })
+      assert.equal(await db.customer.count(), 0, 'old receiver fails closed on the guarded payload')
+      assert.equal(await db.customerActivity.count(), 0)
+      assert.equal((await db.inquiry.findFirstOrThrow({ where: { ...scope, sourceId: sourceId(8) } })).warpError, 'warp_registration_guard_unavailable')
     } else await claimWorker(db, owner, now())
 
     const lost = await add(12)
@@ -162,9 +170,10 @@ async function main() {
     assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: lost.id } })).warpAttemptedAt?.getTime(), now().getTime())
     assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: held.id } })).warpAttemptedAt, null)
     const beforeRecovery = calls
-    assert.equal(await pilotPendingWarp(db, owner, send, keyOnly, now), 'ok_recovered_duplicate')
+    assert.equal(await pilotPendingWarp(db, owner, send, keyOnly, now), 'ok_recovered_receipt_unverified')
     assert.equal(calls, beforeRecovery + 2, 'retry uses the same oldest inquiry despite the one-hour backoff')
     assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: lost.id } })).warpActivityId, warpActivityId(sourceId(12)))
+    assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: lost.id } })).warpError, WARP_RECEIPT_UNVERIFIED)
     assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: held.id } })).warpDeliveredAt, null)
 
     assert.equal(await pilotPendingWarp(db, owner, async () => Response.json({ error: 'ambiguous_phone' }, { status: 409 }), keyOnly, now), 'warp_customer_conflict')
@@ -197,11 +206,35 @@ async function main() {
   }
 }
 
+async function testLocalDuplicates() {
+  await withWorkerDatabase(async db => {
+    const at = new Date('2026-09-15T00:00:00Z')
+    const base = { ...scope, inquiryDate: '2026-09-15', inquiryTime: '09:00', sourceStatus: null, name: null, lastSeenAt: at }
+    const first = await db.inquiry.create({ data: { ...base, sourceId: sourceId(91), phone: '010-1234-5678', firstSeenAt: at } })
+    const later = await db.inquiry.create({ data: { ...base, sourceId: sourceId(92), phone: '+82 10-1234-5678', firstSeenAt: new Date(at.getTime() + 1) } })
+    await db.inquiry.create({ data: { ...base, companyScopeId: 'other-company', sourceId: sourceId(93), phone: '010-1234-5678', firstSeenAt: new Date(at.getTime() + 2) } })
+    assert.deepEqual([...await duplicateInquiryIds(db)], [later.id], 'normalization and scope mark only the later local duplicate')
+    await claimWorker(db, owner, at)
+    await db.inquirySyncState.update({ where: { id: `${scope.source}:${scope.companyScopeId}:${scope.homepageScopeId}` }, data: { status: 'ready' } })
+    assert.equal(await requestWarpRegistration(db, later.id, at), 'duplicate')
+    let calls = 0
+    const send: typeof fetch = async (_url, init) => {
+      calls++
+      const payload = JSON.parse(String(init?.body))
+      assert.equal(payload.sourceId, first.sourceId)
+      return Response.json({ ok: true, customerId: 'new-customer', activityId: warpActivityId(payload.sourceId), created: true, duplicate: false })
+    }
+    assert.deepEqual(await dispatchPendingWarp(db, owner, send, env, () => at), { configured: true, delivered: 1, failed: 0 })
+    assert.equal(await pilotPendingWarp(db, owner, send, keyOnly, () => at), 'warp_no_pending_inquiry')
+    assert.equal(calls, 1, 'dispatch and pilot never send the later local duplicate')
+  })
+}
+
 async function testStopDuringHeartbeat() {
   await withWorkerDatabase(async (db, inspect) => {
     for (const index of [1, 2]) await db.inquiry.create({ data: {
       ...scope, sourceId: sourceId(index), inquiryDate: '2026-09-22', inquiryTime: '09:00',
-      phone: '010-0000-0000', lastSeenAt: new Date(),
+      phone: `010-0000-${String(index).padStart(4, '0')}`, lastSeenAt: new Date(),
     } })
     await claimWorker(db, owner)
     const controller = new AbortController()

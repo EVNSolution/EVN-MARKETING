@@ -41,6 +41,13 @@ export function phoneLast4(value: string): string {
   return value.replace(/\D/g, '').slice(-4)
 }
 
+/** Match domestic and +82 Korean mobile numbers without relying on display formatting. */
+export function normalizeInquiryPhone(value: string): string {
+  const digits = value.replace(/\D/g, '')
+  const normalized = /^8210\d{8}$/.test(digits) ? `0${digits.slice(2)}` : digits
+  return /^\d{9,15}$/.test(normalized) ? normalized : ''
+}
+
 /**
  * 신원미상 고객명 자동 생성.
  * 전화번호가 있으면 "미상(📞 전화끝4자리)", 없으면 차량번호가 있을 때 "미상(🚚 차량번호끝4자리)",

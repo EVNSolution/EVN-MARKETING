@@ -37,8 +37,11 @@ try {
     db.prepare('INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,sourceStatus,name,phone,lastSeenAt,warpDeliveredAt,warpError) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(`synthetic-${i}`, ...scope, `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
         '2026-09-28', '09:30', '접수', `합성 문의 ${i}`, `010-0000-${String(i).padStart(4, '0')}`, at,
-        i === 1 ? at : null, i === 2 ? 'warp_customer_conflict' : i === 3 ? 'warp_unavailable' : i === 4 ? 'warp_manual_confirmed' : null)
+        [1, 5, 6].includes(i) ? at : null, i === 2 ? 'warp_customer_conflict' : i === 3 ? 'warp_registration_guard_unavailable'
+          : i === 4 ? 'warp_manual_confirmed' : i === 5 ? 'warp_existing_customer' : i === 6 ? 'warp_receipt_unverified' : null)
   }
+  db.prepare("UPDATE Inquiry SET phone='+82 10-0000-0001' WHERE id='synthetic-22'").run()
+  db.prepare("UPDATE Inquiry SET warpCustomerId='existing-customer',warpActivityId='existing-activity' WHERE id='synthetic-5'").run()
   db.prepare('INSERT INTO InquirySyncState(id,source,companyScopeId,homepageScopeId,status,lastSuccessfulAt,nextRunAt,workerHeartbeatAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)')
     .run(scope.join(':'), ...scope, 'ready', at, new Date(Date.now() + 3_600_000).toISOString(), at, at)
 
@@ -93,19 +96,37 @@ try {
   const payload = await (await context.request.get(base + '/api/inquiries?limit=200')).json()
   assert.equal(payload.warp.configured, true, 'web reports enabled intent without receiving a WARP key')
   assert.equal(payload.warp.delivered, 2)
-  assert.equal(payload.warp.pending, 21)
+  assert.equal(payload.warp.pending, 18)
+  assert.equal(payload.warp.duplicates, 3)
   assert.equal(payload.warp.failed, 2)
   const manuallyConfirmed = page.getByRole('row').filter({ hasText: '010-0000-0004' })
   assert.match(await manuallyConfirmed.innerText(), /등록완료/)
   assert.equal(await manuallyConfirmed.getByRole('button', { name: '등록하기' }).count(), 0)
   assert.match(await manuallyConfirmed.getByText('등록완료').getAttribute('title'), /직접 등록/)
+  for (const [id, text] of [[2, 'WARP 고객과 연락처가 중복'], [5, '기존 고객의 문의 이력에 연결'], [22, '수집된 문의와 연락처가 중복']]) {
+    const row = page.getByRole('row').filter({ has: page.getByText(`합성 문의 ${id}`, { exact: true }) })
+    assert.equal(await row.getByText('중복', { exact: true }).evaluate(el => el.tagName), 'SPAN')
+    assert.equal(await row.getByRole('button').count(), 0, 'duplicate marker is noninteractive')
+    assert.match(await row.innerText(), new RegExp(text))
+    assert.match(await row.innerText(), /WARP에서 해당 연락처로 기존 고객을 확인/)
+  }
+  for (const [id, label] of [[3, '등록 보류'], [6, '등록 확인 필요']]) {
+    const row = page.getByRole('row').filter({ has: page.getByText(`합성 문의 ${id}`, { exact: true }) })
+    assert.equal(await row.getByText(label, { exact: true }).evaluate(el => el.tagName), 'SPAN')
+    assert.equal(await row.getByRole('button').count(), 0, 'blocked marker is noninteractive')
+  }
+  assert.match(await page.getByRole('row').filter({ has: page.getByText('합성 문의 3', { exact: true }) }).innerText(), /중복 방지 연동 업데이트가 필요/)
+  const resolved = await context.request.post(base + '/api/inquiries/synthetic-5/warp-registration', { headers: { Origin: base } })
+  assert.equal(resolved.status(), 409)
+  assert.match((await resolved.json()).error, /중복된 연락처/)
+  assert.equal(db.prepare("SELECT warpError FROM Inquiry WHERE id='synthetic-5'").get().warpError, 'warp_existing_customer')
   assert.ok(!JSON.stringify(payload).includes(password))
   const search = page.getByPlaceholder('성함 또는 연락처')
   await search.fill('010-0000-0002')
   await page.getByRole('button', { name: '조회', exact: true }).click()
   await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1)
   assert.match(await page.locator('tbody').innerText(), /010-0000-0002/)
-  assert.match(await page.locator('tbody').innerText(), /보류|확인 필요/)
+  assert.match(await page.locator('tbody').innerText(), /중복/)
   assert.equal((await context.request.get(base + '/api/inquiries?from=2026-02-30')).status(), 400)
   assert.equal((await context.request.post(base + '/api/inquiries/sync', { headers: { Origin: 'https://wrong.example.invalid' } })).status(), 400)
   const queued = page.waitForResponse(response => response.url().endsWith('/api/inquiries/sync') && response.request().method() === 'POST')
