@@ -94,8 +94,16 @@ function runPackagedPilot(expectedCalls) {
   // The stub lives only in this child process; the application keeps its pinned endpoint.
   const stub = `
     import assert from 'node:assert/strict';
-    let calls = 0;
+    let calls = 0, checks = 0;
     globalThis.fetch = async (url, init) => {
+      if (url === 'https://warp.cleversystem.ai/api/external/marketing-inquiries/check') {
+        checks++;
+        assert.equal(init.method, 'POST');
+        assert.equal(init.redirect, 'error');
+        assert.equal(new Headers(init.headers).get('x-api-key'), process.env.WARP_MARKETING_API_KEY);
+        assert.deepEqual(JSON.parse(init.body), ${JSON.stringify({ source: inquiry.source, companyScopeId: inquiry.companyScopeId, homepageScopeId: inquiry.homepageScopeId, items: [{ sourceId: inquiry.sourceId, phone: inquiry.phone }] })});
+        return Response.json({ ok: true, results: [{ sourceId: ${JSON.stringify(inquiry.sourceId)}, exists: false }] });
+      }
       calls++;
       assert.equal(url, 'https://warp.cleversystem.ai/api/external/marketing-inquiries');
       assert.equal(init.method, 'POST');
@@ -104,7 +112,10 @@ function runPackagedPilot(expectedCalls) {
       assert.deepEqual(JSON.parse(init.body), ${JSON.stringify({ ...inquiry, name: '미상(📞 0000)', rejectExistingCustomer: true })});
       return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: ${JSON.stringify(activityId)}, created: calls === 1, duplicate: calls === 2 });
     };
-    process.once('exit', () => assert.equal(calls, ${expectedCalls}, 'packaged pilot fetch count'));
+    process.once('exit', () => {
+      assert.equal(calls, ${expectedCalls}, 'packaged pilot write count');
+      assert.equal(checks, ${expectedCalls ? 1 : 0}, 'packaged pilot read-only check count');
+    });
     await import('/app/warp-delivery.mjs');
   `
   return spawnSync(process.execPath, ['--input-type=module', '--eval', stub, '/app/warp-delivery.mjs', 'pilot'], {
