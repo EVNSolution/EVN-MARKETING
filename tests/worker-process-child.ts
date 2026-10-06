@@ -1,8 +1,9 @@
+import { dispatchPendingWarp } from './warp-phone-check-helper'
 import assert from 'node:assert/strict'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimNextRun, claimWorker, finishRun, heartbeatWorker, reconcile, releaseWorker, SyncError } from '@/lib/inquiry-sync'
-import { dispatchPendingWarp, warpActivityId } from '@/lib/warp-delivery'
+import { warpActivityId } from '@/lib/warp-delivery'
 
 export type Command = {
   action: 'claim' | 'collect' | 'dispatch' | 'heartbeat' | 'release' | 'continue' | 'close'

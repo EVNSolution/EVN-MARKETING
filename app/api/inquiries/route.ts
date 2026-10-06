@@ -40,23 +40,28 @@ export async function GET(request: Request) {
   const to = params.get('to')?.trim() ?? ''
   const status = params.get('status')?.trim() ?? ''
   const query = params.get('q')?.trim() ?? ''
+  const review = params.get('review') ?? ''
   const skip = page && limit ? (page - 1) * limit : NaN
 
   if (!page || !limit || limit > 200 || (from && !validDate(from)) || (to && !validDate(to)) ||
-      (from && to && from > to) || status.length > 100 || query.length > 100 || !Number.isSafeInteger(skip)) {
+      (from && to && from > to) || status.length > 100 || query.length > 100 || !['', 'pending', 'reviewed'].includes(review) || !Number.isSafeInteger(skip)) {
     return NextResponse.json({ error: '조회 조건을 확인해 주세요.' }, { status: 400 })
   }
 
-  const where = {
-    ...scope,
-    ...(from || to ? { inquiryDate: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
-    ...(status ? { sourceStatus: status === '__empty__' ? null : status } : {}),
-    ...(query ? { OR: [{ name: { contains: query } }, { phone: { contains: query } }] } : {}),
-  }
-
   try {
+    const duplicates = await duplicateInquiryIds(prisma)
+    const reviewRows = review ? await prisma.inquiry.findMany({ where: scope, select: { id: true, warpDeliveredAt: true, warpError: true } }) : []
+    const reviewIds = reviewRows.filter(row => warpDeliveryState(row, duplicates.has(row.id)).status === (review === 'pending' ? 'duplicate' : 'duplicate_reviewed')).map(row => row.id)
+    const where = {
+      ...scope,
+      ...(review ? { id: { in: reviewIds } } : {}),
+      ...(from || to ? { inquiryDate: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+      ...(status ? { sourceStatus: status === '__empty__' ? null : status } : {}),
+      ...(query ? { OR: [{ name: { contains: query } }, { phone: { contains: query } }] } : {}),
+    }
+
     const now = new Date()
-    const [total, rows, state, latestRun, statusRows, emptyStatusCount, activeRun, warp, duplicates] = await Promise.all([
+    const [total, rows, state, latestRun, statusRows, emptyStatusCount, activeRun, warp] = await Promise.all([
       prisma.inquiry.count({ where }),
       prisma.inquiry.findMany({
         where,
@@ -88,7 +93,6 @@ export async function GET(request: Request) {
         select: { status: true, createdAt: true, heartbeatAt: true },
       }),
       warpDeliverySummary(prisma),
-      duplicateInquiryIds(prisma),
     ])
 
     const currentStatus = inquirySyncStatus(state, activeRun?.status, now)

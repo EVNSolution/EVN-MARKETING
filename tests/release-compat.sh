@@ -96,7 +96,19 @@ writeFileSync(`${directory}/nginx/next.conf`, renderNginx({ active: { id: b, slo
 renameSync(`${directory}/nginx/next.conf`, `${directory}/nginx/nginx.conf`);
 NODE
   docker exec marketing-compat-proxy nginx -t
-  docker exec marketing-compat-proxy nginx -s reload
+  # Match the production controller: expiry completes only after old proxy workers drain.
+  python3 - "$phase" <<'PY'
+import subprocess, sys, time
+def workers():
+    command = "for p in /proc/[0-9]*/cmdline; do case $(tr '\\0' ' ' < \"$p\") in 'nginx: worker process'*) echo \"$p\";; esac; done"
+    return set(subprocess.check_output(['docker','exec','marketing-compat-proxy','sh','-c',command],text=True).splitlines())
+old = workers()
+subprocess.run(['docker','exec','marketing-compat-proxy','nginx','-s','reload'],check=True)
+deadline = time.monotonic() + 120
+while sys.argv[1] == 'expire' and old & workers():
+    if time.monotonic() >= deadline: raise RuntimeError('compatibility proxy drain timed out')
+    time.sleep(0.2)
+PY
   touch "$compat_dir/control/$phase.done"
 done
 result="$(docker wait marketing-compat-test)"

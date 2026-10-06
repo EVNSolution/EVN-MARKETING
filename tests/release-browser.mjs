@@ -100,7 +100,7 @@ try {
   const unloadedContext = await context()
   await unloadedContext.route('**/*.js*', route => route.abort())
   const unloadedLogin = await loginPage(unloadedContext)
-  for (const page of [nativeLogin, nativeLogout, unloadedLogin]) {
+  for (const page of [nativeLogin, nativeExpiredPage, nativeLogout, unloadedLogin]) {
     assert.equal(new URL(await page.locator('form').getAttribute('action'), base).searchParams.get('dpl'), a, 'native form pins the rendered release')
     assert.ok(await page.locator('input[name^="$ACTION_"]').count(), 'React SSR action encoding is retained')
   }
@@ -304,10 +304,13 @@ try {
   assert.equal(await oldLogout.locator('input[name=email]').inputValue(), 'synthetic@example.invalid')
   await nativeExpiredPage.locator('input[name=email]').fill('synthetic@example.invalid')
   await nativeExpiredPage.locator('input[name=password]').fill('synthetic-compat-only')
+  const expiredAction = await nativeExpiredPage.locator('form').getAttribute('action')
+  assert.equal(new URL(expiredAction, base).searchParams.get('dpl'), a, 'expired native form keeps its original release')
   const nativeRejection = nativeExpiredPage.waitForResponse(response => response.request().method() === 'POST')
   await nativeExpiredPage.getByRole('button', { name: '로그인', exact: true }).click()
   const expiredHtml = await nativeRejection
-  assert.equal(expiredHtml.status(), 409)
+  assert.equal(expiredHtml.status(), 409, JSON.stringify({ url: expiredHtml.url(), formAction: expiredAction,
+    slot: expiredHtml.headers()['x-marketing-slot'], release: expiredHtml.headers()['x-marketing-release'] }))
   assert.ok(expiredHtml.headers()['content-type'].startsWith('text/html'))
   await nativeExpiredPage.getByRole('heading', { name: '화면 갱신이 필요합니다' }).waitFor()
   assert.equal(db.pragma('integrity_check', { simple: true }), 'ok')

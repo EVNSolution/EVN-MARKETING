@@ -3,7 +3,8 @@ import { createClient } from '@libsql/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, releaseWorker, SyncError } from '@/lib/inquiry-sync'
-import { dispatchPendingWarp, warpActivityId } from '@/lib/warp-delivery'
+import { dispatchPendingWarp } from './warp-phone-check-helper'
+import { warpActivityId } from '@/lib/warp-delivery'
 
 type Command = { action: 'claim' | 'dispatch' | 'release' | 'close'; at: number; pause?: boolean }
 
