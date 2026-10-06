@@ -1,3 +1,4 @@
+import { applyWarpRecovery } from './warp-phone-check-helper'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
@@ -8,7 +9,7 @@ import { build } from 'esbuild'
 import type { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, ensureSyncState, INQUIRY_SCOPE_ID, releaseWorker, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
 import { MANUAL_CONFIRMATION, scope, WARP_RECEIPT_UNVERIFIED, warpActivityId } from '@/lib/warp-delivery'
-import { applyWarpRecovery, MAX_RECOVERY_ROWS, parseRecoveryPlan, planWarpRecovery, recoverySha256, type RecoveryEvent } from '@/lib/warp-recovery'
+import { MAX_RECOVERY_ROWS, parseRecoveryPlan, planWarpRecovery, recoverySha256, type RecoveryEvent } from '@/lib/warp-recovery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
 const env = { WARP_MARKETING_API_KEY: 'synthetic-recovery-key-never-used-in-production', WARP_DELIVERY_ENABLED: 'false' }
@@ -25,7 +26,7 @@ globalThis.fetch = async () => { throw new Error('real network access is forbidd
 async function add(db: PrismaClient, n: number, delivered = false, overrides = {}) {
   return db.inquiry.create({ data: {
     ...scope, sourceId: sourceId(n), inquiryDate: '2026-09-22', inquiryTime: '09:00',
-    name, phone, sourceStatus: 'received', lastSeenAt: at,
+    name, phone: n === 1 ? phone : `010-0000-${String(1233+n).padStart(4,'0')}`, sourceStatus: 'received', lastSeenAt: at,
     ...(delivered ? { warpCustomerId: customerId, warpActivityId: warpActivityId(sourceId(n)), warpDeliveredAt: at, warpAttemptedAt: at } : {}),
     ...overrides,
   } })
@@ -51,7 +52,7 @@ function receiver() {
     const payload = JSON.parse(String(init.body))
     assert.deepEqual(Object.keys(payload).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'sourceId', 'inquiryDate', 'inquiryTime', 'sourceStatus', 'name', 'phone', 'rejectExistingCustomer'].sort())
     assert.equal(payload.rejectExistingCustomer, true)
-    assert.equal(payload.phone, customer.phone)
+    assert.match(payload.phone, /^010-0000-\d{4}$/)
     assert.equal(payload.companyScopeId, scope.companyScopeId)
     calls.push(payload.sourceId)
     const activityId = warpActivityId(payload.sourceId)
@@ -69,6 +70,7 @@ function auditLog() {
 
 function noPrivateValues(value: string) {
   for (const secret of [name, phone, env.WARP_MARKETING_API_KEY]) assert.equal(value.includes(secret), false)
+  assert.doesNotMatch(value, /010-0000-\d{4}/)
 }
 
 async function testAsymmetricRecovery() {
@@ -326,6 +328,10 @@ async function testCli() {
     await build({ entryPoints: [source], bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: bundle })
     const startup = `process.umask(Number(process.env.SYNTHETIC_UMASK ?? 0)); globalThis.fetch = async (url, init) => {
       if (process.argv[2] === 'plan') throw Error('dry-run must never send');
+      if (url === 'https://warp.cleversystem.ai/api/external/marketing-inquiries/check') {
+        const p = JSON.parse(init.body);
+        return Response.json({ok:true,results:p.items.map(item=>({sourceId:item.sourceId,exists:false}))});
+      }
       if (url !== 'https://warp.cleversystem.ai/api/external/marketing-inquiries' || init.method !== 'POST') throw Error('unexpected network');
       const p = JSON.parse(init.body);
       const { createHash } = await import('node:crypto');

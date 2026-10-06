@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/release-client'
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react'
+import DuplicateReviewPanel from './DuplicateReviewPanel'
 
 type Inquiry = {
   id: string
@@ -12,7 +13,7 @@ type Inquiry = {
   inquiryTime: string
   name: string | null
   phone: string
-  warpDelivery: { status: 'delivered' | 'pending' | 'duplicate' | 'blocked' | 'retrying' | 'queued'; label: string; reason: string | null }
+  warpDelivery: { status: 'delivered' | 'pending' | 'duplicate' | 'duplicate_reviewed' | 'blocked' | 'retrying' | 'queued'; label: string; reason: string | null }
 }
 
 type SyncRun = {
@@ -31,7 +32,7 @@ type SyncRun = {
 
 type InquiryResponse = {
   rows: Inquiry[]
-  warp: { configured: boolean; delivered: number; pending: number; failed: number; duplicates: number }
+  warp: { configured: boolean; delivered: number; pending: number; failed: number; duplicates: number; reviewPending: number; reviewed: number }
   pagination: { page: number; limit: number; total: number; totalPages: number }
   sync: {
     currentStatus: string
@@ -86,6 +87,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [syncing, setSyncing] = useState(false)
+  const [reviewId, setReviewId] = useState<string | null>(null)
   const [syncMessage, setSyncMessage] = useState('')
   const [registeringIds, setRegisteringIds] = useState<string[]>([])
   const [registrationMessages, setRegistrationMessages] = useState<Record<string, string>>({})
@@ -191,6 +193,36 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  const renderDelivery = (row: Inquiry) => (
+    <div className="break-words">
+                      {row.warpDelivery.status === 'delivered' ? (
+                        <span title={row.warpDelivery.reason ?? undefined} className="rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">등록완료</span>
+                      ) : row.warpDelivery.status === 'duplicate' ? (
+                        <span className="inline-block rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-800">중복확인</span>
+                      ) : row.warpDelivery.status === 'duplicate_reviewed' ? (
+                        <span className="inline-block rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">검토완료</span>
+                      ) : row.warpDelivery.status === 'blocked' ? (
+                        <span className="inline-block rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{row.warpDelivery.label}</span>
+                      ) : isAdmin ? (
+                        <button type="button" onClick={() => void requestWarpRegistration(row)}
+                          disabled={registeringIds.includes(row.id) || row.warpDelivery.status === 'queued'}
+                          className="min-h-11 rounded-lg bg-slate-800 px-3 py-1.5 font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45">
+                          {row.warpDelivery.status === 'queued' ? '등록중' : '등록하기'}
+                        </button>
+                      ) : (
+                        <span className={`rounded-full px-2 py-1 font-semibold ${row.warpDelivery.status === 'pending' || row.warpDelivery.status === 'queued' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800'}`}>{row.warpDelivery.status === 'queued' ? '등록 요청됨' : row.warpDelivery.label}</span>
+                      )}
+                      {row.warpDelivery.status !== 'delivered' && (
+                        <p className="mt-1 max-w-64 text-[11px] text-slate-500" aria-live="polite">
+                          {row.warpDelivery.reason || registrationMessages[row.id] || (isAdmin && row.warpDelivery.status !== 'queued' ? row.warpDelivery.label : '')}
+                        </p>
+                      )}
+                      {['duplicate', 'duplicate_reviewed'].includes(row.warpDelivery.status) && (
+                        <button type="button" onClick={() => setReviewId(row.id)} className="mt-1 min-h-11 rounded-lg px-2 text-xs font-semibold text-slate-700 underline underline-offset-4">검토하기</button>
+                      )}
+    </div>
+  )
+
   const sync = data?.sync
   const state = statusText[sync?.currentStatus ?? 'offline'] ?? statusText.failed
   const run = sync?.latestRun
@@ -239,7 +271,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
             <b className="text-slate-800">WARP 고객관리 자동 등록</b>
             <a className="font-semibold underline underline-offset-2" href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer">WARP 고객관리 열기</a>
           </div>
-          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''} · 중복 {data.warp.duplicates}건</p>
+          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''} · 중복확인 {data.warp.reviewPending}건 · 검토완료 {data.warp.reviewed}건</p>
           <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '자동 등록은 꺼져 있습니다. 문의별 등록하기 버튼으로 요청할 수 있습니다.' : '자동 등록 설정이 켜져 있습니다. 중복 방지 확인을 통과한 문의만 등록합니다.'}</p>
           <p className="mt-1 text-[11px] text-slate-400">등록완료에는 기존에 보존된 WARP 전송 확인과 사용자의 직접 등록 확인이 포함됩니다. 중복과 확인 필요 항목은 완료 건수에서 제외합니다.</p>
         </section>
@@ -271,7 +303,14 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                 className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-xs text-slate-700 outline-none focus:border-slate-400" />
             </span>
           </label>
-          <button type="submit" className="h-9 rounded-lg bg-slate-800 px-4 text-xs font-bold text-white hover:bg-slate-700">조회</button>
+          <label className="space-y-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            중복 검토
+            <select aria-label="중복 검토 필터" value={searchParams.get('review') ?? ''} onChange={event => navigate({ review: event.target.value || null, page: '1' })}
+              className="block min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700">
+              <option value="">전체 문의</option><option value="pending">중복확인</option><option value="reviewed">검토완료</option>
+            </select>
+          </label>
+          <button type="submit" className="min-h-11 rounded-lg bg-slate-800 px-4 text-xs font-bold text-white hover:bg-slate-700">조회</button>
         </form>
 
         <div className="min-h-72 overflow-x-auto">
@@ -286,7 +325,8 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
               )}
             </div>
           ) : data?.rows.length ? (
-            <table className="w-full min-w-[900px] text-xs">
+            <>
+            <table className="hidden w-full min-w-[900px] text-xs md:table">
               <thead>
                 <tr className="border-b border-slate-200 bg-white text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">
                   <th className="px-4 py-3">문의일자</th>
@@ -304,31 +344,23 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                     <td className="px-4 py-3 font-medium text-slate-700">{row.name ?? '—'}</td>
                     <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{row.phone}</td>
                     <td className="px-4 py-3">
-                      {row.warpDelivery.status === 'delivered' ? (
-                        <span title={row.warpDelivery.reason ?? undefined} className="rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">등록완료</span>
-                      ) : row.warpDelivery.status === 'duplicate' ? (
-                        <span className="inline-block rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-800">중복</span>
-                      ) : row.warpDelivery.status === 'blocked' ? (
-                        <span className="inline-block rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{row.warpDelivery.label}</span>
-                      ) : isAdmin ? (
-                        <button type="button" onClick={() => void requestWarpRegistration(row)}
-                          disabled={registeringIds.includes(row.id) || row.warpDelivery.status === 'queued'}
-                          className="rounded-lg bg-slate-800 px-3 py-1.5 font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45">
-                          {row.warpDelivery.status === 'queued' ? '등록중' : '등록하기'}
-                        </button>
-                      ) : (
-                        <span className={`rounded-full px-2 py-1 font-semibold ${row.warpDelivery.status === 'pending' || row.warpDelivery.status === 'queued' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800'}`}>{row.warpDelivery.status === 'queued' ? '등록 요청됨' : row.warpDelivery.label}</span>
-                      )}
-                      {row.warpDelivery.status !== 'delivered' && (
-                        <p className="mt-1 max-w-64 text-[11px] text-slate-500" aria-live="polite">
-                          {row.warpDelivery.reason || registrationMessages[row.id] || (isAdmin && row.warpDelivery.status !== 'queued' ? row.warpDelivery.label : '')}
-                        </p>
-                      )}
+                      {renderDelivery(row)}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <div className="divide-y divide-slate-100 md:hidden">
+              {data.rows.map(row => <article key={row.id} className="space-y-3 px-4 py-4" aria-label="문의 카드">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="break-all font-semibold text-slate-800">{row.name ?? '—'}</p>
+                  <p className="text-xs tabular-nums text-slate-500">{row.inquiryDate} {row.inquiryTime}</p>
+                </div>
+                <p className="text-sm tabular-nums text-slate-600">{row.phone}</p>
+                <div className="text-xs">{renderDelivery(row)}</div>
+              </article>)}
+            </div>
+            </>
           ) : (
             <div className="flex min-h-72 items-center justify-center text-sm text-slate-400">조건에 맞는 문의가 없습니다.</div>
           )}
@@ -353,6 +385,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
           </div>
         )}
       </section>
+      {reviewId && <DuplicateReviewPanel id={reviewId} isAdmin={isAdmin} onClose={() => setReviewId(null)} onChanged={load} />}
     </div>
   )
 }

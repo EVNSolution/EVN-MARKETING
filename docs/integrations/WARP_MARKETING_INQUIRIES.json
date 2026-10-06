@@ -1,26 +1,27 @@
 {
   "schema_version": 1,
   "contract_id": "warp-marketing-inquiries",
-  "status": "existing-customer-guard-provider-review-pending",
+  "status": "source-reviewed-activation-pending",
   "owner": "OziinG",
   "review": {
     "issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
-    "pull_request": "https://github.com/EVNSolution/EVN-WARP/pull/51",
+    "pull_request": "https://github.com/EVNSolution/EVN-WARP/pull/49",
     "required_before_production": true,
     "source_review_date": "2026-09-17",
     "activation_required": [
-      "Obtain Owner review of the follow-up generated display-name policy; Issue #48 and PR #49 reviewed the earlier blank-name policy.",
-      "Verify the caller repository uses this follow-up contract and passes its delivery tests.",
+      "Verify the caller repository uses this reviewed contract and passes its delivery tests.",
       "Provision the dedicated key through the approved secret-management path on both sides.",
       "Verify an authenticated delivery, replay, and CRM readback before processing the backlog.",
-      "Obtain Owner approval and deploy WARP PR #51 before guarded Marketing delivery is enabled."
-    ]
+      "Keep this manifest byte-identical in WARP and Marketing; verify the guarded append and read-only check against the merged receiver before activation."
+    ],
+    "delegation": "https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448"
   },
   "authentication": {
     "header": "x-api-key",
     "environment": "WARP_MARKETING_API_KEY",
     "scope": "marketing.inquiry.append",
-    "existing_buildup_key_accepted": false
+    "existing_buildup_key_accepted": false,
+    "read_scope": "marketing.customer-phone.exists"
   },
   "repositories": {
     "EVN-WARP": {
@@ -57,6 +58,24 @@
           "token": "/api/external/marketing-inquiries"
         }
       }
+    },
+    {
+      "id": "warp.marketing-inquiry.check",
+      "method": "POST",
+      "path": "/api/external/marketing-inquiries/check",
+      "provider": "EVN-WARP",
+      "caller": "evn-marketing",
+      "capability": "marketing.customer-phone.exists",
+      "sources": {
+        "EVN-WARP": {
+          "file": "app/api/external/marketing-inquiries/check/route.ts",
+          "token": "export async function POST"
+        },
+        "evn-marketing": {
+          "file": "lib/warp-delivery.ts",
+          "token": "WARP_CHECK_ENDPOINT"
+        }
+      }
     }
   ],
   "source_scope": {
@@ -75,9 +94,6 @@
     "name",
     "phone"
   ],
-  "optional_request_fields": {
-    "rejectExistingCustomer": true
-  },
   "response_fields": [
     "ok",
     "customerId",
@@ -88,11 +104,68 @@
   "rules": [
     "One source inquiry creates exactly one customer activity while that activity is retained, including on retry; source UUID spelling is case-insensitive.",
     "Explicit deletion of the receipt activity or its customer ends replay protection and a later delivery can recreate records.",
-    "An exact unique normalized primary phone match receives a new activity; do not overwrite its customer profile.",
-    "Multiple primary phone matches return ambiguous_phone and create no record.",
-    "When rejectExistingCustomer is true, replay lookup runs first and any existing normalized primary phone returns phone_exists without writes.",
-    "Marketing fills missing inquiry names with WARP's unknownCustomerName using the phone before saving or sending, including legacy blanks at read/send time. The receiver uses the supplied name (or its own fallback when blank) and preserves the received name and source status in activity content. Never overwrite a matching customer's profile.",
+    "Without rejectExistingCustomer, an exact unique normalized primary-phone match receives a new activity; do not overwrite its customer profile.",
+    "Multiple normalized primary-phone matches return 409 ambiguous_phone and create no record, with or without the guard.",
+    "Unknown names remain blank; source status remains in activity content.",
     "Read and append only within the fixed source scope. No arbitrary customer updates or deletion.",
-    "Interpret original date and minute as Asia/Seoul for CRM date fields and preserve the original strings in activity content."
-  ]
+    "Interpret original date and minute as Asia/Seoul for CRM date fields and preserve the original strings in activity content.",
+    "For receiver validation, append matching and read-only checks, normalize valid Korean mobiles with normalizeCustomerMobile first; otherwise accept digitsOnly values of 9 to 15 digits, preserving fixed-line and other legacy contacts. Invalid or missing contacts never match; company phones and secondary contacts do not match. Archived CustomerMerge aliases are not separate customers.",
+    "When rejectExistingCustomer is true, resolve a retained deterministic receipt first; otherwise a single matching primary phone returns 409 phone_exists before any Customer or CustomerActivity mutation.",
+    "Receipt lookup, phone matching and append run inside the shared customerWrite transaction, serialized with customer merges.",
+    "created is true only when this request creates a Customer; duplicate is true only when replaying a retained source inquiry activity. A new activity on an existing Customer returns created:false and duplicate:false.",
+    "Resolve receipt customer aliases to the current canonical Customer, preserving the deterministic activityId; missing or invalid canonical receipts fail closed.",
+    "Checks use a read-only transaction snapshot, expose only sourceId and existence unless that exact scoped sourceId has a retained deterministic activity, and never return customer names or contacts.",
+    "Check receipts contain ok:true, customerId, activityId, created:false, duplicate:true and are not evidence of fresh Customer creation; Marketing preserves historical WARP_RECEIPT_UNVERIFIED markers."
+  ],
+  "optional_request_fields": {
+    "rejectExistingCustomer": true
+  },
+  "phone_check": {
+    "request": {
+      "method": "POST",
+      "path": "/api/external/marketing-inquiries/check",
+      "max_body_bytes": 16384,
+      "fields": [
+        "source",
+        "companyScopeId",
+        "homepageScopeId",
+        "items"
+      ],
+      "items": {
+        "min": 1,
+        "max": 50,
+        "fields": [
+          "sourceId",
+          "phone"
+        ],
+        "sourceId": "unique UUID, case-insensitive",
+        "phone": "string, at most 40 characters; valid Korean mobiles normalize first (including +82/0082 and legacy 011/016/017/018/019), otherwise 9 to 15 digits after digitsOnly normalization"
+      }
+    },
+    "response": {
+      "success": {
+        "ok": true,
+        "results": [
+          {
+            "sourceId": "lowercase request sourceId",
+            "exists": "boolean",
+            "receipt": "present only for the caller's deterministic retained inquiry activity"
+          }
+        ]
+      },
+      "errors": [
+        "bad_payload",
+        "unauthorized",
+        "not_configured",
+        "temporarily_unavailable"
+      ],
+      "receipt_fields": [
+        "ok",
+        "customerId",
+        "activityId",
+        "created",
+        "duplicate"
+      ]
+    }
+  }
 }

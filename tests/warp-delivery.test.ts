@@ -1,3 +1,4 @@
+import { dispatchPendingWarp, pilotPendingWarp } from './warp-phone-check-helper'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,7 +8,7 @@ import { createClient } from '@libsql/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, releaseWorker, INQUIRY_SOURCE, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID } from '@/lib/inquiry-sync'
-import { checkWarpConnection, deliver, dispatchPendingWarp, duplicateInquiryIds, pilotPendingWarp, requestWarpRegistration, WARP_EXISTING_CUSTOMER, WARP_RECEIPT_UNVERIFIED, warpActivityId, warpConfigured, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
+import { checkWarpConnection, deliver, duplicateInquiryIds, requestWarpRegistration, WARP_EXISTING_CUSTOMER, WARP_RECEIPT_UNVERIFIED, warpActivityId, warpConfigured, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
 const keyOnly = { WARP_MARKETING_API_KEY: 'synthetic-test-key-never-used-in-production' }

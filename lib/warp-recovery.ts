@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, heartbeatWorker, INQUIRY_SCOPE_ID, releaseWorker, SyncError } from '@/lib/inquiry-sync'
-import { acknowledge, deliver, keyConfigured, MANUAL_CONFIRMATION, payloadFor, rowSelect, scope, warpActivityId, type Env } from '@/lib/warp-delivery'
+import { acknowledge, checkedDeliver, duplicateInquiryIds, keyConfigured, MANUAL_CONFIRMATION, REVIEW_CLEARED, payloadFor, rowSelect, scope, warpActivityId, warpDeliveryState, type Env } from '@/lib/warp-delivery'
 
 export const MAX_RECOVERY_ROWS = 20
 export const MAX_PLAN_BYTES = 32_768
@@ -51,7 +51,10 @@ function exactKeys(value: unknown, keys: string[]): value is Record<string, unkn
 
 async function selectedRows(db: Db, ids: string[]) {
   // Exact stored spelling is retained in the manifest; only the shared sender normalizes UUID case.
-  return db.inquiry.findMany({ where: { ...scope, sourceId: { in: ids } }, select, take: MAX_RECOVERY_ROWS })
+  const rows = await db.inquiry.findMany({ where: { ...scope, sourceId: { in: ids } }, select, take: MAX_RECOVERY_ROWS })
+  const duplicates = await duplicateInquiryIds(db)
+  if (rows.some(row => !row.warpDeliveredAt && duplicates.has(row.id))) fail('warp_recovery_duplicate_review')
+  return rows
 }
 
 function fingerprint(row: Row): PlanRow {
@@ -69,6 +72,7 @@ function matchRows(rows: Row[], expected: PlanRow[]) {
     const row = rows.find(row => row.sourceId === entry.sourceId)
     if (!row) fail('warp_recovery_row_changed')
     if (row.warpError === MANUAL_CONFIRMATION) fail('warp_recovery_manual_confirmation')
+    if (['duplicate', 'duplicate_reviewed'].includes(warpDeliveryState(row).status) || row.warpError === REVIEW_CLEARED) fail('warp_recovery_duplicate_review')
     if (JSON.stringify(fingerprint(row)) !== JSON.stringify(entry)) fail('warp_recovery_row_changed')
     if ((row.warpActivityId && row.warpActivityId !== warpActivityId(row.sourceId))
       || (row.warpDeliveredAt && (!row.warpActivityId || !row.warpCustomerId))) fail('warp_recovery_invalid_local_receipt')
@@ -149,7 +153,7 @@ export async function applyWarpRecovery(
       await heartbeatWorker(db, owner, now())
       checkStop()
       result.attempted++
-      const delivery = await deliver(payloadFor(row), options.send ?? fetch, env, signal)
+      const delivery = await checkedDeliver(payloadFor(row), options.send ?? fetch, env, signal)
       checkStop()
       if (!delivery.receipt) fail(delivery.error)
       const receipt = delivery.receipt

@@ -14,7 +14,7 @@
     "test:data-recovery": "tsx tests/data-recovery.test.ts",
     "test:backup": "node tests/data-backup.test.mjs && python3 tests/data-ops.test.py",
     "test:warp-recovery": "tsx tests/warp-recovery.test.ts",
-    "test:inquiries": "tsx tests/inquiry-sync.test.ts && tsx tests/mleverage-source.test.ts && tsx tests/inquiry-management-actions.test.ts",
+    "test:inquiries": "tsx tests/inquiry-sync.test.ts && tsx tests/mleverage-source.test.ts && tsx tests/inquiry-management-actions.test.ts && tsx tests/inquiry-review.test.ts",
     "test:server-runtime": "tsx tests/server-runtime.test.ts && tsx tests/readiness.test.ts",
     "test:upload-security": "tsx tests/upload-security.test.ts",
     "test:upload-processes": "tsx tests/upload-processes.test.ts",

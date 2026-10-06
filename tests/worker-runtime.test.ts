@@ -1,3 +1,4 @@
+import { dispatchPendingWarp } from './warp-phone-check-helper'
 import assert from 'node:assert/strict'
 import type { PrismaClient } from '@/app/generated/prisma/client'
 import {
@@ -18,7 +19,7 @@ import {
   releaseWorker,
   type SourcePage,
 } from '@/lib/inquiry-sync'
-import { dispatchPendingWarp, warpActivityId } from '@/lib/warp-delivery'
+import { warpActivityId } from '@/lib/warp-delivery'
 import { runInquiryWorker, type WorkerDependencies } from '@/workers/worker-runtime'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
