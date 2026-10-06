@@ -28,6 +28,22 @@ async function main() {
 
   await withWorkerDatabase(async db => {
     await worker(db)
+    const invalid = await db.inquiry.create({ data: { ...base, sourceId: sourceId(80), phone: '번호 없음' } })
+    await db.inquiry.create({ data: { ...base, sourceId: sourceId(81), phone: '010-1111-0081' } })
+    let writes = 0
+    const provider: typeof fetch = async (url, init) => {
+      const input = JSON.parse(String(init?.body))
+      if (String(url).endsWith('/check')) return Response.json({ ok: true, results: input.items.map((item: { sourceId: string }) => ({ sourceId: item.sourceId, exists: false })) })
+      writes++
+      return Response.json({ ok: true, customerId: 'synthetic-valid-customer', activityId: warpActivityId(input.sourceId), created: true, duplicate: false })
+    }
+    assert.equal((await dispatchPendingWarp(db, owner, provider, env, () => at)).delivered, 1)
+    assert.equal(writes, 1)
+    assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: invalid.id } })).warpError, 'warp_invalid_inquiry', 'one invalid contact does not pause other valid registrations')
+  })
+
+  await withWorkerDatabase(async db => {
+    await worker(db)
     const row = await db.inquiry.create({ data: { ...base, sourceId: sourceId(1), phone: '010-1111-0001' } })
     let writes = 0, lookups = 0
     const duplicate: typeof fetch = async (url, init) => {

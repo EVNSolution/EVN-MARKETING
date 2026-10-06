@@ -235,6 +235,7 @@ export async function lookupWarpPhones(rows: { sourceId: string; phone: string }
 }
 
 export async function checkedDeliver(payload: InquiryPayload, send: typeof fetch, env: Env, signal?: AbortSignal): Promise<Delivery> {
+  if (!normalizeInquiryPhone(payload.phone) || payload.phone.length > 40) return { error: 'warp_invalid_inquiry' }
   const [match] = await lookupWarpPhones([payload], send, env, signal) ?? []
   if (!match) return { error: 'warp_duplicate_check_unavailable' }
   if (match.receipt) return { receipt: match.receipt, error: '' }
