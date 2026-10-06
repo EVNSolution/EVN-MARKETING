@@ -22,6 +22,8 @@ async function worker(db: Parameters<typeof claimWorker>[0]) {
 async function main() {
   for (const phone of ['010-1234-5678', '+82 10 1234 5678', '0082-10-1234-5678', '+82 (0)10-1234-5678']) assert.equal(normalizeInquiryPhone(phone), '01012345678')
   assert.equal(normalizeInquiryPhone('+82 11 555 9999'), '0115559999')
+  assert.equal(normalizeInquiryPhone('1012345678'), '1012345678', 'legacy numeric fallback matches WARP without inventing a leading zero')
+  assert.equal(normalizeInquiryPhone('115559999'), '115559999')
   assert.equal(normalizeInquiryPhone('02-3443-6235'), '0234436235', 'existing fixed-line inquiries remain supported')
 
   await withWorkerDatabase(async db => {

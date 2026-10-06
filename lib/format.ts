@@ -45,7 +45,7 @@ export function phoneLast4(value: string): string {
 export function normalizeInquiryPhone(value: string): string {
   const digits = value.replace(/\D/g, '')
   const national = digits.startsWith('0082') ? digits.slice(4) : digits.startsWith('82') ? digits.slice(2) : digits
-  const normalized = /^0?(?:10\d{8}|1[16789]\d{7,8})$/.test(national) ? (national.startsWith('0') ? national : `0${national}`) : digits
+  const normalized = national !== digits && /^0?(?:10\d{8}|1[16789]\d{7,8})$/.test(national) ? (national.startsWith('0') ? national : `0${national}`) : digits
   return /^\d{9,15}$/.test(normalized) ? normalized : ''
 }
 
