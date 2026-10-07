@@ -10,7 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "seed": "tsx prisma/seed.ts",
     "test:db": "tsx tests/db.test.ts",
-    "test:landing": "tsx tests/landing-inquiries.test.ts",
+    "test:landing": "tsx tests/landing-inquiries.test.ts && node tests/landing-expansion-audit.test.mjs",
     "test:schema": "node tests/schema-check.test.mjs && node tests/landing-schema-bridge.test.mjs",
     "test:data-recovery": "tsx tests/data-recovery.test.ts",
     "test:backup": "node tests/data-backup.test.mjs && python3 tests/data-ops.test.py",
@@ -31,6 +31,7 @@
     "warp:delivery": "tsx scripts/warp-delivery.ts",
     "deploy:check": "python3 deploy/aws/operator-release.py check",
     "deploy:publish": "python3 deploy/aws/operator-release.py publish",
+    "deploy:publish-ops": "python3 deploy/aws/operator-release.py publish-ops",
     "deploy": "python3 deploy/aws/operator-release.py release",
     "deploy:rollback": "python3 deploy/aws/operator-release.py rollback"
   },

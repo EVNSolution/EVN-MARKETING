@@ -25,6 +25,7 @@
 !scripts/schema-check.mjs
 !scripts/schema-compatibility.mjs
 !scripts/landing-schema-policy.json
+!scripts/landing-expansion-audit.mjs
 !scripts/data-backup.mjs
 !scripts/build-landing-public.mjs
 !previews/

@@ -92,6 +92,7 @@ class Controller:
         require(c['volume'] == 'evn-marketing-data' and c['network'] == 'evn-marketing', 'configuration')
         require(re.fullmatch(r'vol-[0-9a-f]+', c['ebsVolumeId']), 'configuration')
         require(type(c['collectorEnabled']) is bool and type(c['warpDeliveryEnabled']) is bool, 'configuration')
+        require(type(c.get('landingIntakeEnabled', False)) is bool, 'configuration')
         require(type(c['minFreeMemoryMiB']) is int and c['minFreeMemoryMiB'] >= 256, 'configuration')
         require(type(c['minFreeDiskMiB']) is int and c['minFreeDiskMiB'] >= 1024, 'configuration')
         require(self.state.get('format') == 1, 'journal')

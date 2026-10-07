@@ -84,6 +84,31 @@ assert push[1]["env"]["DOCKER_HOST"].endswith("/.colima/evn-marketing/docker.soc
 assert push[1]["env"]["AWS_ECR_DISABLE_CACHE"] == "true"
 assert "DOCKER_CONFIG" in push[1]["env"]
 
+with patch.dict(os.environ, {"MARKETING_AWS_ACCOUNT_ID": "000000000000"}), \
+        patch.object(operator, "validate_publish_target"), \
+        patch.object(operator, "image_digest", side_effect=[None, DIGEST]) as lookup, \
+        patch.object(operator.shutil, "which", return_value="synthetic-helper"), \
+        patch.object(operator.subprocess, "run", side_effect=[result(stdout=b"source archive"), result()]) as process, \
+        patch.object(operator.release, "check_source", return_value=SHA), \
+        patch.object(operator.release, "check_manual_target"), \
+        patch.object(operator, "run", return_value="") as upload:
+    assert operator.publish_image(SHA, target="operations") == DIGEST
+    assert lookup.call_args_list[0].args[0] == SHA + "-ops"
+    args = process.call_args_list[1].args[0]
+    assert args[args.index("--target")+1] == "operations"
+    assert args[args.index("-t")+1].endswith(":"+SHA+"-ops")
+    assert "org.opencontainers.image.revision="+SHA in args
+    assert upload.call_args.args[0][0:2] == ["docker","push"]
+
+with patch.object(operator, "configure", return_value=SHA) as configure, \
+        patch.object(operator, "publish_image", return_value=DIGEST) as publish, \
+        patch.object(operator, "run", return_value=""), \
+        patch.object(operator.release, "prepare_request", side_effect=AssertionError("operations images are not releases")), \
+        patch.object(operator.release, "dispatch", side_effect=AssertionError("must not deploy")):
+    operator.execute("publish-ops", "synthetic.json")
+    configure.assert_called_once_with("synthetic.json", "release")
+    publish.assert_called_once_with(SHA, target="operations")
+
 request = {"Parameters": {"Action": ["release"], "Revision": [SHA], "Digest": [DIGEST]}}
 for command in ("check", "publish"):
     with patch.object(operator, "configure", return_value=SHA), \
@@ -117,7 +142,7 @@ with patch.object(operator, "configure", return_value=SHA), \
     audit.assert_not_called()
     dispatch.assert_called_once_with("previous", manual=True)
 
-for command in ("publish", "release"):
+for command in ("publish", "publish-ops", "release"):
     with patch.object(operator, "configure", return_value=SHA), \
             patch.object(operator, "run", side_effect=RuntimeError("audit failed")), \
             patch.object(operator, "publish_image") as publish, \

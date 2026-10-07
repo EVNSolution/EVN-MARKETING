@@ -28,6 +28,8 @@
 
 전환 준비 후에도 `landingIntakeEnabled=false`로 후보를 확인하고, 접수 활성화·정상 저장·관리자 목록 표시까지 확인한 뒤 공개 완료로 보고한다. 실제 고객 이름·전화번호·키·비밀번호를 CI나 PR에 기록하지 않는다.
 
+별도 host lock·정식 migration·중단 시 재개 도구와 operations 이미지 게시 기능을 추가했다. [운영 확장 절차](landing-expansion-operations.md)의 source/backup/승인 경계를 따른다. 로컬 모델 검사 통과와 실제 운영 적용 완료를 구분하며, 리허설과 서버 설치 승인 전에는 실행하지 않는다.
+
 ## Windows 검증
 
 - `npm run test:landing`: 검증 실패 시 무저장, 동의 기록, 12회 재전송, 독립 프로세스 3개 동시 요청, 전송 제한, 타 범위 보존, 개인정보 삭제 및 종료 후 재전송 차단.
