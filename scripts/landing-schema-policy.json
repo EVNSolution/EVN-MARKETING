@@ -1,0 +1,256 @@
+{
+  "format": 1,
+  "id": "20261007000100_landing_inquiries",
+  "baseline": {
+    "format": 1,
+    "revision": "7dae895c9b1f3a21cb17f0a918b58c729a87601b",
+    "prismaSchemaSha256": "7e5082d20fa002d45f1f714a31add83a7ec1ad8b80ddc75126cf1cf6c270527c",
+    "migrations": [
+      {
+        "name": "20260915000100_baseline",
+        "checksum": "258df5e1efca3b4c27c40b27ed91687164aed0cbb2e26ec837886591ab057443"
+      },
+      {
+        "name": "20260915000200_inquiry_sync",
+        "checksum": "2706f53b7ed3999ced753d7192a1cd9f4a11761a44d176ceb27e3627d8a62914"
+      },
+      {
+        "name": "20260915000300_warp_delivery",
+        "checksum": "27f17be1ae6ec2445f3fb1b4dfe45c04861a9aca7f42546d2797575ce651c01b"
+      }
+    ],
+    "schema": [
+      {
+        "type": "index",
+        "name": "InquirySyncRun_source_companyScopeId_homepageScopeId_status_createdAt_idx",
+        "tbl_name": "InquirySyncRun",
+        "sql": "CREATE INDEX \"InquirySyncRun_source_companyScopeId_homepageScopeId_status_createdAt_idx\" ON \"InquirySyncRun\"(\"source\", \"companyScopeId\", \"homepageScopeId\", \"status\", \"createdAt\")"
+      },
+      {
+        "type": "index",
+        "name": "InquirySyncState_source_companyScopeId_homepageScopeId_key",
+        "tbl_name": "InquirySyncState",
+        "sql": "CREATE UNIQUE INDEX \"InquirySyncState_source_companyScopeId_homepageScopeId_key\" ON \"InquirySyncState\"(\"source\", \"companyScopeId\", \"homepageScopeId\")"
+      },
+      {
+        "type": "index",
+        "name": "Inquiry_inquiryDate_inquiryTime_idx",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE INDEX \"Inquiry_inquiryDate_inquiryTime_idx\" ON \"Inquiry\"(\"inquiryDate\", \"inquiryTime\")"
+      },
+      {
+        "type": "index",
+        "name": "Inquiry_sourceStatus_idx",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE INDEX \"Inquiry_sourceStatus_idx\" ON \"Inquiry\"(\"sourceStatus\")"
+      },
+      {
+        "type": "index",
+        "name": "Inquiry_source_companyScopeId_homepageScopeId_sourceId_key",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE UNIQUE INDEX \"Inquiry_source_companyScopeId_homepageScopeId_sourceId_key\" ON \"Inquiry\"(\"source\", \"companyScopeId\", \"homepageScopeId\", \"sourceId\")"
+      },
+      {
+        "type": "index",
+        "name": "Inquiry_warpDeliveredAt_warpAttemptedAt_idx",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE INDEX \"Inquiry_warpDeliveredAt_warpAttemptedAt_idx\" ON \"Inquiry\"(\"warpDeliveredAt\", \"warpAttemptedAt\")"
+      },
+      {
+        "type": "index",
+        "name": "Team_name_key",
+        "tbl_name": "Team",
+        "sql": "CREATE UNIQUE INDEX \"Team_name_key\" ON \"Team\"(\"name\")"
+      },
+      {
+        "type": "index",
+        "name": "User_email_key",
+        "tbl_name": "User",
+        "sql": "CREATE UNIQUE INDEX \"User_email_key\" ON \"User\"(\"email\")"
+      },
+      {
+        "type": "table",
+        "name": "Customer",
+        "tbl_name": "Customer",
+        "sql": "CREATE TABLE \"Customer\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"name\" TEXT NOT NULL,\n    \"phone\" TEXT,\n    \"email\" TEXT,\n    \"customerSegment\" TEXT,\n    \"customerCategory\" TEXT,\n    \"status\" TEXT NOT NULL DEFAULT '잠재고객',\n    \"grade\" TEXT,\n    \"tags\" TEXT,\n    \"source\" TEXT,\n    \"collectedAt\" DATETIME,\n    \"referrer\" TEXT,\n    \"leadType\" TEXT,\n    \"assignee\" TEXT,\n    \"isAgent\" BOOLEAN NOT NULL DEFAULT false,\n    \"memo\" TEXT,\n    \"birthYear\" INTEGER,\n    \"regionCity\" TEXT,\n    \"regionDist\" TEXT,\n    \"gender\" TEXT,\n    \"birthInfo\" TEXT,\n    \"maritalStatus\" TEXT,\n    \"childrenCount\" INTEGER,\n    \"addressDetail\" TEXT,\n    \"isSoleProprietor\" BOOLEAN,\n    \"soleBusinessName\" TEXT,\n    \"soleBusinessNo\" TEXT,\n    \"soleBusinessType\" TEXT,\n    \"b2bCategory\" TEXT,\n    \"companyName\" TEXT,\n    \"businessRegNo\" TEXT,\n    \"contactTitle\" TEXT,\n    \"industry\" TEXT,\n    \"companyAddress\" TEXT,\n    \"companyPhone\" TEXT,\n    \"employeeCount\" INTEGER,\n    \"mainContactCardUrl\" TEXT,\n    \"contactsJson\" TEXT,\n    \"hasVehicle\" BOOLEAN,\n    \"vehicleMaker\" TEXT,\n    \"vehicleName\" TEXT,\n    \"vehiclePlateNo\" TEXT,\n    \"vehicleYear\" TEXT,\n    \"totalMileage\" INTEGER,\n    \"truckType1\" TEXT,\n    \"truckType2\" TEXT,\n    \"truckType3\" TEXT,\n    \"truckType4\" TEXT,\n    \"vehicleCount\" INTEGER,\n    \"vehicleListJson\" TEXT,\n    \"documentsJson\" TEXT,\n    \"b2bRevenue1\" TEXT,\n    \"b2bRevenue2\" TEXT,\n    \"b2bRevenue3\" TEXT,\n    \"shipperName\" TEXT,\n    \"cargoType\" TEXT,\n    \"deliveryCity\" TEXT,\n    \"deliveryDist\" TEXT,\n    \"deliveryFreq\" TEXT,\n    \"workShift\" TEXT,\n    \"monthlyIncome\" TEXT,\n    \"cargoNote\" TEXT,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    \"updatedAt\" DATETIME NOT NULL\n)"
+      },
+      {
+        "type": "table",
+        "name": "CustomerActivity",
+        "tbl_name": "CustomerActivity",
+        "sql": "CREATE TABLE \"CustomerActivity\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"customerId\" TEXT NOT NULL,\n    \"type\" TEXT NOT NULL,\n    \"date\" DATETIME NOT NULL,\n    \"content\" TEXT,\n    \"result\" TEXT,\n    \"nextAction\" TEXT,\n    \"assignee\" TEXT,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    CONSTRAINT \"CustomerActivity_customerId_fkey\" FOREIGN KEY (\"customerId\") REFERENCES \"Customer\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE\n)"
+      },
+      {
+        "type": "table",
+        "name": "Inquiry",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE TABLE \"Inquiry\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"source\" TEXT NOT NULL,\n    \"companyScopeId\" TEXT NOT NULL,\n    \"homepageScopeId\" TEXT NOT NULL,\n    \"sourceId\" TEXT NOT NULL,\n    \"inquiryDate\" TEXT NOT NULL,\n    \"inquiryTime\" TEXT NOT NULL,\n    \"sourceStatus\" TEXT,\n    \"name\" TEXT,\n    \"phone\" TEXT NOT NULL,\n    \"firstSeenAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    \"lastSeenAt\" DATETIME NOT NULL\n, \"warpCustomerId\" TEXT, \"warpActivityId\" TEXT, \"warpDeliveredAt\" DATETIME, \"warpAttemptedAt\" DATETIME, \"warpError\" TEXT)"
+      },
+      {
+        "type": "table",
+        "name": "InquirySyncRun",
+        "tbl_name": "InquirySyncRun",
+        "sql": "CREATE TABLE \"InquirySyncRun\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"source\" TEXT NOT NULL,\n    \"companyScopeId\" TEXT NOT NULL,\n    \"homepageScopeId\" TEXT NOT NULL,\n    \"trigger\" TEXT NOT NULL,\n    \"status\" TEXT NOT NULL DEFAULT 'pending',\n    \"rangeStart\" TEXT NOT NULL,\n    \"rangeEnd\" TEXT NOT NULL,\n    \"startedAt\" DATETIME,\n    \"heartbeatAt\" DATETIME,\n    \"completedAt\" DATETIME,\n    \"expectedCount\" INTEGER,\n    \"readCount\" INTEGER NOT NULL DEFAULT 0,\n    \"createdCount\" INTEGER NOT NULL DEFAULT 0,\n    \"updatedCount\" INTEGER NOT NULL DEFAULT 0,\n    \"unchangedCount\" INTEGER NOT NULL DEFAULT 0,\n    \"pagesRead\" INTEGER NOT NULL DEFAULT 0,\n    \"errorType\" TEXT,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP\n)"
+      },
+      {
+        "type": "table",
+        "name": "InquirySyncState",
+        "tbl_name": "InquirySyncState",
+        "sql": "CREATE TABLE \"InquirySyncState\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"source\" TEXT NOT NULL,\n    \"companyScopeId\" TEXT NOT NULL,\n    \"homepageScopeId\" TEXT NOT NULL,\n    \"status\" TEXT NOT NULL DEFAULT 'offline',\n    \"lastSuccessfulAt\" DATETIME,\n    \"lastRunId\" TEXT,\n    \"nextRunAt\" DATETIME,\n    \"workerHeartbeatAt\" DATETIME,\n    \"workerOwner\" TEXT,\n    \"workerLeaseExpiresAt\" DATETIME,\n    \"lockOwner\" TEXT,\n    \"lockExpiresAt\" DATETIME,\n    \"updatedAt\" DATETIME NOT NULL\n)"
+      },
+      {
+        "type": "table",
+        "name": "Team",
+        "tbl_name": "Team",
+        "sql": "CREATE TABLE \"Team\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"name\" TEXT NOT NULL,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP\n)"
+      },
+      {
+        "type": "table",
+        "name": "User",
+        "tbl_name": "User",
+        "sql": "CREATE TABLE \"User\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"name\" TEXT NOT NULL,\n    \"email\" TEXT NOT NULL,\n    \"password\" TEXT NOT NULL,\n    \"role\" TEXT NOT NULL DEFAULT 'user',\n    \"teamId\" TEXT,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    \"updatedAt\" DATETIME NOT NULL,\n    CONSTRAINT \"User_teamId_fkey\" FOREIGN KEY (\"teamId\") REFERENCES \"Team\" (\"id\") ON DELETE SET NULL ON UPDATE CASCADE\n)"
+      }
+    ]
+  },
+  "expanded": {
+    "format": 1,
+    "revision": "d7d59c565a4f30982b6fffcd729ee1aae83f96c4",
+    "prismaSchemaSha256": "0d705b2f9e73cf7b9803cf310b3e41656c1c438afe86d45eb9769fc9f2656154",
+    "migrations": [
+      {
+        "name": "20260915000100_baseline",
+        "checksum": "258df5e1efca3b4c27c40b27ed91687164aed0cbb2e26ec837886591ab057443"
+      },
+      {
+        "name": "20260915000200_inquiry_sync",
+        "checksum": "2706f53b7ed3999ced753d7192a1cd9f4a11761a44d176ceb27e3627d8a62914"
+      },
+      {
+        "name": "20260915000300_warp_delivery",
+        "checksum": "27f17be1ae6ec2445f3fb1b4dfe45c04861a9aca7f42546d2797575ce651c01b"
+      },
+      {
+        "name": "20261007000100_landing_inquiries",
+        "checksum": "55c0deaf385c2739c9cc6d6243b2fa4059d1d7c8aa9170f06a9fd0973c80a33f"
+      }
+    ],
+    "schema": [
+      {
+        "type": "index",
+        "name": "InquirySyncRun_source_companyScopeId_homepageScopeId_status_createdAt_idx",
+        "tbl_name": "InquirySyncRun",
+        "sql": "CREATE INDEX \"InquirySyncRun_source_companyScopeId_homepageScopeId_status_createdAt_idx\" ON \"InquirySyncRun\"(\"source\", \"companyScopeId\", \"homepageScopeId\", \"status\", \"createdAt\")"
+      },
+      {
+        "type": "index",
+        "name": "InquirySyncState_source_companyScopeId_homepageScopeId_key",
+        "tbl_name": "InquirySyncState",
+        "sql": "CREATE UNIQUE INDEX \"InquirySyncState_source_companyScopeId_homepageScopeId_key\" ON \"InquirySyncState\"(\"source\", \"companyScopeId\", \"homepageScopeId\")"
+      },
+      {
+        "type": "index",
+        "name": "Inquiry_inquiryDate_inquiryTime_idx",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE INDEX \"Inquiry_inquiryDate_inquiryTime_idx\" ON \"Inquiry\"(\"inquiryDate\", \"inquiryTime\")"
+      },
+      {
+        "type": "index",
+        "name": "Inquiry_sourceStatus_idx",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE INDEX \"Inquiry_sourceStatus_idx\" ON \"Inquiry\"(\"sourceStatus\")"
+      },
+      {
+        "type": "index",
+        "name": "Inquiry_source_companyScopeId_homepageScopeId_sourceId_key",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE UNIQUE INDEX \"Inquiry_source_companyScopeId_homepageScopeId_sourceId_key\" ON \"Inquiry\"(\"source\", \"companyScopeId\", \"homepageScopeId\", \"sourceId\")"
+      },
+      {
+        "type": "index",
+        "name": "Inquiry_warpDeliveredAt_warpAttemptedAt_idx",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE INDEX \"Inquiry_warpDeliveredAt_warpAttemptedAt_idx\" ON \"Inquiry\"(\"warpDeliveredAt\", \"warpAttemptedAt\")"
+      },
+      {
+        "type": "index",
+        "name": "LandingReceipt_inquiryId_key",
+        "tbl_name": "LandingReceipt",
+        "sql": "CREATE UNIQUE INDEX \"LandingReceipt_inquiryId_key\" ON \"LandingReceipt\"(\"inquiryId\")"
+      },
+      {
+        "type": "index",
+        "name": "LandingThrottle_windowStart_idx",
+        "tbl_name": "LandingThrottle",
+        "sql": "CREATE INDEX \"LandingThrottle_windowStart_idx\" ON \"LandingThrottle\"(\"windowStart\")"
+      },
+      {
+        "type": "index",
+        "name": "Team_name_key",
+        "tbl_name": "Team",
+        "sql": "CREATE UNIQUE INDEX \"Team_name_key\" ON \"Team\"(\"name\")"
+      },
+      {
+        "type": "index",
+        "name": "User_email_key",
+        "tbl_name": "User",
+        "sql": "CREATE UNIQUE INDEX \"User_email_key\" ON \"User\"(\"email\")"
+      },
+      {
+        "type": "table",
+        "name": "Customer",
+        "tbl_name": "Customer",
+        "sql": "CREATE TABLE \"Customer\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"name\" TEXT NOT NULL,\n    \"phone\" TEXT,\n    \"email\" TEXT,\n    \"customerSegment\" TEXT,\n    \"customerCategory\" TEXT,\n    \"status\" TEXT NOT NULL DEFAULT '잠재고객',\n    \"grade\" TEXT,\n    \"tags\" TEXT,\n    \"source\" TEXT,\n    \"collectedAt\" DATETIME,\n    \"referrer\" TEXT,\n    \"leadType\" TEXT,\n    \"assignee\" TEXT,\n    \"isAgent\" BOOLEAN NOT NULL DEFAULT false,\n    \"memo\" TEXT,\n    \"birthYear\" INTEGER,\n    \"regionCity\" TEXT,\n    \"regionDist\" TEXT,\n    \"gender\" TEXT,\n    \"birthInfo\" TEXT,\n    \"maritalStatus\" TEXT,\n    \"childrenCount\" INTEGER,\n    \"addressDetail\" TEXT,\n    \"isSoleProprietor\" BOOLEAN,\n    \"soleBusinessName\" TEXT,\n    \"soleBusinessNo\" TEXT,\n    \"soleBusinessType\" TEXT,\n    \"b2bCategory\" TEXT,\n    \"companyName\" TEXT,\n    \"businessRegNo\" TEXT,\n    \"contactTitle\" TEXT,\n    \"industry\" TEXT,\n    \"companyAddress\" TEXT,\n    \"companyPhone\" TEXT,\n    \"employeeCount\" INTEGER,\n    \"mainContactCardUrl\" TEXT,\n    \"contactsJson\" TEXT,\n    \"hasVehicle\" BOOLEAN,\n    \"vehicleMaker\" TEXT,\n    \"vehicleName\" TEXT,\n    \"vehiclePlateNo\" TEXT,\n    \"vehicleYear\" TEXT,\n    \"totalMileage\" INTEGER,\n    \"truckType1\" TEXT,\n    \"truckType2\" TEXT,\n    \"truckType3\" TEXT,\n    \"truckType4\" TEXT,\n    \"vehicleCount\" INTEGER,\n    \"vehicleListJson\" TEXT,\n    \"documentsJson\" TEXT,\n    \"b2bRevenue1\" TEXT,\n    \"b2bRevenue2\" TEXT,\n    \"b2bRevenue3\" TEXT,\n    \"shipperName\" TEXT,\n    \"cargoType\" TEXT,\n    \"deliveryCity\" TEXT,\n    \"deliveryDist\" TEXT,\n    \"deliveryFreq\" TEXT,\n    \"workShift\" TEXT,\n    \"monthlyIncome\" TEXT,\n    \"cargoNote\" TEXT,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    \"updatedAt\" DATETIME NOT NULL\n)"
+      },
+      {
+        "type": "table",
+        "name": "CustomerActivity",
+        "tbl_name": "CustomerActivity",
+        "sql": "CREATE TABLE \"CustomerActivity\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"customerId\" TEXT NOT NULL,\n    \"type\" TEXT NOT NULL,\n    \"date\" DATETIME NOT NULL,\n    \"content\" TEXT,\n    \"result\" TEXT,\n    \"nextAction\" TEXT,\n    \"assignee\" TEXT,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    CONSTRAINT \"CustomerActivity_customerId_fkey\" FOREIGN KEY (\"customerId\") REFERENCES \"Customer\" (\"id\") ON DELETE CASCADE ON UPDATE CASCADE\n)"
+      },
+      {
+        "type": "table",
+        "name": "Inquiry",
+        "tbl_name": "Inquiry",
+        "sql": "CREATE TABLE \"Inquiry\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"source\" TEXT NOT NULL,\n    \"companyScopeId\" TEXT NOT NULL,\n    \"homepageScopeId\" TEXT NOT NULL,\n    \"sourceId\" TEXT NOT NULL,\n    \"inquiryDate\" TEXT NOT NULL,\n    \"inquiryTime\" TEXT NOT NULL,\n    \"sourceStatus\" TEXT,\n    \"name\" TEXT,\n    \"phone\" TEXT NOT NULL,\n    \"firstSeenAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    \"lastSeenAt\" DATETIME NOT NULL\n, \"warpCustomerId\" TEXT, \"warpActivityId\" TEXT, \"warpDeliveredAt\" DATETIME, \"warpAttemptedAt\" DATETIME, \"warpError\" TEXT)"
+      },
+      {
+        "type": "table",
+        "name": "InquirySyncRun",
+        "tbl_name": "InquirySyncRun",
+        "sql": "CREATE TABLE \"InquirySyncRun\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"source\" TEXT NOT NULL,\n    \"companyScopeId\" TEXT NOT NULL,\n    \"homepageScopeId\" TEXT NOT NULL,\n    \"trigger\" TEXT NOT NULL,\n    \"status\" TEXT NOT NULL DEFAULT 'pending',\n    \"rangeStart\" TEXT NOT NULL,\n    \"rangeEnd\" TEXT NOT NULL,\n    \"startedAt\" DATETIME,\n    \"heartbeatAt\" DATETIME,\n    \"completedAt\" DATETIME,\n    \"expectedCount\" INTEGER,\n    \"readCount\" INTEGER NOT NULL DEFAULT 0,\n    \"createdCount\" INTEGER NOT NULL DEFAULT 0,\n    \"updatedCount\" INTEGER NOT NULL DEFAULT 0,\n    \"unchangedCount\" INTEGER NOT NULL DEFAULT 0,\n    \"pagesRead\" INTEGER NOT NULL DEFAULT 0,\n    \"errorType\" TEXT,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP\n)"
+      },
+      {
+        "type": "table",
+        "name": "InquirySyncState",
+        "tbl_name": "InquirySyncState",
+        "sql": "CREATE TABLE \"InquirySyncState\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"source\" TEXT NOT NULL,\n    \"companyScopeId\" TEXT NOT NULL,\n    \"homepageScopeId\" TEXT NOT NULL,\n    \"status\" TEXT NOT NULL DEFAULT 'offline',\n    \"lastSuccessfulAt\" DATETIME,\n    \"lastRunId\" TEXT,\n    \"nextRunAt\" DATETIME,\n    \"workerHeartbeatAt\" DATETIME,\n    \"workerOwner\" TEXT,\n    \"workerLeaseExpiresAt\" DATETIME,\n    \"lockOwner\" TEXT,\n    \"lockExpiresAt\" DATETIME,\n    \"updatedAt\" DATETIME NOT NULL\n)"
+      },
+      {
+        "type": "table",
+        "name": "LandingReceipt",
+        "tbl_name": "LandingReceipt",
+        "sql": "CREATE TABLE \"LandingReceipt\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"inquiryId\" TEXT,\n    \"fingerprint\" TEXT,\n    \"kind\" TEXT,\n    \"region\" TEXT,\n    \"consentVersion\" TEXT,\n    \"consentedAt\" DATETIME,\n    \"closedAt\" DATETIME,\n    CONSTRAINT \"LandingReceipt_inquiryId_fkey\" FOREIGN KEY (\"inquiryId\") REFERENCES \"Inquiry\" (\"id\") ON DELETE SET NULL ON UPDATE CASCADE\n)"
+      },
+      {
+        "type": "table",
+        "name": "LandingThrottle",
+        "tbl_name": "LandingThrottle",
+        "sql": "CREATE TABLE \"LandingThrottle\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"windowStart\" DATETIME NOT NULL,\n    \"count\" INTEGER NOT NULL\n)"
+      },
+      {
+        "type": "table",
+        "name": "Team",
+        "tbl_name": "Team",
+        "sql": "CREATE TABLE \"Team\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"name\" TEXT NOT NULL,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP\n)"
+      },
+      {
+        "type": "table",
+        "name": "User",
+        "tbl_name": "User",
+        "sql": "CREATE TABLE \"User\" (\n    \"id\" TEXT NOT NULL PRIMARY KEY,\n    \"name\" TEXT NOT NULL,\n    \"email\" TEXT NOT NULL,\n    \"password\" TEXT NOT NULL,\n    \"role\" TEXT NOT NULL DEFAULT 'user',\n    \"teamId\" TEXT,\n    \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    \"updatedAt\" DATETIME NOT NULL,\n    CONSTRAINT \"User_teamId_fkey\" FOREIGN KEY (\"teamId\") REFERENCES \"Team\" (\"id\") ON DELETE SET NULL ON UPDATE CASCADE\n)"
+      }
+    ]
+  },
+  "baselineContractSha256": "be0bbaab3f91511d72fca7dd533179bbf9e54d25bd9ce8c215ce128db9e23ae6",
+  "expandedContractSha256": "ce708b8e46cf000c4058ca7163ab54a2bde00b3fa675d950961463ee514bca26"
+}

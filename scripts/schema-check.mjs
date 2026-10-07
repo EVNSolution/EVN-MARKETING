@@ -3,6 +3,7 @@ import { lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } fro
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { annotateCompatibility, compatibleSchemas, schemaContract } from './schema-compatibility.mjs'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
@@ -27,7 +28,7 @@ export function createManifest(root, revision) {
       db.exec(sql.toString('utf8'))
       return { name, checksum: hash(sql) }
     })
-    return { format: 1, revision, prismaSchemaSha256: hash(readFileSync(path.join(root, 'prisma/schema.prisma'))), migrations: entries, schema: schema(db) }
+    return annotateCompatibility({ format: 1, revision, prismaSchemaSha256: hash(readFileSync(path.join(root, 'prisma/schema.prisma'))), migrations: entries, schema: schema(db) })
   } finally { db.close() }
 }
 
@@ -43,11 +44,9 @@ function validateManifest(manifest) {
 export function checkSchema(database, current, previous) {
   validateManifest(current)
   validateManifest(previous)
-  // No migration is performed by this tool. Changed schemas require the separate
-  // expand/migration rehearsal before they can enter the ordinary release path.
-  for (const field of ['prismaSchemaSha256', 'migrations', 'schema']) {
-    if (JSON.stringify(current[field]) !== JSON.stringify(previous[field])) fail('schema_change_requires_review')
-  }
+  // Read-only. Only the pinned landing expansion can cross a schema boundary,
+  // and both images must advertise recovery support before they can be paired.
+  const candidates = compatibleSchemas(current, previous)
   if (!path.isAbsolute(database) || path.normalize(database) !== database
     || !lstatSync(database).isFile() || realpathSync(database) !== database) fail('database_path')
   const db = new Database(database, { readonly: true, fileMustExist: true, timeout: 1000 })
@@ -55,16 +54,20 @@ export function checkSchema(database, current, previous) {
     db.pragma('query_only = ON')
     // One read snapshot prevents the ledger and schema being observed at different times.
     db.exec('BEGIN')
-    if (JSON.stringify(schema(db)) !== JSON.stringify(current.schema)) fail('schema')
+    const actualSchema = schema(db)
+    const expected = candidates.find(candidate => JSON.stringify(actualSchema) === JSON.stringify(candidate.schema))
+    if (!expected) fail('schema')
     const ledgerExists = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = '_prisma_migrations'").get()
     if (!ledgerExists) fail('migration_ledger')
     const ledger = db.prepare('SELECT migration_name, checksum, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY migration_name').all()
       .filter(row => row.rolled_back_at === null)
     if (ledger.some(row => row.finished_at === null)
-      || JSON.stringify(ledger.map(row => ({ name: row.migration_name, checksum: row.checksum }))) !== JSON.stringify(current.migrations)) fail('migration_ledger')
+      || JSON.stringify(ledger.map(row => ({ name: row.migration_name, checksum: row.checksum }))) !== JSON.stringify(expected.migrations)) fail('migration_ledger')
     if (JSON.stringify(db.pragma('integrity_check')) !== JSON.stringify([{ integrity_check: 'ok' }])
       || db.pragma('foreign_key_check').length) fail('integrity')
-    return { ok: true, policy: 'unchanged-schema', current: current.revision, previous: previous.revision }
+    return { ok: true, policy: candidates.length > 1 || schemaContract(current) !== schemaContract(previous)
+      ? 'pinned-landing-expansion' : 'unchanged-schema', current: current.revision, previous: previous.revision,
+    storageContractSha256: schemaContract(expected) }
   } finally { db.close() }
 }
 

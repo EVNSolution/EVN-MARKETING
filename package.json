@@ -10,7 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "seed": "tsx prisma/seed.ts",
     "test:db": "tsx tests/db.test.ts",
-    "test:schema": "node tests/schema-check.test.mjs",
+    "test:schema": "node tests/schema-check.test.mjs && node tests/landing-schema-bridge.test.mjs",
     "test:data-recovery": "tsx tests/data-recovery.test.ts",
     "test:backup": "node tests/data-backup.test.mjs && python3 tests/data-ops.test.py",
     "test:warp-recovery": "tsx tests/warp-recovery.test.ts",

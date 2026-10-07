@@ -22,6 +22,8 @@ COPY workers workers
 COPY scripts/warp-delivery.ts scripts/warp-delivery.ts
 COPY scripts/warp-recovery.ts scripts/warp-recovery.ts
 COPY scripts/schema-check.mjs scripts/schema-check.mjs
+COPY scripts/schema-compatibility.mjs scripts/schema-compatibility.mjs
+COPY scripts/landing-schema-policy.json scripts/landing-schema-policy.json
 COPY scripts/data-backup.mjs scripts/data-backup.mjs
 COPY types types
 COPY auth.ts proxy.ts ./
@@ -57,6 +59,8 @@ COPY --from=build /app/warp-delivery.mjs ./warp-delivery.mjs
 COPY --from=build /app/warp-recovery.mjs ./warp-recovery.mjs
 COPY --from=build /app/scripts/data-backup.mjs ./data-backup.mjs
 COPY --from=build /app/scripts/schema-check.mjs ./schema-check.mjs
+COPY --from=build /app/scripts/schema-compatibility.mjs ./schema-compatibility.mjs
+COPY --from=build /app/scripts/landing-schema-policy.json ./landing-schema-policy.json
 COPY --from=build /app/schema-manifest.json ./schema-manifest.json
 COPY --from=build /app/worker-activation.version ./worker-activation.version
 COPY --from=build /app/node_modules/dotenv ./node_modules/dotenv

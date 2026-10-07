@@ -23,6 +23,8 @@
 !scripts/warp-delivery.ts
 !scripts/warp-recovery.ts
 !scripts/schema-check.mjs
+!scripts/schema-compatibility.mjs
+!scripts/landing-schema-policy.json
 !scripts/data-backup.mjs
 !types/
 !types/**
