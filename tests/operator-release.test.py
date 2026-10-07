@@ -103,11 +103,17 @@ with patch.dict(os.environ, {"MARKETING_AWS_ACCOUNT_ID": "000000000000"}), \
 with patch.object(operator, "configure", return_value=SHA) as configure, \
         patch.object(operator, "publish_image", return_value=DIGEST) as publish, \
         patch.object(operator, "run", return_value=""), \
+        patch.object(operator.release, "scan") as scan, \
+        patch.object(operator.release, "check_source", return_value=SHA) as checked_source, \
+        patch.object(operator.release, "check_manual_target") as checked_target, \
         patch.object(operator.release, "prepare_request", side_effect=AssertionError("operations images are not releases")), \
         patch.object(operator.release, "dispatch", side_effect=AssertionError("must not deploy")):
     operator.execute("publish-ops", "synthetic.json")
     configure.assert_called_once_with("synthetic.json", "release")
     publish.assert_called_once_with(SHA, target="operations")
+    scan.assert_called_once_with(DIGEST)
+    checked_source.assert_called_once_with(manual=True)
+    checked_target.assert_called_once_with()
 
 request = {"Parameters": {"Action": ["release"], "Revision": [SHA], "Digest": [DIGEST]}}
 for command in ("check", "publish"):

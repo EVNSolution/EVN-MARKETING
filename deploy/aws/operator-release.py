@@ -155,6 +155,9 @@ def execute(command, config):
     run(["npm", "audit", "--omit=dev", "--audit-level=high"])
     if command == "publish-ops":
         digest = publish_image(revision, target="operations")
+        release.scan(digest)
+        release.check_source(manual=True)
+        release.check_manual_target()
         print(json.dumps({"revision": revision, "operationsDigest": digest, "deployed": False}))
         return
     if command == "publish":
