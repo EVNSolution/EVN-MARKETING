@@ -7,6 +7,7 @@
   "ebsVolumeId": "APPROVED_EBS_VOLUME_ID",
   "network": "evn-marketing",
   "collectorEnabled": false,
+  "landingIntakeEnabled": false,
   "warpDeliveryEnabled": false,
   "minFreeMemoryMiB": 512,
   "minFreeDiskMiB": 4096,

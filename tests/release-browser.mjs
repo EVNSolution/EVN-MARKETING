@@ -101,8 +101,11 @@ try {
   await unloadedContext.route('**/*.js*', route => route.abort())
   const unloadedLogin = await loginPage(unloadedContext)
   for (const page of [nativeLogin, nativeExpiredPage, nativeLogout, unloadedLogin]) {
-    assert.equal(new URL(await page.locator('form').getAttribute('action'), base).searchParams.get('dpl'), a, 'native form pins the rendered release')
-    assert.ok(await page.locator('input[name^="$ACTION_"]').count(), 'React SSR action encoding is retained')
+    const button = page.getByRole('button', { name: page === nativeLogout ? '로그아웃' : '로그인', exact: true })
+    const authForm = page.locator('form').filter({ has: button })
+    assert.equal(await authForm.count(), 1, 'exactly one authentication form is selected alongside unrelated search forms')
+    assert.equal(new URL(await authForm.getAttribute('action'), base).searchParams.get('dpl'), a, 'native form pins the rendered release')
+    assert.ok(await authForm.locator('input[name^="$ACTION_"]').count(), 'React SSR action encoding is retained in the authentication form')
   }
   const oldEncoding = await nativeLogin.locator('input[name^="$ACTION_"]').evaluateAll(inputs => inputs.map(input => input.value))
 

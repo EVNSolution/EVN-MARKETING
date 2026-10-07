@@ -113,20 +113,23 @@ def validate_publish_target():
         raise ValueError("Marketing image tags must be immutable")
 
 
-def publish_image(revision):
+def publish_image(revision, target="runtime"):
+    if target not in ("runtime", "operations"):
+        raise ValueError("unsupported image target")
     validate_publish_target()
-    digest = image_digest(revision, missing_ok=True)
+    tag = revision if target == "runtime" else revision + "-ops"
+    digest = image_digest(tag, missing_ok=True)
     if digest:
         return digest
     if not shutil.which("docker-credential-ecr-login"):
         raise RuntimeError("docker-credential-ecr-login is required")
     registry = f"{os.environ['MARKETING_AWS_ACCOUNT_ID']}.dkr.ecr.{release.REGION}.amazonaws.com"
-    image = f"{registry}/evn-marketing:{revision}"
+    image = f"{registry}/evn-marketing:{tag}"
     archive = subprocess.run(["git", "archive", "--format=tar", revision], cwd=ROOT,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
     if archive.returncode:
         raise RuntimeError("cannot archive the pinned source")
-    build = subprocess.run(["docker", "build", "--platform", "linux/amd64", "--provenance=false", "--build-arg",
+    build = subprocess.run(["docker", "build", "--platform", "linux/amd64", "--provenance=false", "--target", target, "--build-arg",
                             "MARKETING_BUILD_REVISION=" + revision, "--label",
                             "org.opencontainers.image.revision=" + revision, "--label",
                             "org.opencontainers.image.source=https://github.com/" + release.REPOSITORY,
@@ -140,7 +143,7 @@ def publish_image(revision):
         Path(directory, "config.json").write_text(json.dumps({"credHelpers": {registry: "ecr-login"}}) + "\n")
         run(["docker", "push", image], env={**os.environ, "DOCKER_CONFIG": directory,
                                              "AWS_ECR_DISABLE_CACHE": "true"})
-    return image_digest(revision)
+    return image_digest(tag)
 
 
 def execute(command, config):
@@ -150,6 +153,13 @@ def execute(command, config):
         release.dispatch("previous", manual=True)
         return
     run(["npm", "audit", "--omit=dev", "--audit-level=high"])
+    if command == "publish-ops":
+        digest = publish_image(revision, target="operations")
+        release.scan(digest)
+        release.check_source(manual=True)
+        release.check_manual_target()
+        print(json.dumps({"revision": revision, "operationsDigest": digest, "deployed": False}))
+        return
     if command == "publish":
         digest = publish_image(revision)
         release.prepare_request(digest, manual=True)
@@ -166,7 +176,7 @@ def execute(command, config):
 def parser():
     value = argparse.ArgumentParser(description="EV&Marketing local deployment operator")
     commands = value.add_subparsers(dest="command")
-    for name in ("check", "publish", "release", "rollback"):
+    for name in ("check", "publish", "publish-ops", "release", "rollback"):
         command = commands.add_parser(name)
         command.add_argument("--config", required=True, help="nonsecret operator JSON config")
     return value

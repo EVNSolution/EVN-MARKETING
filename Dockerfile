@@ -24,7 +24,10 @@ COPY scripts/warp-recovery.ts scripts/warp-recovery.ts
 COPY scripts/schema-check.mjs scripts/schema-check.mjs
 COPY scripts/schema-compatibility.mjs scripts/schema-compatibility.mjs
 COPY scripts/landing-schema-policy.json scripts/landing-schema-policy.json
+COPY scripts/landing-expansion-audit.mjs scripts/landing-expansion-audit.mjs
 COPY scripts/data-backup.mjs scripts/data-backup.mjs
+COPY scripts/build-landing-public.mjs scripts/build-landing-public.mjs
+COPY previews/evn-landing previews/evn-landing
 COPY types types
 COPY auth.ts proxy.ts ./
 ARG MARKETING_BUILD_REVISION
@@ -52,6 +55,7 @@ RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
 COPY --from=build /app/app/fonts/licenses ./licenses/fonts
 COPY --from=build /app/worker.mjs ./worker.mjs
 COPY --from=build /app/worker-health.mjs ./worker-health.mjs
@@ -61,6 +65,7 @@ COPY --from=build /app/scripts/data-backup.mjs ./data-backup.mjs
 COPY --from=build /app/scripts/schema-check.mjs ./schema-check.mjs
 COPY --from=build /app/scripts/schema-compatibility.mjs ./schema-compatibility.mjs
 COPY --from=build /app/scripts/landing-schema-policy.json ./landing-schema-policy.json
+COPY --from=build /app/scripts/landing-expansion-audit.mjs ./landing-expansion-audit.mjs
 COPY --from=build /app/schema-manifest.json ./schema-manifest.json
 COPY --from=build /app/worker-activation.version ./worker-activation.version
 COPY --from=build /app/node_modules/dotenv ./node_modules/dotenv

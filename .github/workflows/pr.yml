@@ -32,8 +32,10 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
+      - name: Homepage intake and duplicate submission checks
+        run: npm run test:landing
       - name: Release controller and cloud declaration checks
-        run: python3 tests/selective-ci.test.py && python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/operator-release.test.py && python3 tests/deploy-controller-lab.py --self-test
+        run: python3 tests/selective-ci.test.py && python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/operator-release.test.py && python3 tests/landing-expand.test.py && python3 tests/deploy-controller-lab.py --self-test
       - name: Offline backup and bounded receipt recovery
         run: npm run test:backup && npm run test:warp-recovery
       - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint

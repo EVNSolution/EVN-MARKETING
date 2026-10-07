@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # CI-only, no published app ports and no external network for app/proxy/browser containers.
-# Last passing PR #7 source. Rebuild the real previous code, not this code with another ID.
-release_a=fbf325f3efc30b8913b6dd3989d93abba9af0a7c
+# The required unchanged-schema bridge. Rebuild its actual committed application.
+# This commit must pass its own CI and be deployed before this feature release.
+release_a=d6d7df889f1a1ca52769a1615e352034f09c3bb8
 release_b="${GITHUB_SHA:?}"
 compat_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/marketing-compat.XXXXXX")"
 chmod 777 "$compat_dir"
@@ -20,33 +21,37 @@ trap cleanup EXIT
 docker build --platform linux/amd64 -f deploy/Dockerfile.proxy -t evn-marketing:proxy-ci .
 mkdir "$compat_dir/previous"
 git archive "$release_a" | tar -x -C "$compat_dir/previous"
-# Only add native build tools to the historical recipe; its app source/lockfile stay pinned.
-node --input-type=module - "$compat_dir/previous/Dockerfile" <<'NODE'
-import { readFileSync, writeFileSync } from 'node:fs';
-const file = process.argv[2], original = readFileSync(file, 'utf8');
-const line = 'apt-get install -y --no-install-recommends openssl ca-certificates';
-if (original.split(line).length !== 2) throw new Error('unexpected historical build recipe');
-writeFileSync(file, original.replace(line, `${line} python3 make g++`));
-NODE
 docker build --build-arg MARKETING_BUILD_REVISION="$release_a" -t evn-marketing:compat-a "$compat_dir/previous"
-# PR #7 predates packaged manifests: derive its contract from this exact pinned source for CI only.
-node scripts/schema-check.mjs manifest "$compat_dir/previous" "$release_a" "$compat_dir/previous-manifest.json"
+# Read the capability from the real image; never manufacture it for an old image.
+docker run --rm --network none --entrypoint cat evn-marketing:compat-a /app/schema-manifest.json > "$compat_dir/previous-manifest.json"
 chmod 644 "$compat_dir/previous-manifest.json"
 docker network create --internal marketing-compat
-docker run --rm --network none -v "$PWD:/src:ro" -v "$compat_dir/data:/data" evn-marketing:ci node /src/tests/release-setup.mjs
+# Begin with the baseline database and the bridge's exact synthetic fixture.
+mkdir "$compat_dir/previous/node_modules"
+docker run --rm --network none -v "$compat_dir/previous:/src:ro" -v "$PWD/node_modules:/src/node_modules:ro" -v "$compat_dir/data:/data" evn-marketing:compat-a node /src/tests/release-setup.mjs
 # Restore a coherent offline bundle before all existing real browser checks.
 mkdir "$compat_dir/rehearsal" "$compat_dir/restored"
 chmod 777 "$compat_dir/rehearsal" "$compat_dir/restored"
 docker run --rm --network none -v "$compat_dir/data:/data" -v "$compat_dir/rehearsal:/rehearsal" \
-  evn-marketing:ci node data-backup.mjs snapshot /data /rehearsal/backup > "$compat_dir/rehearsal/snapshot-result.json"
+  evn-marketing:compat-a node data-backup.mjs snapshot /data /rehearsal/backup > "$compat_dir/rehearsal/snapshot-result.json"
 summary_hash="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).summarySha256)' "$compat_dir/rehearsal/snapshot-result.json")"
 docker run --rm --network none -v "$compat_dir/rehearsal/backup:/backup:ro" -v "$compat_dir/restored:/restore" \
-  evn-marketing:ci node data-backup.mjs restore /backup /restore "$summary_hash" > "$compat_dir/rehearsal/restore-result.json"
-docker run --rm --network none -v "$compat_dir/restored:/data" evn-marketing:ci node data-backup.mjs audit /data > "$compat_dir/rehearsal/before.json"
+  evn-marketing:compat-a node data-backup.mjs restore /backup /restore "$summary_hash" > "$compat_dir/rehearsal/restore-result.json"
+docker run --rm --network none -v "$compat_dir/restored:/data" evn-marketing:compat-a node data-backup.mjs audit /data > "$compat_dir/rehearsal/before.json"
 docker run --rm --network none -v "$compat_dir/restored:/data" -e DATABASE_URL=file:/data/marketing.db \
   evn-marketing:ops npx --no-install prisma migrate deploy
 docker run --rm --network none -v "$compat_dir/restored:/data" evn-marketing:ci node data-backup.mjs audit /data > "$compat_dir/rehearsal/after.json"
-cmp "$compat_dir/rehearsal/before.json" "$compat_dir/rehearsal/after.json"
+docker run --rm --network none -v "$compat_dir/restored:/data" -v "$compat_dir/rehearsal:/rehearsal" \
+  evn-marketing:ci node data-backup.mjs snapshot /data /rehearsal/expanded > "$compat_dir/rehearsal/expanded-result.json"
+docker run --rm --network none -v "$PWD:/src:ro" -v "$compat_dir/rehearsal:/rehearsal:ro" \
+  evn-marketing:ci node /src/tests/landing-migration-preservation.mjs /rehearsal/backup /rehearsal/expanded
+docker run --rm --network none --entrypoint cat evn-marketing:ci /app/schema-manifest.json > "$compat_dir/current-manifest.json"
+chmod 644 "$compat_dir/current-manifest.json"
+# Exercise the actual bridge checker for rollback and self-recovery on expanded data.
+docker run --rm --network none -v "$compat_dir/restored:/data" -v "$compat_dir/current-manifest.json:/candidate.json:ro" \
+  -e DATABASE_URL=file:/data/marketing.db evn-marketing:compat-a node schema-check.mjs check schema-manifest.json /candidate.json
+docker run --rm --network none -v "$compat_dir/restored:/data" \
+  -e DATABASE_URL=file:/data/marketing.db evn-marketing:compat-a node schema-check.mjs check schema-manifest.json schema-manifest.json
 cp "$compat_dir/data/.marketing-volume-id" "$compat_dir/restored/.marketing-volume-id"
 mv "$compat_dir/data" "$compat_dir/original"
 mv "$compat_dir/restored" "$compat_dir/data"
@@ -127,7 +132,8 @@ for name in ('marketing-compat-blue','marketing-compat-green','marketing-compat-
 assert all(value > 0 for value in peaks.values())
 summary = {'ok':True,'synthetic':True,'sourceSha':os.environ['GITHUB_SHA'],
            'restore':json.loads((directory/'rehearsal/restore-result.json').read_text()),
-           'migrationUnchanged':True,'restoredBrowserChecks':True,
+           'migrationUnchanged':False,'landingExpansionRehearsed':True,'existingDataPreserved':True,
+           'bridgeRollbackSchemaVerified':True,'restoredBrowserChecks':True,
            'componentPeakBytes':peaks,'sumOfComponentPeaksBytes':sum(peaks.values()),
            'measurement':'cgroup-v2 high-water sum; not simultaneous usage or production sizing',
            'runtimeImage':subprocess.check_output(['docker','image','inspect','evn-marketing:ci','--format','{{.Id}}'],text=True).strip(),

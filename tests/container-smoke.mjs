@@ -24,6 +24,7 @@ for (const path of [
 assert.equal(existsSync('/app/warp-delivery.mjs'), true, 'packaged WARP CLI is present')
 assert.equal(existsSync('/app/warp-recovery.mjs'), true, 'packaged recovery CLI is present')
 assert.equal(existsSync('/app/worker-health.mjs'), true, 'packaged worker health CLI is present')
+assert.equal(existsSync('/app/landing-expansion-audit.mjs'), true, 'packaged read-only expansion audit is present')
 const Database = require('better-sqlite3')
 const { chromium } = require('playwright-core')
 mkdirSync('/data/uploads', { recursive: true })
@@ -40,7 +41,7 @@ const activityId = `mleverage_${createHash('sha256').update([
 ].join(':')).digest('hex')}`
 const db = new Database('/data/marketing.db')
 try {
-  for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
+  for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery', '20261007000100_landing_inquiries']) {
     db.exec(readFileSync(`/src/prisma/migrations/${migration}/migration.sql`, 'utf8'))
   }
   recordSyntheticMigrations(db, '/src')
@@ -65,6 +66,11 @@ const schemaCli = (database) => spawnSync(process.execPath, ['/app/schema-check.
   env: { DATABASE_URL: database }, encoding: 'utf8', timeout: 5000,
 })
 assert.equal(schemaCli('file:/data/marketing.db').status, 0, 'packaged schema gate reads its image manifest')
+const expansionAudit = spawnSync(process.execPath, ['/app/landing-expansion-audit.mjs', 'expanded', '/data'], {
+  env: {}, encoding: 'utf8', timeout: 5000,
+})
+assert.equal(expansionAudit.status, 0, 'packaged expansion auditor recognizes the exact expanded schema')
+assert.equal(JSON.parse(expansionAudit.stdout).ok, true)
 const missingSchemaDb = schemaCli('file:/data/schema-must-not-create.db')
 assert.equal(missingSchemaDb.status, 1)
 assert.equal(missingSchemaDb.stderr, '')
