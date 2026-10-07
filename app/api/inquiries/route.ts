@@ -3,6 +3,7 @@ import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
 import { duplicateInquiryIds, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { inquiryCustomerName } from '@/lib/format'
+import { landingScope } from '@/lib/landing-inquiries'
 import {
   INQUIRY_COMPANY_ID,
   INQUIRY_HOMEPAGE_ID,
@@ -41,10 +42,12 @@ export async function GET(request: Request) {
   const status = params.get('status')?.trim() ?? ''
   const query = params.get('q')?.trim() ?? ''
   const review = params.get('review') ?? ''
+  const source = params.get('source') ?? ''
+  const visibleScope = source === 'landing' ? landingScope : source === 'collected' ? scope : { OR: [scope, landingScope] }
   const skip = page && limit ? (page - 1) * limit : NaN
 
   if (!page || !limit || limit > 200 || (from && !validDate(from)) || (to && !validDate(to)) ||
-      (from && to && from > to) || status.length > 100 || query.length > 100 || !['', 'pending', 'reviewed'].includes(review) || !Number.isSafeInteger(skip)) {
+      (from && to && from > to) || status.length > 100 || query.length > 100 || !['', 'pending', 'reviewed'].includes(review) || !['', 'landing', 'collected'].includes(source) || !Number.isSafeInteger(skip)) {
     return NextResponse.json({ error: '조회 조건을 확인해 주세요.' }, { status: 400 })
   }
 
@@ -53,11 +56,10 @@ export async function GET(request: Request) {
     const reviewRows = review ? await prisma.inquiry.findMany({ where: scope, select: { id: true, warpDeliveredAt: true, warpError: true } }) : []
     const reviewIds = reviewRows.filter(row => warpDeliveryState(row, duplicates.has(row.id)).status === (review === 'pending' ? 'duplicate' : 'duplicate_reviewed')).map(row => row.id)
     const where = {
-      ...scope,
+      AND: [visibleScope, ...(query ? [{ OR: [{ name: { contains: query } }, { phone: { contains: query } }] }] : [])],
       ...(review ? { id: { in: reviewIds } } : {}),
       ...(from || to ? { inquiryDate: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
       ...(status ? { sourceStatus: status === '__empty__' ? null : status } : {}),
-      ...(query ? { OR: [{ name: { contains: query } }, { phone: { contains: query } }] } : {}),
     }
 
     const now = new Date()
@@ -69,8 +71,9 @@ export async function GET(request: Request) {
         skip,
         take: limit,
         select: {
-          id: true, inquiryDate: true, inquiryTime: true, sourceStatus: true, name: true, phone: true,
+          id: true, source: true, inquiryDate: true, inquiryTime: true, sourceStatus: true, name: true, phone: true,
           warpDeliveredAt: true, warpError: true,
+          landingReceipt: { select: { kind: true, region: true, consentVersion: true, consentedAt: true } },
         },
       }),
       prisma.inquirySyncState.findUnique({
@@ -101,7 +104,9 @@ export async function GET(request: Request) {
       rows: rows.map(({ warpDeliveredAt, warpError, ...row }) => ({
         ...row,
         name: inquiryCustomerName(row.name, row.phone),
-        warpDelivery: warpDeliveryState({ warpDeliveredAt, warpError }, duplicates.has(row.id)),
+        warpDelivery: row.source === landingScope.source
+          ? { status: 'landing', label: '상담 대기', reason: '새 홈페이지에서 접수된 문의입니다.' }
+          : warpDeliveryState({ warpDeliveredAt, warpError }, duplicates.has(row.id)),
       })),
       warp,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
@@ -115,7 +120,7 @@ export async function GET(request: Request) {
         nextRunAt: state?.nextRunAt ?? null,
         latestRun,
       },
-    })
+    }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch {
     return NextResponse.json({ error: '문의 내역을 불러오지 못했습니다.' }, { status: 500 })
   }

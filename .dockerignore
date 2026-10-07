@@ -24,6 +24,10 @@
 !scripts/warp-recovery.ts
 !scripts/schema-check.mjs
 !scripts/data-backup.mjs
+!scripts/build-landing-public.mjs
+!previews/
+!previews/evn-landing/
+!previews/evn-landing/**
 !types/
 !types/**
 app/generated/

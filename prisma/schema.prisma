@@ -148,11 +148,34 @@ model Inquiry {
   warpDeliveredAt DateTime?
   warpAttemptedAt DateTime?
   warpError       String?
+  landingReceipt  LandingReceipt?
 
   @@unique([source, companyScopeId, homepageScopeId, sourceId])
   @@index([inquiryDate, inquiryTime])
   @@index([sourceStatus])
   @@index([warpDeliveredAt, warpAttemptedAt])
+}
+
+// The receipt ID is supplied by the form and makes uncertain retries idempotent.
+// After consultation closure, only the random receipt ID and closure time remain.
+model LandingReceipt {
+  id              String   @id
+  inquiryId       String?  @unique
+  inquiry         Inquiry? @relation(fields: [inquiryId], references: [id], onDelete: SetNull)
+  fingerprint     String?
+  kind            String?
+  region          String?
+  consentVersion  String?
+  consentedAt     DateTime?
+  closedAt        DateTime?
+}
+
+model LandingThrottle {
+  id          String   @id
+  windowStart DateTime
+  count       Int
+
+  @@index([windowStart])
 }
 
 model InquirySyncRun {

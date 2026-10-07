@@ -1,0 +1,49 @@
+/* Keep the imported visual system; only local behavior and narrow screens differ. */
+html { scroll-behavior: smooth; }
+body { min-width: 0; }
+[role="button"]:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, .preview-slider:focus-visible { outline: 3px solid #98ac16; outline-offset: 4px; }
+.preview-form { margin: 0; }
+.preview-form input { min-width: 0; }
+.preview-form [class*="CheckboxWrapper"] { position: relative; }
+.preview-form [class*="CheckboxWrapper"] input[type="checkbox"] { display: block; position: absolute; opacity: 0; width: 22px; height: 22px; left: 0; top: 0; cursor: pointer; z-index: 1; }
+.preview-form input[type="checkbox"]:checked + [class*="CustomCheckbox"]::after { content: ''; width: 6px; height: 11px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); }
+.preview-form input[type="checkbox"]:focus-visible + [class*="CustomCheckbox"] { outline: 3px solid #98ac16; outline-offset: 3px; }
+.preview-status { font-size: 14px; line-height: 1.5; margin-top: 16px; color: #354200; }
+.preview-status[data-state="error"] { color: #a42318; }
+.preview-footer-note { color: #d4f91f; font-size: 12px; line-height: 1.5; }
+.preview-dialog { padding: 0; margin: auto; border: 0; border-radius: 20px; background: transparent; width: 550px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; color: #232323; }
+.preview-dialog::backdrop { background: rgba(0,0,0,.6); }
+.preview-dialog .preview-modal-content { position: static; transform: none; width: 100%; max-width: 100%; opacity: 1; visibility: visible; }
+.preview-dialog [class*="Content_Body"] { padding: 0; }
+.preview-close { position: absolute; right: 12px; top: 9px; width: 30px; height: 30px; z-index: 2; border: 0; background: #fff; color: #232323; border-radius: 50%; cursor: pointer; font-size: 25px; line-height: 1; }
+.preview-privacy { width: 620px; border-radius: 15px; }
+.preview-privacy .preview-close { top: 6px; background: #232323; color: #fff; }
+.preview-policy-note { background: #f3f6d9; padding: 12px; margin-bottom: 14px; font-size: 13px; line-height: 1.5; }
+.preview-region { display: block; width: 100%; height: 48px; padding: 10px; border: 1px solid #e2e2e2; border-radius: 8px; background: #fff; color: #3b3b3b; font: inherit; }
+.preview-message { box-sizing: border-box; background: #fff; padding: 32px; }
+.preview-message h2 { font-size: 22px; font-weight: 700; margin-bottom: 20px; }
+.preview-message p { line-height: 1.65; margin-bottom: 20px; }
+.preview-message > button:last-child { background: #232323; color: #fff; border-radius: 8px; padding: 12px 24px; cursor: pointer; }
+.preview-slider { overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; }
+.preview-slider::-webkit-scrollbar { display: none; }
+.preview-slider .swiper-wrapper { gap: 26px; }
+.preview-slider .swiper-slide { flex: 0 0 auto; scroll-snap-align: start; }
+@media (max-width: 768px) {
+  .preview-subsidy { width: 320px; }
+  .preview-subsidy input[type="tel"] { padding-left: 5px; padding-right: 5px; font-size: 15px; }
+  .preview-slider .swiper-wrapper { gap: 20px; }
+}
+@media (max-width: 359px) {
+  #company .Item_Mobile__gKWND { min-width: 0; width: 100%; }
+  #company .Item_Mobile__gKWND [class*="Box_Box"] { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  #company [style*="--width:330px"] { --width: 100% !important; }
+  #car [style*="--width:320px"], #contact [style*="--width:320px"], .preview-slider [style*="--width:320px"] { --width: 100% !important; max-width: 100%; }
+  #car [style*="--width:320px"] { width: 100%; }
+  #contact [class*="Box_Box"] { max-width: 100%; }
+  #contact [style*="width: 320px"], #contact [style*="width:320px"] { width: 100% !important; }
+  .preview-slider .swiper-slide { width: 100% !important; }
+  .preview-dialog .preview-modal-content { width: 100%; }
+  .preview-dialog [class*="BasicModal_ModalContent"] { box-sizing: border-box; width: 100%; padding: 14px; }
+  .preview-form [style*="--font-size:16px"] { --font-size: 12px !important; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }

@@ -40,7 +40,7 @@ const activityId = `mleverage_${createHash('sha256').update([
 ].join(':')).digest('hex')}`
 const db = new Database('/data/marketing.db')
 try {
-  for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
+  for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery', '20261007000100_landing_inquiries']) {
     db.exec(readFileSync(`/src/prisma/migrations/${migration}/migration.sql`, 'utf8'))
   }
   recordSyntheticMigrations(db, '/src')

@@ -23,6 +23,8 @@ COPY scripts/warp-delivery.ts scripts/warp-delivery.ts
 COPY scripts/warp-recovery.ts scripts/warp-recovery.ts
 COPY scripts/schema-check.mjs scripts/schema-check.mjs
 COPY scripts/data-backup.mjs scripts/data-backup.mjs
+COPY scripts/build-landing-public.mjs scripts/build-landing-public.mjs
+COPY previews/evn-landing previews/evn-landing
 COPY types types
 COPY auth.ts proxy.ts ./
 ARG MARKETING_BUILD_REVISION
@@ -50,6 +52,7 @@ RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
 COPY --from=build /app/app/fonts/licenses ./licenses/fonts
 COPY --from=build /app/worker.mjs ./worker.mjs
 COPY --from=build /app/worker-health.mjs ./worker-health.mjs
