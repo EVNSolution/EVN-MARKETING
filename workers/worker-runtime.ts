@@ -51,6 +51,7 @@ export type WorkerDependencies = {
   readSourceCredentials: () => Promise<Credentials | null>
   readSourcePage: (page: Page, startDate: string, endDate: string, pageNumber: number, previousFirstPageIds?: string[]) => Promise<SourcePage>
   markSourceManaging?: (page: Page, row: RawInquiry, signal: AbortSignal) => Promise<void>
+  collectDashboard?: (db: PrismaClient, owner: string, page: Page, signal: AbortSignal) => Promise<void>
   koreaDate: () => string
 }
 
@@ -240,6 +241,13 @@ export async function runInquiryWorker({
           result.errorType = 'interrupted'
         }
         await deps.finishRun(prisma, claimedRun.id, claimedRun.owner, result)
+        if (!signal.aborted && deps.collectDashboard && await workAllowed()) {
+          try { await deps.collectDashboard(prisma, owner, launched.page, signal) } catch (error) {
+            if (isLeaseError(error)) throw error
+            // Dashboard errors must not rewrite a completed inquiry run or stop CRM dispatch.
+            log('dashboard_collection_failed')
+          }
+        }
         collecting = false
       } catch (error) {
         if (collecting || isLeaseError(error)) throw error
