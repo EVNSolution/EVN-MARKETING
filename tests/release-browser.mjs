@@ -21,9 +21,9 @@ let unloadPrompts = 0
 const contexts = []
 const deadline = setTimeout(() => { throw new Error('compatibility browser test timed out') }, 150_000)
 
-async function until(check) {
+async function until(check, attempts = 300) {
   let lastError
-  for (let n = 0; n < 300; n++) {
+  for (let n = 0; n < attempts; n++) {
     try { if (await check()) return } catch (error) { lastError = error }
     await delay(100)
   }
@@ -68,7 +68,9 @@ async function login(page) {
 }
 async function phase(name) {
   writeFileSync(`/control/${name}`, '')
-  await until(() => existsSync(`/control/${name}.done`))
+  // release-compat.sh acknowledges expiry after its bounded 120-second proxy drain.
+  // Keep the overall 150-second browser deadline and all expiry assertions intact.
+  await until(() => existsSync(`/control/${name}.done`), name === 'expire' ? 1_250 : 300)
 }
 const requestHeaders = id => ({ 'x-deployment-id': id })
 
