@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { PrismaClient } from '@/app/generated/prisma/client'
 import { inquiryCustomerName, normalizeInquiryPhone } from '@/lib/format'
 import { INQUIRY_SCOPE_ID, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
+import { landingScope } from '@/lib/landing-inquiries'
 import { DUPLICATE_RECHECK, DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED, WARP_EXISTING_CUSTOMER, duplicateInquiryIds, deliveryScopes, warpDeliveryState } from '@/lib/warp-delivery'
 
 type Db = Pick<PrismaClient, 'inquiry'>
@@ -41,7 +42,7 @@ export async function reviewInquiry(db: PrismaClient, id: string, action: 'hold'
     if (action === 'recheck' && !review.canRecheck) return 'not_duplicate' as const
     if (action === 'recheck') {
       const worker = await tx.inquirySyncState.findUnique({ where: { id: INQUIRY_SCOPE_ID } })
-      if (!worker?.workerOwner || !['ready', 'running', 'success'].includes(worker.status) || !worker.workerHeartbeatAt || !worker.workerLeaseExpiresAt
+      if (!worker?.workerOwner || (review.row.source !== landingScope.source && !['ready', 'running', 'success'].includes(worker.status)) || !worker.workerHeartbeatAt || !worker.workerLeaseExpiresAt
         || now.getTime() - worker.workerHeartbeatAt.getTime() >= WORKER_LEASE_MS || worker.workerHeartbeatAt.getTime() > now.getTime() + 5_000
         || worker.workerLeaseExpiresAt <= now) return 'worker_offline' as const
     }

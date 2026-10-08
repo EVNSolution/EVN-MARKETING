@@ -95,7 +95,7 @@ export async function requestWarpRegistration(db: PrismaClient, id: string, now 
   return db.$transaction(async (tx) => {
     // Reserve the writer before reading; serialize registration against close and worker claims.
     await tx.$executeRaw`UPDATE "Inquiry" SET "id" = "id" WHERE "id" = ${id}`
-    const row = await tx.inquiry.findFirst({ where: { ...deliveryScopes, id }, select: { warpDeliveredAt: true, warpError: true } })
+    const row = await tx.inquiry.findFirst({ where: { ...deliveryScopes, id }, select: { source: true, warpDeliveredAt: true, warpError: true } })
     if (!row) return 'not_found' as const
     const status = warpDeliveryState(row, (await duplicateInquiryIds(tx)).has(id)).status
     if (['duplicate', 'duplicate_reviewed'].includes(status)) return 'duplicate' as const
@@ -103,7 +103,7 @@ export async function requestWarpRegistration(db: PrismaClient, id: string, now 
     if (status === 'delivered') return 'delivered' as const
     if (status === 'queued' || status === 'sending') return 'queued' as const
     const state = await tx.inquirySyncState.findUnique({ where: { id: INQUIRY_SCOPE_ID } })
-    if (!state?.workerOwner || !['ready', 'running', 'success'].includes(state.status) || !state.workerHeartbeatAt || !state.workerLeaseExpiresAt
+    if (!state?.workerOwner || (row.source !== landingScope.source && !['ready', 'running', 'success'].includes(state.status)) || !state.workerHeartbeatAt || !state.workerLeaseExpiresAt
       || now.getTime() - state.workerHeartbeatAt.getTime() >= WORKER_LEASE_MS
       || state.workerHeartbeatAt.getTime() > now.getTime() + 5_000 || state.workerLeaseExpiresAt <= now) return 'worker_offline' as const
     const blocked = await tx.inquiry.findFirst({ where: { ...deliveryScopes, warpDeliveredAt: null,

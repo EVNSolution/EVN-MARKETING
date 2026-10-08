@@ -150,6 +150,27 @@ async function main() {
     assert.equal((await dispatchPendingWarp(db, owner, remote.send, env, () => at)).delivered, 1)
   })
 
+  await database(async db => {
+    await worker(db); const row = await landing(db)
+    const collected = await db.inquiry.create({ data: { ...scope, sourceId: randomUUID(), phone: '01000000003', inquiryDate: '2026-10-08', inquiryTime: '09:01', lastSeenAt: at } })
+    await db.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { status: 'login_required' } })
+    assert.equal(await requestWarpRegistration(db, collected.id, at), 'worker_offline', 'legacy source policy remains unchanged')
+    assert.equal(await requestWarpRegistration(db, row.id, at), 'queued', 'landing registration does not depend on source login')
+    const remote = provider()
+    assert.equal((await dispatchPendingWarp(db, owner, remote.send, env, () => at)).delivered, 1)
+    const duplicate = await landing(db, '01000000004')
+    await db.inquiry.update({ where: { id: duplicate.id }, data: { warpError: 'warp_phone_duplicate' } })
+    const review = await inquiryReview(db, duplicate.id); assert.ok(review)
+    assert.equal(await reviewInquiry(db, duplicate.id, 'recheck', review.reviewToken, at), 'queued')
+    await dispatchPendingWarp(db, owner, remote.send, env, () => at)
+    assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: duplicate.id } })).warpError, REVIEW_CLEARED)
+    await db.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { workerLeaseExpiresAt: new Date(at.getTime() - 1) } })
+    assert.equal(await requestWarpRegistration(db, duplicate.id, at), 'worker_offline', 'a live lease remains mandatory')
+    await db.inquiry.update({ where: { id: duplicate.id }, data: { warpError: 'warp_phone_duplicate' } })
+    const stale = await inquiryReview(db, duplicate.id); assert.ok(stale)
+    assert.equal(await reviewInquiry(db, duplicate.id, 'recheck', stale.reviewToken, at), 'worker_offline')
+  })
+
   const sameId = randomUUID()
   const rows = [{ ...scope, sourceId: sameId, phone: '01000000001' }, { ...landingScope, sourceId: sameId, phone: '01000000002' }]
   const lookup: typeof fetch = async (_url, init) => {
