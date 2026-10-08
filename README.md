@@ -6,6 +6,7 @@
 
 ## 포함된 기능
 
+- 대시보드(외부): 원본 홈페이지의 방문·페이지뷰, 매체별 일별 유입, 네트워크와 키워드 전체 목록
 - 원본 문의 조회·검색, 신규 문의 수집, WARP 등록 완료·대기·오류 표시
 - 이메일·비밀번호 로그인과 JWT 세션
 
@@ -55,6 +56,18 @@ npm run lint
 ```
 
 `npm run test:inquiries`, `npm run test:warp-delivery`, `npm run test:integration-contract`로 합성 데이터 기반 수집·전송·계약 검사를 실행합니다.
+
+## 대시보드(외부)
+
+`/external-dashboard`와 `GET /api/external-dashboard`는 로그인한 사용자만 조회할 수 있습니다. 기존 문의 수집기의 로그인 세션·단일 소유권·수집 일정을 재사용하며, 문의 수집이 끝난 뒤 같은 브라우저의 새 탭에서 원본 대시보드의 정상 GET 응답 두 개를 관찰합니다. 저장된 성공 데이터가 없고 다음 문의 수집 시각이 아직 미래라면, worker 활성화·인증 준비 후 최초 한 번만 대시보드를 읽습니다. 초기 읽기는 문의 작업을 만들거나 기존 예정 시각을 바꾸지 않습니다. 화면 새로고침은 저장 결과만 읽고 수집 작업이나 CRM 등록을 실행하지 않습니다.
+
+원본 계약은 `https://app.mleverage-admin.co.kr/maus/api/homepages/<기존 INQUIRY_HOMEPAGE_ID>/dashboard/overview` 및 `acquisition`이며 둘 다 쿼리가 없습니다. `result.success=true`인 두 응답의 `body`가 모두 검증된 경우만 한 번에 반영합니다. overview의 `aggregationDates`와 `monthlyViews`, acquisition의 `monthlyAdViews`, `monthlyInflows`, `monthlyKeywords`를 전부 보존합니다. 실제 날짜와 무관한 테스트 값은 합성 데이터로만 만듭니다.
+
+방문자 합계는 원본의 집계 날짜에 속한 일별 합계입니다. 각 유입 목록 비율의 분모는 해당 목록 전체이며 원본처럼 소수점 한 자리의 나머지를 배분합니다. 매체별 차트는 원본의 지원 매체 매핑과 0인 계열 숨김을 따르고, Bing·기타를 포함한 원본 행 전체는 별도 표에서 조회할 수 있습니다. 원본에서 숨긴 `today*` 값으로 새 지표를 만들거나 임의 날짜 필터를 추가하지 않습니다.
+
+결과는 영구 `UPLOADS_DIR/_reports/external-dashboard/current.json`에 저장합니다. 기존 worker lease와 DB 쓰기 잠금 안에서 임시 파일 fsync → 원자적 rename으로 게시하며, 기존 비공개 업로드 정책이 이 경로의 직접 다운로드를 차단합니다. 기존 오프라인 백업·복구의 uploads 전체 목록에 포함되고 스키마 변경은 없습니다. 수집 실패는 마지막 성공 데이터·시각을 보존하고 오류와 시도 시각만 갱신합니다. 첫 수집 전은 ‘—’, 검증된 실제 0은 ‘0’이며, 마지막 성공 후 2시간이 지나면 오래된 데이터임을 표시합니다.
+
+`npm run test:external-dashboard`는 합성 원본·보존·소유권·비공개 저장을 검증합니다. worker 회귀 검사와 기존 브라우저 smoke에도 연결되어 있습니다. `npm run check:external-dashboard`는 기존 환경 또는 Mac Keychain 로그인으로 원본을 읽고 집계만 출력하는 수동 점검입니다. DB 쓰기, 문의 상태 변경, CRM 전송은 하지 않습니다. 실행 환경에 이미 있는 자격증명을 사용하며 파일이나 출력으로 복사하지 않습니다.
 
 ## 외부 리드 수신 API
 
