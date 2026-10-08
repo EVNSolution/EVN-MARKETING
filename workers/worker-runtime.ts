@@ -51,6 +51,8 @@ export type WorkerDependencies = {
   readSourceCredentials: () => Promise<Credentials | null>
   readSourcePage: (page: Page, startDate: string, endDate: string, pageNumber: number, previousFirstPageIds?: string[]) => Promise<SourcePage>
   markSourceManaging?: (page: Page, row: RawInquiry, signal: AbortSignal) => Promise<void>
+  collectDashboard?: (db: PrismaClient, owner: string, page: Page, signal: AbortSignal) => Promise<void>
+  needsInitialDashboard?: () => Promise<boolean>
   koreaDate: () => string
 }
 
@@ -92,6 +94,7 @@ export async function runInquiryWorker({
   let terminalStatus = 'offline'
   let loginFailures = 0
   let collecting = false
+  let initialDashboardChecked = false
   let exitCode = 0
   let browserClosing: Promise<void> | undefined
   const closeBrowser = () => (browserClosing ??= browser?.close())
@@ -206,6 +209,22 @@ export async function runInquiryWorker({
         }
         const state = await prisma.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })
         if (signal.aborted) break
+        if (!initialDashboardChecked) {
+          initialDashboardChecked = true
+          // A due inquiry run uses its normal completion hook instead of reading twice.
+          if (state.nextRunAt && state.nextRunAt > new Date() && deps.collectDashboard && deps.needsInitialDashboard) {
+            try {
+              if (await deps.needsInitialDashboard() && !signal.aborted && await workAllowed()) {
+                collecting = true
+                await deps.collectDashboard(prisma, owner, launched.page, signal)
+              }
+            } catch (error) {
+              if (isLeaseError(error)) throw error
+              log('dashboard_collection_failed')
+            } finally { collecting = false }
+          }
+        }
+        if (signal.aborted) break
         if (!state.nextRunAt || state.nextRunAt <= new Date()) await deps.enqueueSync(prisma, 'hourly')
         if (signal.aborted) break
         const claimedRun = await deps.claimNextRun(prisma, new Date(), owner, deps.koreaDate(), signal)
@@ -240,6 +259,13 @@ export async function runInquiryWorker({
           result.errorType = 'interrupted'
         }
         await deps.finishRun(prisma, claimedRun.id, claimedRun.owner, result)
+        if (!signal.aborted && deps.collectDashboard && await workAllowed()) {
+          try { await deps.collectDashboard(prisma, owner, launched.page, signal) } catch (error) {
+            if (isLeaseError(error)) throw error
+            // Dashboard errors must not rewrite a completed inquiry run or stop CRM dispatch.
+            log('dashboard_collection_failed')
+          }
+        }
         collecting = false
       } catch (error) {
         if (collecting || isLeaseError(error)) throw error

@@ -15,6 +15,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
         <nav className="order-2 flex w-full flex-wrap gap-2 px-3 pb-3 md:order-none md:block md:w-auto md:flex-1 md:space-y-1 md:pb-0">
+          <Link href="/external-dashboard"
+            className="flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10">
+            대시보드(외부)
+          </Link>
           <Link href="/inquiries"
             className="flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10">
             문의 내역

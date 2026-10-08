@@ -2,6 +2,8 @@ import 'dotenv/config'
 import { collectorEnabled, runInquiryWorker, type WorkerDependencies } from './worker-runtime'
 import { configuredWorkerOwner } from '@/lib/worker-health'
 import { workerActivationAllowed } from './worker-activation'
+import { collectExternalDashboard } from './external-dashboard-sync'
+import { readDashboardRecord } from '@/lib/external-dashboard-store'
 
 async function main() {
   const enabled = collectorEnabled()
@@ -43,6 +45,8 @@ async function main() {
       readSourceCredentials: credentials.readSourceCredentials,
       readSourcePage: source.readSourcePage,
       markSourceManaging: source.markSourceManaging,
+      collectDashboard: collectExternalDashboard,
+      needsInitialDashboard: async () => !(await readDashboardRecord())?.data,
       koreaDate: sync.koreaDate,
     }
     return await runInquiryWorker({ enabled, signal: controller.signal, dependencies, owner, workAllowed: workerActivationAllowed })

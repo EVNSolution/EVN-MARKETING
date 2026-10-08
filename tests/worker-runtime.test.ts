@@ -35,6 +35,8 @@ type Controls = {
 }
 
 async function main() {
+  await testDashboardHook()
+  await testInitialDashboard()
   await testDeploymentActivation()
   await testDisabledGate()
   await testRetryThenSuccessPreservesSchedule()
@@ -55,6 +57,45 @@ async function main() {
   await testHealthTransitionsAndLeaseLoss()
   await testLoginRedirectIsNotReadiness()
   console.log('worker runtime tests passed')
+}
+
+async function testDashboardHook() {
+  for (const mode of ['success', 'failure', 'fenced', 'drain', 'inactive']) await withWorkerDatabase(async (worker, inspect) => {
+    const controller = new AbortController()
+    const logs: string[] = []
+    let collected = 0
+    let dispatchedAfterCollection = 0
+    let active = true
+    const deps = dependencies(worker, {
+      prepare: async () => true,
+      dispatch: async () => { if (collected) dispatchedAfterCollection++ },
+    })
+    deps.finishRun = async (...args) => {
+      await finishRun(...args)
+      if (mode === 'drain') controller.abort()
+      if (mode === 'inactive') active = false
+    }
+    deps.collectDashboard = async () => {
+      collected++
+      assert.equal((await inspect.inquirySyncRun.findFirstOrThrow()).status, 'success', 'inquiries settle before dashboard read')
+      if (mode === 'failure') throw new Error('synthetic-private-error')
+      if (mode === 'fenced') throw new SyncError('lost_worker_lease')
+    }
+    const result = await runInquiryWorker({
+      enabled: true, signal: controller.signal, dependencies: deps, owner: `dashboard-${mode}`,
+      workAllowed: async () => active, log: code => logs.push(code), wait: async () => { controller.abort() },
+    })
+    assert.equal(result, mode === 'fenced' ? 1 : 0)
+    assert.equal(collected, ['drain', 'inactive'].includes(mode) ? 0 : 1)
+    const run = await inspect.inquirySyncRun.findFirstOrThrow()
+    const state = await inspect.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })
+    assert.equal(run.status, 'success', 'dashboard outcome cannot rewrite inquiry success')
+    assert.equal(state.nextRunAt?.getTime(), run.completedAt!.getTime() + 3_600_000, 'existing hourly schedule remains intact')
+    if (mode === 'failure') {
+      assert.ok(dispatchedAfterCollection > 0, 'CRM dispatch continues after dashboard failure')
+      assert.deepEqual(logs, ['dashboard_collection_failed'], 'logs never contain source response details')
+    }
+  })
 }
 
 async function testDeploymentActivation() {
@@ -86,6 +127,38 @@ async function testDeploymentActivation() {
     assert.ok(preparations > 0)
     assert.equal(sends, 1)
     assert.equal((await inspect.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })).workerOwner, null)
+  })
+}
+
+async function testInitialDashboard() {
+  for (const mode of ['empty', 'present', 'failure', 'inactive', 'stopped']) await withWorkerDatabase(async (worker, inspect) => {
+    await ensureSyncState(inspect)
+    const nextRunAt = new Date(Date.now() + 3_600_000)
+    await inspect.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { nextRunAt } })
+    const controller = new AbortController()
+    let read = 0, checks = 0, waits = 0
+    const logs: string[] = []
+    const deps = dependencies(worker, { prepare: async () => true })
+    deps.needsInitialDashboard = async () => {
+      checks++
+      if (mode === 'stopped') controller.abort()
+      return mode !== 'present'
+    }
+    deps.collectDashboard = async () => {
+      read++
+      assert.ok((await inspect.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })).workerOwner)
+      if (mode === 'failure') throw new Error('synthetic_source_unavailable')
+    }
+    assert.equal(await runInquiryWorker({
+      enabled: true, signal: controller.signal, dependencies: deps, owner: `initial-dashboard-${mode}`,
+      workAllowed: async () => mode !== 'inactive', log: code => logs.push(code),
+      wait: async () => { if (++waits === 2) controller.abort() },
+    }), 0)
+    assert.equal(checks, mode === 'inactive' ? 0 : 1, 'initial snapshot check runs once per worker, after activation')
+    assert.equal(read, ['empty', 'failure'].includes(mode) ? 1 : 0)
+    assert.equal(await inspect.inquirySyncRun.count(), 0, 'initial dashboard read never enqueues an inquiry run')
+    assert.equal((await inspect.inquirySyncState.findUniqueOrThrow({ where: { id: INQUIRY_SCOPE_ID } })).nextRunAt?.getTime(), nextRunAt.getTime())
+    assert.deepEqual(logs, mode === 'failure' ? ['dashboard_collection_failed'] : [])
   })
 }
 
