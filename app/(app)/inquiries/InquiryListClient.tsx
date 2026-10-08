@@ -14,7 +14,7 @@ type Inquiry = {
   name: string | null
   phone: string
   landingReceipt?: { kind: string | null; region: string | null; consentVersion: string | null; consentedAt: string | null } | null
-  warpDelivery: { status: 'landing' | 'delivered' | 'pending' | 'duplicate' | 'duplicate_reviewed' | 'blocked' | 'retrying' | 'queued'; label: string; reason: string | null }
+  warpDelivery: { status: 'sending' | 'delivered' | 'pending' | 'duplicate' | 'duplicate_reviewed' | 'blocked' | 'retrying' | 'queued'; label: string; reason: string | null }
 }
 
 type SyncRun = {
@@ -215,15 +215,14 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
     finally { setClosing(false) }
   }
 
-  const renderDelivery = (row: Inquiry) => row.warpDelivery.status === 'landing' ? (
-    <div className="space-y-1 text-xs">
-      <span className="inline-block rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">홈페이지 상담 대기</span>
-      <p className="text-slate-600">{row.landingReceipt?.kind === 'subsidy' ? '보조금 상담' : '구매 상담'}{row.landingReceipt?.region ? ` · ${row.landingReceipt.region}` : ''}</p>
-      <p className="text-[11px] text-slate-500">개인정보 동의 {kst(row.landingReceipt?.consentedAt ?? null)}</p>
-      {isAdmin && <button type="button" onClick={() => { setCloseError(''); setClosingInquiry(row) }} className="min-h-11 rounded-lg px-2 font-semibold text-slate-700 underline underline-offset-4">상담 종료·개인정보 삭제</button>}
-    </div>
-  ) : (
+  const renderDelivery = (row: Inquiry) => (
     <div className="break-words">
+      {row.landingReceipt && <div className="mb-2 space-y-1 text-xs">
+      <span className="inline-block rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">새 홈페이지</span>
+      <p className="text-slate-600">{row.landingReceipt?.kind === 'subsidy' ? '보조금 상담' : '구매 상담'}{row.landingReceipt?.region ? ` · ${row.landingReceipt.region}` : ''}</p>
+      <p className="text-[11px] text-slate-500">개인정보 동의 {kst(row.landingReceipt.consentedAt)} · {row.landingReceipt.consentVersion}</p>
+      {isAdmin && <button type="button" disabled={row.warpDelivery.status === 'sending' || registeringIds.includes(row.id)} onClick={() => { setCloseError(''); setClosingInquiry(row) }} className="min-h-11 rounded-lg px-2 font-semibold text-slate-700 underline underline-offset-4 disabled:opacity-45">상담 종료·개인정보 삭제</button>}
+      </div>}
                       {row.warpDelivery.status === 'delivered' ? (
                         <span title={row.warpDelivery.reason ?? undefined} className="rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">등록완료</span>
                       ) : row.warpDelivery.status === 'duplicate' ? (
@@ -234,9 +233,9 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                         <span className="inline-block rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{row.warpDelivery.label}</span>
                       ) : isAdmin ? (
                         <button type="button" onClick={() => void requestWarpRegistration(row)}
-                          disabled={registeringIds.includes(row.id) || row.warpDelivery.status === 'queued'}
+                          disabled={registeringIds.includes(row.id) || ['queued', 'sending'].includes(row.warpDelivery.status)}
                           className="min-h-11 rounded-lg bg-slate-800 px-3 py-1.5 font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45">
-                          {row.warpDelivery.status === 'queued' ? '등록중' : '등록하기'}
+                          {['queued', 'sending'].includes(row.warpDelivery.status) ? '등록중' : '등록하기'}
                         </button>
                       ) : (
                         <span className={`rounded-full px-2 py-1 font-semibold ${row.warpDelivery.status === 'pending' || row.warpDelivery.status === 'queued' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800'}`}>{row.warpDelivery.status === 'queued' ? '등록 요청됨' : row.warpDelivery.label}</span>
@@ -297,11 +296,11 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
       {data?.warp && (
         <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs text-slate-600" aria-label="WARP 고객관리 연동">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <b className="text-slate-800">기존 수집 문의 · WARP 고객관리 자동 등록</b>
+            <b className="text-slate-800">문의 · WARP 고객관리 등록</b>
             <a className="font-semibold underline underline-offset-2" href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer">WARP 고객관리 열기</a>
           </div>
-          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '자동 등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''} · 중복확인 {data.warp.reviewPending}건 · 검토완료 {data.warp.reviewed}건</p>
-          <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '자동 등록은 꺼져 있습니다. 문의별 등록하기 버튼으로 요청할 수 있습니다.' : '자동 등록 설정이 켜져 있습니다. 중복 방지 확인을 통과한 문의만 등록합니다.'}</p>
+          <p className="mt-2">{!data.warp.configured ? '자동 등록 비활성' : !data.warp.delivered && !data.warp.pending ? '등록할 문의 없음' : data.warp.failed ? '등록 오류 확인 필요' : data.warp.pending ? '등록 대기' : '등록 완료'} · 완료 {data.warp.delivered}건 · 대기 {data.warp.pending}건{data.warp.failed ? ` (오류 ${data.warp.failed}건 포함)` : ''} · 중복확인 {data.warp.reviewPending}건 · 검토완료 {data.warp.reviewed}건</p>
+          <p className="mt-2 text-[11px] text-slate-400">{!data.warp.configured ? '자동 등록은 꺼져 있습니다. 문의별 등록하기 버튼으로 요청할 수 있습니다.' : '기존 수집 문의의 자동 등록 설정이 켜져 있습니다. 중복 방지 확인을 통과한 문의만 등록합니다.'} 새 홈페이지 문의는 항상 등록하기를 눌러야 전송됩니다.</p>
           <p className="mt-1 text-[11px] text-slate-400">등록완료에는 기존에 보존된 WARP 전송 확인과 사용자의 직접 등록 확인이 포함됩니다. 중복과 확인 필요 항목은 완료 건수에서 제외합니다.</p>
         </section>
       )}
@@ -422,7 +421,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
       {reviewId && <DuplicateReviewPanel id={reviewId} isAdmin={isAdmin} onClose={() => setReviewId(null)} onChanged={load} />}
       {closingInquiry && <dialog ref={closeDialog} onCancel={event => { if (closing) event.preventDefault(); else setClosingInquiry(null) }} aria-labelledby="close-landing-title" aria-describedby="close-landing-description" className="fixed inset-0 m-auto w-[90vw] max-w-md rounded-xl bg-white p-6 shadow-xl backdrop:bg-black/50">
           <h2 id="close-landing-title" className="font-bold text-slate-900">상담을 종료하고 개인정보를 삭제할까요?</h2>
-          <p id="close-landing-description" className="mt-3 text-sm text-slate-600">이 홈페이지 문의의 이름, 연락처, 지역과 동의 기록이 삭제됩니다. 되돌릴 수 없습니다. 계약·분쟁 등 별도 법정 보존 대상인 기록은 담당 절차에 따라 분리 보관한 후 진행해 주세요.</p>
+          <p id="close-landing-description" className="mt-3 text-sm text-slate-600">EV&Marketing에 보관된 이 홈페이지 문의의 이름, 연락처, 지역과 동의 기록이 삭제되고 대기 중인 등록 요청은 취소됩니다. WARP에 이미 전달된 고객과 상담 이력은 삭제되지 않으며 WARP에서 별도로 처리해야 합니다. 되돌릴 수 없습니다. 계약·분쟁 등 별도 법정 보존 대상인 기록은 담당 절차에 따라 분리 보관한 후 진행해 주세요.</p>
           {closeError && <p role="alert" className="mt-3 text-sm text-red-700">{closeError}</p>}
           <div className="mt-5 flex justify-end gap-2">
             <button type="button" autoFocus disabled={closing} onClick={() => setClosingInquiry(null)} className="min-h-11 rounded-lg border border-slate-300 px-4 text-sm">취소</button>

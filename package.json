@@ -24,7 +24,7 @@
     "test:deploy-controller": "python3 tests/deploy-controller.test.py",
     "test:worker-health": "tsx tests/worker-health.test.ts",
     "test:worker-processes": "tsx tests/worker-processes.test.ts",
-    "test:warp-delivery": "tsx tests/warp-delivery.test.ts && tsx tests/warp-delivery-cli.test.ts",
+    "test:warp-delivery": "tsx tests/warp-delivery.test.ts && tsx tests/warp-delivery-cli.test.ts && tsx tests/landing-warp.test.ts",
     "test:integration-contract": "node scripts/verify-direct-integration-contract.mjs evn-marketing",
     "worker:inquiries": "tsx workers/inquiry-sync.ts",
     "preview:inquiries": "tsx tests/setup-inquiry-preview.ts",

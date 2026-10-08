@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { checkLandingWarpUi } from './landing-warp-browser.mjs'
 
 // Owns a fresh synthetic DB, a loopback-only web process and a temporary browser profile.
 // Never starts a collector or uses the caller's database, credentials or browser session.
@@ -103,7 +104,7 @@ try {
   assert.match(await manuallyConfirmed.innerText(), /등록완료/)
   assert.equal(await manuallyConfirmed.getByRole('button', { name: '등록하기' }).count(), 0)
   assert.match(await manuallyConfirmed.getByText('등록완료').getAttribute('title'), /직접 등록/)
-  for (const [id, text] of [[2, 'WARP 고객과 연락처가 중복'], [5, '기존 고객의 문의 이력에 연결'], [22, '수집된 문의와 연락처가 중복']]) {
+  for (const [id, text] of [[2, 'WARP 고객과 연락처가 중복'], [5, '기존 고객의 문의 이력에 연결'], [22, '수집된 문의 또는 홈페이지 문의와 연락처가 중복']]) {
     const row = page.getByRole('row').filter({ has: page.getByText(`합성 문의 ${id}`, { exact: true }) })
     assert.equal(await row.getByText('중복확인', { exact: true }).evaluate(el => el.tagName), 'SPAN')
     assert.equal(await row.getByRole('button', { name: '등록하기' }).count(), 0, 'duplicate marker is noninteractive')
@@ -155,6 +156,7 @@ try {
   assert.equal((await ordinary.context.request.post(base + '/api/inquiries/sync', { headers: { Origin: base } })).status(), 403)
   assert.equal((await ordinary.context.request.get(reviewUrl)).status(), 200)
   assert.equal((await ordinary.context.request.post(reviewUrl, { headers: { Origin: base }, data: decision })).status(), 403)
+  await checkLandingWarpUi({ page, context, db, base })
   await page.getByRole('button', { name: '로그아웃', exact: true }).click()
   await page.waitForURL('**/login')
   assert.equal((await context.request.get(base + '/api/inquiries', { maxRedirects: 0 })).status(), 307)

@@ -53,7 +53,7 @@ export async function GET(request: Request) {
 
   try {
     const duplicates = await duplicateInquiryIds(prisma)
-    const reviewRows = review ? await prisma.inquiry.findMany({ where: scope, select: { id: true, warpDeliveredAt: true, warpError: true } }) : []
+    const reviewRows = review ? await prisma.inquiry.findMany({ where: visibleScope, select: { id: true, warpDeliveredAt: true, warpError: true } }) : []
     const reviewIds = reviewRows.filter(row => warpDeliveryState(row, duplicates.has(row.id)).status === (review === 'pending' ? 'duplicate' : 'duplicate_reviewed')).map(row => row.id)
     const where = {
       AND: [visibleScope, ...(query ? [{ OR: [{ name: { contains: query } }, { phone: { contains: query } }] }] : [])],
@@ -88,14 +88,14 @@ export async function GET(request: Request) {
           unchangedCount: true, pagesRead: true, createdAt: true, startedAt: true, heartbeatAt: true, completedAt: true,
         },
       }),
-      prisma.inquiry.findMany({ where: scope, distinct: ['sourceStatus'], select: { sourceStatus: true }, orderBy: { sourceStatus: 'asc' } }),
-      prisma.inquiry.count({ where: { ...scope, sourceStatus: null } }),
+      prisma.inquiry.findMany({ where: visibleScope, distinct: ['sourceStatus'], select: { sourceStatus: true }, orderBy: { sourceStatus: 'asc' } }),
+      prisma.inquiry.count({ where: { ...visibleScope, sourceStatus: null } }),
       prisma.inquirySyncRun.findFirst({
         where: { ...scope, status: { in: ['pending', 'running'] } },
         orderBy: { createdAt: 'asc' },
         select: { status: true, createdAt: true, heartbeatAt: true },
       }),
-      warpDeliverySummary(prisma),
+      warpDeliverySummary(prisma, process.env, visibleScope),
     ])
 
     const currentStatus = inquirySyncStatus(state, activeRun?.status, now)
@@ -104,9 +104,7 @@ export async function GET(request: Request) {
       rows: rows.map(({ warpDeliveredAt, warpError, ...row }) => ({
         ...row,
         name: inquiryCustomerName(row.name, row.phone),
-        warpDelivery: row.source === landingScope.source
-          ? { status: 'landing', label: '상담 대기', reason: '새 홈페이지에서 접수된 문의입니다.' }
-          : warpDeliveryState({ warpDeliveredAt, warpError }, duplicates.has(row.id)),
+        warpDelivery: warpDeliveryState({ warpDeliveredAt, warpError }, duplicates.has(row.id)),
       })),
       warp,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },

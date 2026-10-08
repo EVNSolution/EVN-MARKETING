@@ -3,6 +3,7 @@ import type { PrismaClient } from '@/app/generated/prisma/client'
 
 export const LANDING_POLICY_VERSION = '2026-10-07-v1'
 export const landingScope = { source: 'evn-landing', companyScopeId: 'evnsolution', homepageScopeId: 'pv5' }
+export const LANDING_WARP_SENDING = 'warp_landing_sending'
 type LandingInput = { submissionId: string; name: string; phone: string; kind: 'consultation' | 'subsidy'; region: string | null }
 type Environment = Readonly<Record<string, string | undefined>>
 let writesSettled: Promise<unknown> = Promise.resolve()
@@ -77,6 +78,7 @@ export async function closeLandingInquiry(db: PrismaClient, id: string, secret: 
     await tx.$executeRaw`UPDATE "LandingThrottle" SET "count" = "count" WHERE "id" = 'lock'`
     const inquiry = await tx.inquiry.findFirst({ where: { ...landingScope, id }, include: { landingReceipt: true } })
     if (!inquiry?.landingReceipt) return false
+    if (inquiry.warpError === LANDING_WARP_SENDING) return 'sending' as const
     const phoneKey = createHmac('sha256', secret).update(`landing-phone:${inquiry.phone}`).digest('hex')
     await tx.landingThrottle.deleteMany({ where: { id: phoneKey } })
     await tx.landingReceipt.update({ where: { id: inquiry.landingReceipt.id }, data: {

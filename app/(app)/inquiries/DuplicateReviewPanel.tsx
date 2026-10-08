@@ -76,20 +76,21 @@ export default function DuplicateReviewPanel({ id, isAdmin, onClose, onChanged }
           <div className="rounded-xl bg-slate-50 p-4">
             <p className="font-semibold">{review.row.name}</p>
             <p className="mt-1 break-all tabular-nums">{review.row.phone}</p>
-            <p className="mt-1 text-xs text-slate-500">{review.row.inquiryDate} {review.row.inquiryTime}</p>
+            <p className="mt-1 text-xs text-slate-500">{review.row.source === 'evn-landing' ? '새 홈페이지' : '기존 수집 문의'} · {review.row.inquiryDate} {review.row.inquiryTime}</p>
           </div>
           <p><span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">{review.state.label}</span></p>
           <p className="leading-relaxed">{review.state.reason ?? '중복이 없어 등록을 검토할 수 있습니다.'}</p>
-          {review.peerCount > 0 && <section aria-label="같은 연락처의 수집 문의">
-            <h3 className="font-semibold">같은 연락처의 수집 문의 {review.peerCount}건</h3>
+          {review.peerCount > 0 && <section aria-label="같은 연락처의 문의">
+            <h3 className="font-semibold">같은 연락처의 문의 {review.peerCount}건</h3>
             <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
               {review.peers.map(peer => <li key={peer.id} className="flex flex-wrap justify-between gap-2 px-3 py-2 text-xs">
-                <span className="break-all font-medium">{peer.name}</span><span>{peer.inquiryDate} {peer.inquiryTime} · {peer.state.label}</span>
+                <span className="break-all font-medium">{peer.name}</span><span>{peer.source === 'evn-landing' ? '새 홈페이지' : '기존 수집 문의'} · {peer.inquiryDate} {peer.inquiryTime} · {peer.state.label}</span>
               </li>)}
             </ul>
             {review.peerCount > review.peers.length && <p className="mt-1 text-xs text-slate-500">먼저 수집된 20건을 표시합니다.</p>}
           </section>}
           <p className="text-xs leading-relaxed text-slate-500">WARP에서 이 연락처로 기존 고객을 확인해 주세요. 고객 통합이나 연락처 정정 후 재확인할 수 있습니다. 원본 문의의 번호가 잘못됐다면 담당자에게 정정을 요청해 주세요.</p>
+          {(review.row.source === 'evn-landing' || review.peers.some(peer => peer.source === 'evn-landing')) && <p className="text-xs leading-relaxed text-slate-500">같은 상담을 중복 접수한 홈페이지 문의는 문의 목록에서 상담 종료·개인정보 삭제로 정리할 수 있습니다. 남길 문의에서 중복 재확인을 진행하고, 중복이 해소되면 등록하기를 눌러 주세요. WARP에 이미 있는 고객은 새로 등록하지 않습니다.</p>}
           <a href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">WARP 고객관리 열기 ↗</a>
           {review.hasReceipt && <p className="text-xs text-slate-500">이 문의에는 기존 전송 이력이 있습니다. 기록을 보존하며 다시 전송하지 않습니다.</p>}
           {review.queued && <p role="status" className="rounded-lg bg-sky-50 p-3 text-xs text-sky-800">중복 여부를 확인 중입니다. 이 작업은 WARP 고객을 등록하거나 수정하지 않습니다.</p>}

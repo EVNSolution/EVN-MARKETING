@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract_id": "warp-marketing-inquiries",
-  "status": "source-reviewed-activation-pending",
+  "status": "landing-extension-review-pending",
   "owner": "OziinG",
   "review": {
     "issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
@@ -107,7 +107,7 @@
     "Without rejectExistingCustomer, an exact unique normalized primary-phone match receives a new activity; do not overwrite its customer profile.",
     "Multiple normalized primary-phone matches return 409 ambiguous_phone and create no record, with or without the guard.",
     "Unknown names remain blank; source status remains in activity content.",
-    "Read and append only within the fixed source scope. No arbitrary customer updates or deletion.",
+    "Read and append only within the two exact source_scope and landing_source_scope tuples. No arbitrary customer updates or deletion.",
     "Interpret original date and minute as Asia/Seoul for CRM date fields and preserve the original strings in activity content.",
     "For receiver validation, append matching and read-only checks, normalize valid Korean mobiles with normalizeCustomerMobile first; otherwise accept digitsOnly values of 9 to 15 digits, preserving fixed-line and other legacy contacts. Invalid or missing contacts never match; company phones and secondary contacts do not match. Archived CustomerMerge aliases are not separate customers.",
     "When rejectExistingCustomer is true, resolve a retained deterministic receipt first; otherwise a single matching primary phone returns 409 phone_exists before any Customer or CustomerActivity mutation.",
@@ -115,7 +115,13 @@
     "created is true only when this request creates a Customer; duplicate is true only when replaying a retained source inquiry activity. A new activity on an existing Customer returns created:false and duplicate:false.",
     "Resolve receipt customer aliases to the current canonical Customer, preserving the deterministic activityId; missing or invalid canonical receipts fail closed.",
     "Checks use a read-only transaction snapshot, expose only sourceId and existence unless that exact scoped sourceId has a retained deterministic activity, and never return customer names or contacts.",
-    "Check receipts contain ok:true, customerId, activityId, created:false, duplicate:true and are not evidence of fresh Customer creation; Marketing preserves historical WARP_RECEIPT_UNVERIFIED markers."
+    "Check receipts contain ok:true, customerId, activityId, created:false, duplicate:true and are not evidence of fresh Customer creation; Marketing preserves historical WARP_RECEIPT_UNVERIFIED markers.",
+    "Landing append requires its bounded landing object and rejectExistingCustomer:true; the collected source never accepts landing metadata.",
+    "Keep legacy mleverage_ deterministic activity IDs byte-compatible. Check and replay must use the true source tuple, including when both sources have the same sourceId.",
+    "Landing customer source, original seconds, consultation kind, region and consent version/time are preserved in Customer/CustomerActivity; the receipt response shape and dedicated key remain unchanged.",
+    "Marketing holds every unsent same-phone inquiry across both supported sources for review. Previously delivered or explicitly confirmed evidence is retained.",
+    "A landing retry after error or interruption requires a fresh manual registration request. Recovered receipts remain registration-unverified unless fresh Customer creation was confirmed.",
+    "Marketing serializes landing dispatch claim and closure using its SQLite writer lock. Closure cancels unsent queued work, rejects in-flight work, and deletes only local landing PII. WARP records require a separate WARP process."
   ],
   "optional_request_fields": {
     "rejectExistingCustomer": true
@@ -167,5 +173,31 @@
         "duplicate"
       ]
     }
+  },
+  "landing_source_scope": {
+    "source": "evn-landing",
+    "companyScopeId": "evnsolution",
+    "homepageScopeId": "pv5"
+  },
+  "landing_request": {
+    "required_guard": {
+      "rejectExistingCustomer": true
+    },
+    "inquiryTime": "HH:mm:ss (Asia/Seoul); legacy mleverage-admin remains HH:mm",
+    "required_landing_fields": {
+      "kind": "consultation | subsidy",
+      "region": "null for consultation; 서울 | 경기 | 인천 for subsidy",
+      "consentVersion": "1-80 ASCII letters, digits, dot, underscore or hyphen",
+      "consentedAt": "canonical ISO-8601 UTC timestamp with milliseconds"
+    },
+    "activity_id": "evn_landing_ + SHA256(source:companyScopeId:homepageScopeId:lowercase sourceId)",
+    "customer_source": "evn-landing",
+    "dispatch": "Only an explicit per-inquiry manual registration request; never automatic backlog, pilot, or legacy recovery selection",
+    "rollout": [
+      "Deploy the reviewed WARP receiver before the Marketing caller.",
+      "Keep existing automatic delivery settings unchanged; do not send historical or live inquiries for release validation."
+    ],
+    "review_issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
+    "delegation": "https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448"
   }
 }
