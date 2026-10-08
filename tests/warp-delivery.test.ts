@@ -4,7 +4,6 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { createClient } from '@libsql/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, releaseWorker, INQUIRY_SOURCE, INQUIRY_COMPANY_ID, INQUIRY_HOMEPAGE_ID } from '@/lib/inquiry-sync'
@@ -22,11 +21,11 @@ async function main() {
   await testLocalDuplicates()
   const temp = await mkdtemp(path.join(tmpdir(), 'evn-warp-delivery-test-'))
   const url = `file:${path.join(temp, 'test.db')}`
-  const sql = createClient({ url })
+  const sql = await new PrismaBetterSqlite3({ url }).connect()
   for (const migration of ['20260915000100_baseline', '20260915000200_inquiry_sync', '20260915000300_warp_delivery']) {
-    await sql.executeMultiple(await readFile(path.join(process.cwd(), 'prisma/migrations', migration, 'migration.sql'), 'utf8'))
+    await sql.executeScript(await readFile(path.join(process.cwd(), 'prisma/migrations', migration, 'migration.sql'), 'utf8'))
   }
-  sql.close()
+  await sql.dispose()
   const db = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url, timeout: 5000 }, { timestampFormat: 'iso8601' }) })
   let time = new Date('2026-09-15T00:00:00Z')
   const now = () => time
@@ -214,7 +213,7 @@ async function testLocalDuplicates() {
     const first = await db.inquiry.create({ data: { ...base, sourceId: sourceId(91), phone: '010-1234-5678', firstSeenAt: at } })
     const later = await db.inquiry.create({ data: { ...base, sourceId: sourceId(92), phone: '+82 10-1234-5678', firstSeenAt: new Date(at.getTime() + 1) } })
     await db.inquiry.create({ data: { ...base, companyScopeId: 'other-company', sourceId: sourceId(93), phone: '010-1234-5678', firstSeenAt: new Date(at.getTime() + 2) } })
-    assert.deepEqual([...await duplicateInquiryIds(db)], [later.id], 'normalization and scope mark only the later local duplicate')
+    assert.deepEqual([...await duplicateInquiryIds(db)], [first.id, later.id], 'all supported same-phone inquiries wait for review')
     await claimWorker(db, owner, at)
     await db.inquirySyncState.update({ where: { id: `${scope.source}:${scope.companyScopeId}:${scope.homepageScopeId}` }, data: { status: 'ready' } })
     assert.equal(await requestWarpRegistration(db, later.id, at), 'duplicate')
@@ -225,9 +224,9 @@ async function testLocalDuplicates() {
       assert.equal(payload.sourceId, first.sourceId)
       return Response.json({ ok: true, customerId: 'new-customer', activityId: warpActivityId(payload.sourceId), created: true, duplicate: false })
     }
-    assert.deepEqual(await dispatchPendingWarp(db, owner, send, env, () => at), { configured: true, delivered: 1, failed: 0 })
+    assert.deepEqual(await dispatchPendingWarp(db, owner, send, env, () => at), { configured: true, delivered: 0, failed: 0 })
     assert.equal(await pilotPendingWarp(db, owner, send, keyOnly, () => at), 'warp_no_pending_inquiry')
-    assert.equal(calls, 1, 'dispatch and pilot never send the later local duplicate')
+    assert.equal(calls, 0, 'dispatch and pilot never send either local duplicate')
   })
 }
 

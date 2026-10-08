@@ -1,5 +1,20 @@
 # 마케팅 문의 수신 연동 검토
 
+## 2026-10-08 홈페이지 수동 CRM 등록 확장 — 검토 대상
+
+이번 변경은 기존 전용 키와 두 외부 경로를 재사용한다. 기존 mleverage 계약과 활동 ID는 유지하고, 홈페이지의 정확한 출처 evn-landing / evnsolution / pv5를 별도로 허용한다. 홈페이지는 HH:mm:ss, 기존 수집 문의는 종전 HH:mm 형식을 유지한다. 홈페이지 고객의 source는 evn-landing이며 활동 제목·상담 종류·지역·동의 버전/시각을 원본대로 보관한다. 새 테이블이나 열은 없다.
+
+홈페이지 요청은 rejectExistingCustomer: true와 제한된 landing 메타데이터가 필수다. 활동 ID는 evn_landing_와 정확한 출처 튜플/원본 UUID 해시이며, 기존 mleverage_ ID는 바뀌지 않는다. 같은 UUID를 두 출처에서 사용해도 영수증은 섞이지 않는다. WARP의 고객 쓰기 트랜잭션이 최종 동일 번호 경쟁을 차단한다.
+
+Marketing에서는 출처 전체의 정규화 번호가 겹치는 미전송 문의를 모두 중복검토로 보류한다. 홈페이지는 자동 설정과 무관하게 매번 명시적인 수동 등록 요청이 필요하다. 실패·중단 후 자동 재전송하지 않으며, 영수증만 복구된 경우 등록완료가 아닌 등록 확인 필요로 남긴다. 기존 수집 문의의 자동 설정/파일 기반 복구 선택 범위는 유지한다.
+
+상담 종료는 대기 중 등록을 취소하고, 전송 중에는 409로 보류한다. 완료 후 종료는 Marketing의 개인정보만 삭제하며 WARP 고객·활동은 삭제하지 않는다. 중단된 전송은 worker lease 기간 이후 결과 확인 필요로 전환되며 새 수동 요청으로 기존 영수증부터 확인한다.
+
+배포 순서는 **WARP 수신기 → Marketing 발신기**다. 두 PR은 [기존 계약 Issue #48](https://github.com/EVNSolution/EVN-WARP/issues/48)과 [위임 범위](https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448)에 따라 검토한다. 기존 자동 전송 설정은 바꾸지 않고 과거 문의 일괄 전송·운영 고객 생성으로 검증하지 않는다. 미지원 수신기/조회 실패/불완전 응답은 등록 성공으로 처리하지 않는다.
+
+아래는 이전 계약 및 활성화 작업의 기록이다. 현재 확장 범위는 위 설명과 JSON 계약을 따른다.
+
+
 2026-09-17 · 운영 담당자: OziinG · 상태: 신규 이름 규칙의 후속 Owner 검토 대기
 
 기계 판독 계약은 [WARP_MARKETING_INQUIRIES.json](WARP_MARKETING_INQUIRIES.json)이다. 이 변경은 기존 WARP–BUILDUP 계약과 공유키 권한을 수정하지 않는다. [Issue #48](https://github.com/EVNSolution/EVN-WARP/issues/48)과 [PR #49](https://github.com/EVNSolution/EVN-WARP/pull/49)는 빈 이름을 그대로 두던 이전 계약의 검토 이력이다. 이번 신규 고객 표시 이름 규칙은 후속 Owner 검토가 필요하다. 2026-09-17 기존 Owner 검토에서는 UUID 대소문자 중복 및 독립 DB 연결의 잠금 경합을 재현해 수정했다. 최종 승인·배포 Revision과 결과는 [후속 PR #50](https://github.com/EVNSolution/EVN-WARP/pull/50)에 기록한다.

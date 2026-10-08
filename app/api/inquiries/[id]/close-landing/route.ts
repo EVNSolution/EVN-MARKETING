@@ -11,6 +11,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const { id } = await context.params
     const closed = await closeLandingInquiry(prisma, id, process.env.AUTH_SECRET)
+    if (closed === 'sending') return Response.json({ error: 'WARP 등록 결과를 확인 중입니다. 등록이 끝난 뒤 상담 종료를 다시 요청해 주세요.' }, { status: 409, headers: { 'Cache-Control': 'no-store' } })
     return Response.json(closed ? { ok: true } : { error: '홈페이지 문의를 찾지 못했습니다.' }, { status: closed ? 200 : 404, headers: { 'Cache-Control': 'no-store' } })
   } catch { return Response.json({ error: '상담을 종료하지 못했습니다.' }, { status: 503 }) }
 }
