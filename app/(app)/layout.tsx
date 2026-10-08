@@ -14,7 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             EV<span style={{ color: '#C5D42A' }}>&</span>Marketing
           </div>
         </div>
-        <nav className="order-2 flex w-full gap-2 px-3 pb-3 md:order-none md:block md:w-auto md:flex-1 md:space-y-1 md:pb-0">
+        <nav className="order-2 flex w-full flex-wrap gap-2 px-3 pb-3 md:order-none md:block md:w-auto md:flex-1 md:space-y-1 md:pb-0">
           <Link href="/inquiries"
             className="flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10">
             문의 내역
@@ -22,6 +22,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <a href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer"
             className="flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10">
             WARP CRM
+          </a>
+          <a href="https://marketing.cleversystem.ai/landing" target="_blank" rel="noreferrer"
+            className="flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10">
+            사이트 바로가기
           </a>
         </nav>
         <div className="ml-auto px-3 py-2 md:order-last md:ml-0 md:border-t md:border-white/10 md:py-4">
