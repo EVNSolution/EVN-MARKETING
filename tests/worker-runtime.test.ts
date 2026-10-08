@@ -242,6 +242,8 @@ async function testDrainDuringSend() {
   await withWorkerDatabase(async (worker, inspect) => {
     for (const index of [1, 2]) await inspect.inquiry.create({ data: {
       ...syntheticInquiry(index), source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID,
+      // Drain tests need independently deliverable rows, not a duplicate-phone hold.
+      phone: `010-0000-${String(index).padStart(4, '0')}`,
       homepageScopeId: INQUIRY_HOMEPAGE_ID, lastSeenAt: new Date(),
     } })
     const pending = await enqueueSync(inspect, 'manual', '2026-09-22')
