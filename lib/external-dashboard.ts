@@ -37,11 +37,12 @@ const label = (value: unknown): string => {
   if (typeof value !== 'string' || !value.trim() || value.length > 2_000) return invalid()
   return value
 }
-function date(value: unknown) {
+export function dashboardDate(value: unknown) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)
     || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) return invalid()
   return value
 }
+const date = dashboardDate
 export function parseDashboard(overview: unknown, acquisition: unknown): ExternalDashboard {
   const a = object(overview), b = object(acquisition)
   const monthlyViews = list(a.monthlyViews).map(value => {
@@ -57,6 +58,7 @@ export function parseDashboard(overview: unknown, acquisition: unknown): Externa
     const row = object(value)
     return { date: date(row.date), media: label(row.media), count: count(row.count) }
   })
+  if (new Set(monthlyAdViews.map(row => JSON.stringify([row.date, row.media]))).size !== monthlyAdViews.length) return invalid()
   const monthlyInflows = list(b.monthlyInflows).map(value => {
     const row = object(value)
     return { source: label(row.source), count: count(row.count) }

@@ -10,6 +10,7 @@ import { dashboardResponseKind, dashboardUrl, readExternalDashboard } from '@/wo
 import { INQUIRY_HOMEPAGE_ID, INQUIRY_SCOPE_ID, claimWorker } from '@/lib/inquiry-sync'
 import { uploadResponse } from '@/lib/upload-security'
 import { withWorkerDatabase } from './worker-runtime-helper'
+import { testDashboardHistory } from './external-dashboard-history'
 
 const overview = {
   aggregationDates: ['2026-09-11', '2026-09-12'],
@@ -78,7 +79,7 @@ async function main() {
       const before = await readFile(file, 'utf8')
       await assert.rejects(saveDashboardRecord(db, 'foreign-owner', { data }, env), /lost_worker_lease/)
       assert.equal(await readFile(file, 'utf8'), before)
-      assert.deepEqual(await readdir(path.dirname(file)), ['current.json'])
+      assert.deepEqual((await readdir(path.dirname(file))).sort(), ['current.json', 'history.json', 'snapshots'])
       assert.equal((await uploadResponse(root, ['_reports', 'external-dashboard', 'current.json'], false)).status, 401)
       assert.equal((await uploadResponse(root, ['_reports', 'external-dashboard', 'current.json'], true)).status, 404)
       // Readers see either complete record during replacement, never truncated JSON.
@@ -88,6 +89,7 @@ async function main() {
       await assert.rejects(saveDashboardRecord(db, 'synthetic-dashboard', { data }, env), /lost_worker_lease/)
     } finally { await rm(root, { recursive: true, force: true }) }
   })
+  await testDashboardHistory()
   console.log('external dashboard tests passed: full rankings, independent metrics, source scope, read-only reader, failure retention, lease fencing, atomic writes and upload privacy')
 }
 void main().catch(error => { console.error(error); process.exitCode = 1 })

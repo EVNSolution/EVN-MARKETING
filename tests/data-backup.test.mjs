@@ -20,6 +20,11 @@ try {
   const reportPath = 'uploads/_reports/external-dashboard/current.json'
   await mkdir(path.dirname(path.join(source, reportPath)), { recursive: true })
   await writeFile(path.join(source, reportPath), report)
+  const historyPath = 'uploads/_reports/external-dashboard/history.json'
+  const archivedPath = 'uploads/_reports/external-dashboard/snapshots/2026-10-08.json'
+  const preservedPath = 'uploads/_reports/external-dashboard/preserved-20261009.json'
+  await mkdir(path.dirname(path.join(source, archivedPath)), { recursive: true })
+  for (const file of [historyPath, archivedPath, preservedPath]) await writeFile(path.join(source, file), report)
   db = new Database(path.join(source, 'marketing.db'))
   for (const migration of manifest.migrations) db.exec(await readFile(`prisma/migrations/${migration.name}/migration.sql`, 'utf8'))
   recordSyntheticMigrations(db, process.cwd())
@@ -29,7 +34,7 @@ try {
   db.prepare('INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,phone,lastSeenAt,warpCustomerId,warpActivityId,warpDeliveredAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run('synthetic-inquiry','synthetic','company','homepage','source-id','2026-09-23','00:00','synthetic','2026-09-23','customer','receipt','2026-09-23')
   // Keep the connection open so committed data remains in WAL, not only the main file.
   const result = await snapshot(source, bundle, manifest)
-  assert.equal(result.rows.Inquiry, 1); assert.equal(result.rows.User, 1); assert.equal(result.files, 2)
+  assert.equal(result.rows.Inquiry, 1); assert.equal(result.rows.User, 1); assert.equal(result.files, 5)
   assert.deepEqual(await verify(bundle, result.summarySha256, manifest), result)
   const summary = await readFile(path.join(bundle,'backup-summary.json'),'utf8')
   for (const privateValue of ['synthetic@example.invalid','synthetic-hash','source-id','doc.pdf']) assert.ok(!summary.includes(privateValue))
@@ -46,6 +51,12 @@ try {
   assert.equal(db.prepare('SELECT name FROM Customer').get().name,'Latest customer')
   assert.equal(await readFile(path.join(target,'uploads/customers/synthetic/doc.pdf'),'utf8'),'%PDF synthetic')
   assert.equal(await readFile(path.join(target, reportPath), 'utf8'), report, 'private dashboard snapshot is included in backup and restore')
+  for (const file of [historyPath, archivedPath, preservedPath]) {
+    assert.equal(await readFile(path.join(target, file), 'utf8'), report, 'historical and operator-preserved dashboard files survive restore')
+    await writeFile(path.join(bundle, file), 'corrupt history')
+    await assert.rejects(verify(bundle, result.summarySha256, manifest))
+    await writeFile(path.join(bundle, file), report)
+  }
   await writeFile(path.join(bundle, reportPath), 'corrupt dashboard')
   await assert.rejects(verify(bundle, result.summarySha256, manifest))
   await writeFile(path.join(bundle, reportPath), report)
