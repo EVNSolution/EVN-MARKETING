@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdir, writeFile, rm, rmdir } from 'node:fs/promises'
 import path from 'node:path'
 
 // Uses only the caller's disposable synthetic database and upload directory.
@@ -66,6 +66,56 @@ export async function checkExternalDashboardUi({ page, context, db, base, upload
     await page.locator('main').evaluate(element => element.scrollTo(0, 0))
     if (output) await page.screenshot({ path: path.join(output, `external-dashboard-${width}.png`), fullPage: true })
   }
+  const historical = { date: '2026-08-31', view: { date: '2026-08-31', visitorCount: 77, pageViewCount: 88, collectedAt: '2026-09-28T00:00:00.000Z' },
+    media: [{ date: '2026-08-31', media: '구글', count: 55, collectedAt: '2026-09-28T00:00:00.000Z' }] }
+  const history = { format: 1, latest: record, days: [historical, ...dates.map(date => ({ date,
+    view: { ...record.data.monthlyViews.find(row => row.date === date), collectedAt: record.lastSuccessfulAt },
+    media: record.data.monthlyAdViews.filter(row => row.date === date).map(row => ({ ...row, collectedAt: record.lastSuccessfulAt })),
+  }))] }
+  const older = { ...record, lastAttemptAt: historical.view.collectedAt, lastSuccessfulAt: historical.view.collectedAt,
+    data: { aggregationDates: ['2026-08-31'], monthlyViews: [historical.view], monthlyAdViews: historical.media,
+      monthlyInflows: [{ source: '과거 전체 기간 네트워크', count: 44 }], monthlyKeywords: [{ keyword: '과거 전체 기간 키워드', count: 22 }] } }
+  const historyFile = path.join(path.dirname(file), 'history.json'), snapshots = path.join(path.dirname(file), 'snapshots')
+  await writeFile(historyFile, JSON.stringify(history)); await mkdir(snapshots, { recursive: true })
+  await writeFile(path.join(snapshots, '2026-09-28.json'), JSON.stringify(older))
+  const change = async action => {
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/external-dashboard')
+    void response.catch(() => {})
+    await action(); await response
+    await page.getByRole('button', { name: '화면 새로고침', exact: true }).waitFor()
+  }
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto(base + '/external-dashboard')
+    await page.getByRole('button', { name: '화면 새로고침', exact: true }).waitFor()
+    await page.getByLabel('성과 시작일', { exact: true }).fill('2026-08-31')
+    await change(() => page.getByRole('button', { name: '시작일 하루 조회', exact: true }).click())
+    assert.equal(await visitors.innerText(), '77', 'archived day outside the current rolling source remains selectable')
+    const rankingScope = page.getByRole('region', { name: '원본 전체 기간 집계', exact: true })
+    assert.match(await rankingScope.innerText(), /네트워크·키워드는 일별 수치가 제공되지 않습니다/)
+    assert.match(await rankingScope.innerText(), /2026-09-01 ~ 2026-09-27/, 'ranking keeps the actual original period, not selected Aug31')
+    await change(() => page.getByLabel('원본 보관본 수집일 (한국 시간)', { exact: true }).selectOption('2026-09-28'))
+    assert.equal(await page.getByText('과거 전체 기간 키워드', { exact: true }).count(), 1)
+    assert.match(await rankingScope.innerText(), /2026-08-31 ~ 2026-08-31/)
+    assert.equal(await visitors.innerText(), '77', 'ranking snapshot selection does not change performance dates')
+    await page.getByLabel('성과 종료일', { exact: true }).fill('2026-09-02')
+    await change(() => page.getByRole('button', { name: '기간 조회', exact: true }).click())
+    assert.equal(await visitors.innerText(), '98')
+    await change(() => page.getByRole('button', { name: '오늘', exact: true }).click())
+    assert.equal(await visitors.innerText(), '—')
+    await page.getByRole('status').filter({ hasText: '원본 공개 대기' }).waitFor()
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    if (output) await page.screenshot({ path: path.join(output, `external-dashboard-history-${width}.png`), fullPage: true })
+    await change(() => page.getByRole('button', { name: '기존 집계 보기', exact: true }).click())
+    assert.equal(await visitors.innerText(), '621')
+  }
+  for (const suffix of ['?start=2026-02-30&end=2026-03-01', '?snapshot=..%2Fcurrent', '?start=2026-09-01', '?start=2026-09-01&end=2026-09-01&end=2026-09-02']) {
+    const invalid = await context.request.get(base + '/api/external-dashboard' + suffix)
+    assert.equal(invalid.status(), 400)
+    assert.match(invalid.headers()['cache-control'], /private.*no-store/)
+  }
+  for (const privatePath of ['history.json', 'snapshots/2026-09-28.json']) assert.equal((await context.request.get(base + '/api/uploads/_reports/external-dashboard/' + privatePath)).status(), 404)
+  await rm(historyFile); await rm(path.join(snapshots, '2026-09-28.json')); await rmdir(snapshots)
   const api = await context.request.get(base + '/api/external-dashboard')
   assert.equal(api.status(), 200)
   assert.match(api.headers()['cache-control'], /private.*no-store/)
