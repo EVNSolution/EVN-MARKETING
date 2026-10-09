@@ -58,6 +58,9 @@ export async function testDashboardHistory() {
       await saveDashboardRecord(db, owner, { error: 'dashboard_timeout' }, env, new Date('2026-10-09T04:00:00.000Z'))
       assert.deepEqual((await query()).history.days, result.history.days, 'source errors preserve all historical values')
       const before = await readFile(ledger)
+      const oversized = { ...sample('2026-10-10', 9), monthlyKeywords: Array.from({ length: 3000 }, (_, i) => ({ keyword: 'x'.repeat(1800) + i, count: 1 })) }
+      await assert.rejects(saveDashboardRecord(db, owner, { data: oversized }, env, new Date('2026-10-10T00:00:00.000Z')), /dashboard_storage_error/)
+      assert.deepEqual(await readFile(ledger), before, 'oversized success cannot poison the durable recovery journal')
       await assert.rejects(saveDashboardRecord(db, 'foreign', { data: sample('2026-10-10', 9) }, env), /lost_worker_lease/)
       assert.deepEqual(await readFile(ledger), before)
 

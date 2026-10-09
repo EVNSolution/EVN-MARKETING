@@ -77,7 +77,7 @@ export default function ExternalDashboardClient() {
     </section>
     <div aria-live="polite" className="space-y-2 text-sm">
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error}</p>}
-      {record?.error && <p role="status" className="rounded-lg bg-amber-50 p-3 text-amber-900">{dashboardErrorText[record.error] ?? '원본 수집을 완료하지 못했습니다.'} {data ? '마지막 성공 데이터를 표시합니다.' : '첫 수집이 완료되면 수치가 표시됩니다.'}</p>}
+      {record?.error && <p role="status" className="rounded-lg bg-amber-50 p-3 text-amber-900">{dashboardErrorText[record.error] ?? '원본 수집을 완료하지 못했습니다.'} {record.data || history?.availableStart ? '마지막 성공 데이터를 표시합니다.' : '첫 수집이 완료되면 수치가 표시됩니다.'}</p>}
       {payload && !payload.workerOnline && <p className="rounded-lg bg-amber-50 p-3 text-amber-900">자동 수집 연결을 확인하지 못했습니다. 마지막 성공 시각을 확인해 주세요.</p>}
       {payload?.workerOnline && !payload.sourceReady && <p className="rounded-lg bg-amber-50 p-3 text-amber-900">수집기는 실행 중이며 원본 서비스 연결을 기다리고 있습니다. 자세한 연결 상태는 문의 내역에서 확인할 수 있습니다.</p>}
       {stale && <p className="rounded-lg bg-amber-50 p-3 text-amber-900">마지막 수집 성공 후 2시간이 지났습니다. 현재 표시된 수치는 최신이 아닐 수 있습니다.</p>}
@@ -96,7 +96,7 @@ export default function ExternalDashboardClient() {
         </div>
       </form>
       {history.missingDays.length > 0 && <p role="status" className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">
-        {history.missingDays.includes(today) ? `${today} 원본 공개 대기 · 오늘의 날짜별 수치를 아직 받지 못했습니다. 원본에 제공되면 기존 자동 수집 일정에 따라 보관합니다. ` : ''}
+        {history.missingDays.includes(today) ? `${today} 원본 공개 대기 · 오늘의 방문·페이지뷰 수치를 아직 받지 못했습니다. 원본에 제공되면 기존 자동 수집 일정에 따라 보관합니다. ` : ''}
         방문·페이지뷰 미수집 {history.missingDays.length}일. 미수집일은 0으로 계산하지 않습니다.
       </p>}
       {history.missingMediaDays.length > 0 && <p className="text-xs text-slate-600">매체별 원본 값이 없는 날짜 {history.missingMediaDays.length}일은 수집 대기입니다. 제공된 매체 값만 표시하며 누락을 0으로 바꾸지 않습니다.</p>}

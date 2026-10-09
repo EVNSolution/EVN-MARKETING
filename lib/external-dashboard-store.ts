@@ -44,9 +44,11 @@ function parseRecord(value: unknown): DashboardRecord {
     || (record.lastSuccessfulAt !== null && !timestamp(record.lastSuccessfulAt))
     || (record.error !== null && !Object.hasOwn(dashboardErrorText, record.error))
     || (record.data === null) !== (record.lastSuccessfulAt === null)) return invalid()
-  return { format: 1, source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID,
+  const parsed: DashboardRecord = { format: 1, source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID,
     lastAttemptAt: record.lastAttemptAt, lastSuccessfulAt: record.lastSuccessfulAt, error: record.error,
     data: record.data === null ? null : parseDashboard(record.data, record.data) }
+  if (Buffer.byteLength(JSON.stringify(parsed)) > MAX_BYTES) return invalid()
+  return parsed
 }
 
 async function readJson(file: string, maximum = MAX_BYTES): Promise<unknown | null> {
@@ -188,6 +190,8 @@ export async function saveDashboardRecord(
     const preserve = async (record: DashboardRecord | null) => {
       if (!record?.data || !record.lastSuccessfulAt) return
       const merged = mergeDashboardHistory(history, record)!
+      // The durable journal must itself satisfy the next reader's limits.
+      parseHistoryDays(merged.days)
       await publish(env, path.join(folder, 'history.json'), merged, MAX_HISTORY_BYTES, fence)
       history = merged
       await archive({ ...record, lastAttemptAt: record.lastSuccessfulAt, error: null })
@@ -197,12 +201,12 @@ export async function saveDashboardRecord(
     if (history) await archive(history.latest)
     await preserve(await readPreserved(env))
     await preserve(previous)
-    const record: DashboardRecord = {
+    const record = parseRecord({
       format: 1, source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID,
       lastAttemptAt: now.toISOString(), lastSuccessfulAt: result.data ? now.toISOString() : previous?.lastSuccessfulAt ?? null,
       data: result.data ? parseDashboard(result.data, result.data) : previous?.data ?? null,
       error: result.error ?? null,
-    }
+    })
     if (result.data) await preserve(record)
     await publish(env, path.join(folder, 'current.json'), record, MAX_BYTES, fence)
     return record
