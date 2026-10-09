@@ -53,6 +53,11 @@ WORKDIR /app
 COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
 RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
+# CVE-2026-46675: refresh libpng after any cached Chromium dependencies.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade libpng16-16t64 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libpng16-16t64)" ge 1.6.43-5ubuntu0.7 \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
