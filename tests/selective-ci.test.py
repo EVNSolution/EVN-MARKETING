@@ -1,5 +1,6 @@
 """Regression checks for the conservative PR heavy-lane classifier."""
 import importlib.util
+from itertools import takewhile
 import json
 import os
 from pathlib import Path
@@ -61,7 +62,7 @@ class ClassificationTests(unittest.TestCase):
 
     def test_cloud_helpers_keep_mandatory_tests_and_no_operator_skip_input(self):
         workflow = (SCRIPT.parents[1] / 'workflows/ci.yml').read_text()
-        verify = workflow.split('  verify:\n', 1)[1].split('  build:\n', 1)[0]
+        verify = workflow.split('  verify:\n', 1)[1].split('  plan:\n', 1)[0]
         self.assertNotRegex(verify, r'(?m)^\s*if:')
         for name in ('cloud-release', 'manual-release', 'operator-release', 'selective-ci'):
             self.assertIn(f'python3 tests/{name}.test.py', verify)
@@ -71,7 +72,8 @@ class ClassificationTests(unittest.TestCase):
     def test_workflow_rejects_missing_or_invalid_classifier_outputs(self):
         workflow = (SCRIPT.parents[1] / 'workflows/ci.yml').read_text()
         step = workflow.split('      - name: Require a complete automated check selection\n', 1)[1]
-        script = textwrap.dedent(step.split('        run: |\n', 1)[1].split('      - ', 1)[0])
+        lines = step.split('        run: |\n', 1)[1].splitlines()
+        script = textwrap.dedent('\n'.join(takewhile(lambda line: line.startswith('          '), lines)))
         for compat, controller in [('true', 'true'), ('false', 'false'), ('true', 'false'), ('false', 'true'),
                                    ('', 'false'), ('false', ''), ('False', 'true'), ('true', 'skipped')]:
             with self.subTest(compat=compat, controller=controller):

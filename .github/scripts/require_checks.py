@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 
 
-def require_checks(build, verify, application, controller_required, controller):
-    if (build != 'success' or verify != 'success' or application != 'success'
+def require_checks(plan, verify, application, controller_required, controller):
+    if (plan != 'success' or verify != 'success' or application != 'success'
             or (controller_required, controller) not in {('true', 'success'), ('false', 'skipped')}):
         raise ValueError('every automatically required CI job must succeed')
 
@@ -36,4 +36,4 @@ if __name__ == '__main__':
                            for suite in ('transitions', 'recovery')), os.environ['GITHUB_SHA'])
     else:
         require_checks(*(os.environ.get(name) for name in (
-            'BUILD_RESULT', 'VERIFY_RESULT', 'APPLICATION_RESULT', 'CONTROLLER_REQUIRED', 'CONTROLLER_RESULT')))
+            'PLAN_RESULT', 'VERIFY_RESULT', 'APPLICATION_RESULT', 'CONTROLLER_REQUIRED', 'CONTROLLER_RESULT')))
