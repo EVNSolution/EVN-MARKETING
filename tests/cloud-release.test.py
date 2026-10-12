@@ -70,6 +70,34 @@ for key, value in [("findingSeverityCounts", {"HIGH": 1}), ("findingSeverityCoun
     bad["imageScanFindings"][key] = value
     refuses(lambda: cloud.scan_clean(bad, DIGEST, now))
 
+# ECR can publish the image before scan-on-push creates its findings record.
+missing_scan = types.SimpleNamespace(returncode=254, stdout="", stderr="An error occurred (ScanNotFoundException)")
+with patch.object(cloud.subprocess, "run", side_effect=[missing_scan,
+        types.SimpleNamespace(returncode=0, stdout=json.dumps(pending)),
+        types.SimpleNamespace(returncode=0, stdout=json.dumps(report))]) as lookup, \
+        patch.object(cloud.time, "sleep") as sleep:
+    cloud.scan(DIGEST)
+    assert lookup.call_count == 3 and sleep.call_count == 2
+for error in ("AccessDeniedException", "ImageNotFoundException", "connection timed out"):
+    with patch.object(cloud.subprocess, "run", return_value=types.SimpleNamespace(
+            returncode=254, stdout="", stderr=error)) as lookup, patch.object(cloud.time, "sleep") as sleep:
+        try:
+            cloud.scan(DIGEST)
+        except RuntimeError as failure:
+            assert str(failure) == "image scan lookup failed"
+        else:
+            raise AssertionError("unexpected scan failure retried")
+        assert lookup.call_count == 1 and sleep.call_count == 0
+with patch.object(cloud.subprocess, "run", return_value=missing_scan) as lookup, \
+        patch.object(cloud.time, "sleep"):
+    try:
+        cloud.scan(DIGEST)
+    except RuntimeError as failure:
+        assert "timed out" in str(failure)
+    else:
+        raise AssertionError("missing scan accepted")
+    assert lookup.call_count == 60
+
 request = cloud.command_request(ENV, "d" * 64, DIGEST)
 assert request["InstanceIds"] == [ENV["MARKETING_INSTANCE_ID"]]
 assert request["DocumentName"].endswith(":document/EVN-Marketing-Release")

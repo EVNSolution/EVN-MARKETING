@@ -132,10 +132,15 @@ def check_manual_target():
 
 def scan(digest):
     checked(digest, r"sha256:[0-9a-f]{64}", "image digest")
+    command = ["aws", "ecr", "describe-image-scan-findings", "--repository-name", "evn-marketing",
+               "--image-id", "imageDigest=" + digest, "--region", REGION, "--output", "json", "--no-cli-pager"]
     for _ in range(60):
-        report = aws("ecr", "describe-image-scan-findings", "--repository-name", "evn-marketing",
-                     "--image-id", "imageDigest=" + digest)
-        if scan_clean(report, digest, datetime.now(timezone.utc)):
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode:
+            # Scan-on-push can lag behind image publication. Other failures are fatal.
+            if "(ScanNotFoundException)" not in result.stderr:
+                raise RuntimeError("image scan lookup failed")
+        elif scan_clean(json.loads(result.stdout), digest, datetime.now(timezone.utc)):
             return
         time.sleep(10)
     raise RuntimeError("image scan timed out; nothing dispatched")
