@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { SectionCard } from '@/components/SectionCard'
 import { FIELD_CLS } from '@/lib/ui'
 import { apiFetch } from '@/lib/release-client'
@@ -139,15 +139,40 @@ function Metric({ title, value, detail, small = false }: { title: string; value:
   </section>
 }
 
-const xAt = (index: number, size: number) => 65 + index * 700 / Math.max(1, size - 1)
+const chartRight = (width: number) => width - (width < 560 ? 5 : 55)
+const xSpacing = (size: number, width: number) => {
+  const span = chartRight(width) - 65 - 2 * (width < 560 ? 16 : 35)
+  // Reserve space for six readable dates while progressively expanding short ranges.
+  return Math.min(100, Math.max(36, span / 5), span / Math.max(1, size - 1))
+}
+const xAt = (index: number, size: number, width: number) =>
+  (65 + chartRight(width)) / 2 + (index - (size - 1) / 2) * xSpacing(size, width)
 const yAt = (value: number, maximum: number) => 190 - value / Math.max(1, maximum) * 160
-function ChartGrid({ maximum, dates }: { maximum: number; dates: string[] }) {
+function ChartFrame({ size, label, children }: { size: number; label: string; children: (width: number) => ReactNode }) {
+  const container = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(820)
+  const minimum = size > 6 ? 560 : 240
+  useLayoutEffect(() => {
+    if (!container.current) return
+    const observer = new ResizeObserver(([entry]) => {
+      setWidth(Math.min(820, Math.max(minimum, entry.contentRect.width)))
+    })
+    observer.observe(container.current)
+    return () => observer.disconnect()
+  }, [minimum])
+  return <div ref={container} className="overflow-x-auto">
+    <svg className={`w-full ${size > 6 ? 'min-w-[560px]' : ''}`} viewBox={`0 0 ${width} 235`} role="img" aria-label={label}>
+      {children(width)}
+    </svg>
+  </div>
+}
+function ChartGrid({ maximum, dates, width }: { maximum: number; dates: string[]; width: number }) {
   return <>
     {[0, 0.5, 1].map(fraction => <g key={fraction}>
-      <line x1="65" x2="765" y1={yAt(maximum * fraction, maximum)} y2={yAt(maximum * fraction, maximum)} stroke="#e2e8f0" />
+      <line x1="65" x2={chartRight(width)} y1={yAt(maximum * fraction, maximum)} y2={yAt(maximum * fraction, maximum)} stroke="#e2e8f0" />
       <text x="55" y={yAt(maximum * fraction, maximum) + 4} textAnchor="end" fontSize="11" fill="#64748b">{number(Math.round(maximum * fraction))}</text>
     </g>)}
-    {dates.map((date, i) => (i === 0 || i === dates.length - 1 || i % Math.max(1, Math.ceil(dates.length / 5)) === 0) && <text key={date} x={xAt(i, dates.length)} y="218" textAnchor="middle" fontSize="11" fill="#64748b">{date.slice(5)}</text>)}
+    {dates.map((date, i) => (i === 0 || i === dates.length - 1 || (i % Math.max(1, Math.ceil(dates.length / 5)) === 0 && (dates.length - 1 - i) * xSpacing(dates.length, width) >= 36)) && <text key={date} x={xAt(i, dates.length, width)} y="218" textAnchor="middle" fontSize="11" fill="#64748b">{date.slice(5)}</text>)}
   </>
 }
 function VisitorChart({ data, days, today }: { data: ExternalDashboard; days?: DashboardDay[]; today: string }) {
@@ -158,15 +183,13 @@ function VisitorChart({ data, days, today }: { data: ExternalDashboard; days?: D
   const maximum = Math.max(1, ...rows.flatMap(row => [row.visitorCount ?? 0, row.pageViewCount ?? 0]))
   return <>
     <div className="flex flex-wrap gap-4 text-xs"><span className="text-blue-700">● 방문자</span><span className="text-emerald-700">● 페이지뷰</span></div>
-    <div className="overflow-x-auto">
-      <svg className="w-full min-w-[560px]" viewBox="0 0 820 235" role="img" aria-label="일별 방문자와 페이지뷰 추이. 정확한 수치는 아래 일별 수치 펼치기에서 확인할 수 있습니다.">
-        <ChartGrid maximum={maximum} dates={rows.map(row => row.date)} />
+    <ChartFrame size={rows.length} label="일별 방문자와 페이지뷰 추이. 정확한 수치는 아래 일별 수치 펼치기에서 확인할 수 있습니다.">{width => <>
+        <ChartGrid maximum={maximum} dates={rows.map(row => row.date)} width={width} />
         {(['visitorCount', 'pageViewCount'] as const).map((key, k) => <g key={key}>
-          <path fill="none" stroke={k ? '#059669' : '#2563eb'} strokeWidth="2.5" d={rows.map((row, i) => row[key] === null ? '' : `${i && rows[i - 1][key] !== null ? 'L' : 'M'}${xAt(i, rows.length)},${yAt(row[key], maximum)}`).join(' ')} />
-          {rows.map((row, i) => row[key] !== null && <circle key={row.date} cx={xAt(i, rows.length)} cy={yAt(row[key], maximum)} r="3" fill={k ? '#059669' : '#2563eb'}><title>{row.date} {k ? '페이지뷰' : '방문자'} {number(row[key])}</title></circle>)}
+          <path fill="none" stroke={k ? '#059669' : '#2563eb'} strokeWidth="2.5" d={rows.map((row, i) => row[key] === null ? '' : `${i && rows[i - 1][key] !== null ? 'L' : 'M'}${xAt(i, rows.length, width)},${yAt(row[key], maximum)}`).join(' ')} />
+          {rows.map((row, i) => row[key] !== null && <circle key={row.date} cx={xAt(i, rows.length, width)} cy={yAt(row[key], maximum)} r="3" fill={k ? '#059669' : '#2563eb'}><title>{row.date} {k ? '페이지뷰' : '방문자'} {number(row[key])}</title></circle>)}
         </g>)}
-      </svg>
-    </div>
+    </>}</ChartFrame>
     <details className="mt-3 text-sm"><summary className="cursor-pointer py-2 font-medium">일별 수치 펼치기 ({rows.length}일)</summary>
       <div className="max-h-80 overflow-auto"><table className="w-full min-w-[520px] text-left text-xs"><thead><tr><th className="py-2">성과 날짜</th><th className="py-2 text-right">방문자</th><th className="py-2 text-right">페이지뷰</th><th className="px-3 py-2">수집시각 (한국 시간) / 상태</th></tr></thead><tbody>{rows.map(row => <tr key={row.date} className="border-t border-slate-100"><td className="py-2">{row.date}</td><td className="text-right">{number(row.visitorCount)}</td><td className="text-right">{number(row.pageViewCount)}</td><td className="px-3 py-2">{row.visitorCount === null ? row.date === today ? '원본 공개 대기' : '미수집 · 수집 대기' : time(row.collectedAt)}</td></tr>)}</tbody></table></div>
     </details>
@@ -183,20 +206,21 @@ function MediaChart({ data, days: observations }: { data: ExternalDashboard; day
   }
   const media = Object.keys(mediaColors).filter(label => days.some(day => (grouped.get(day)!.get(label) ?? 0) > 0))
   const maximum = Math.max(1, ...days.map(day => media.reduce((total, label) => total + (grouped.get(day)!.get(label) ?? 0), 0)))
-  const barWidth = Math.min(32, 500 / Math.max(1, days.length))
   return <>
     <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">{media.map(label => <span key={label} style={{ color: mediaColors[label] }}>● {label}</span>)}</div>
-    {media.length ? <div className="overflow-x-auto"><svg className="w-full min-w-[560px]" viewBox="0 0 820 235" role="img" aria-label="매체별 일별 광고 유입. 정확한 수치는 아래 매체별 원본 수치 펼치기에서 확인할 수 있습니다.">
-      <ChartGrid maximum={maximum} dates={days} />
+    {media.length ? <ChartFrame size={days.length} label="매체별 일별 광고 유입. 정확한 수치는 아래 매체별 원본 수치 펼치기에서 확인할 수 있습니다.">{width => {
+      const barWidth = Math.min(width < 560 ? 28 : 32, 500 / Math.max(1, days.length), xSpacing(days.length, width) * 0.75)
+      return <>
+      <ChartGrid maximum={maximum} dates={days} width={width} />
       {days.map((day, i) => {
         let total = 0
         return <g key={day}>{media.map(label => {
           const count = grouped.get(day)!.get(label) ?? 0
           total += count
-          return <rect key={label} x={xAt(i, days.length) - barWidth / 2} y={yAt(total, maximum)} width={barWidth} height={count / maximum * 160} fill={mediaColors[label]}><title>{day} {label} {number(count)}</title></rect>
+          return <rect key={label} x={xAt(i, days.length, width) - barWidth / 2} y={yAt(total, maximum)} width={barWidth} height={count / maximum * 160} fill={mediaColors[label]}><title>{day} {label} {number(count)}</title></rect>
         })}</g>
       })}
-    </svg></div> : <p className="py-5 text-sm text-slate-500">원본 차트에 표시할 광고 유입이 없습니다.</p>}
+    </>}}</ChartFrame> : <p className="py-5 text-sm text-slate-500">원본 차트에 표시할 광고 유입이 없습니다.</p>}
     <details className="mt-3 text-sm"><summary className="cursor-pointer py-2 font-medium">매체별 원본 수치 펼치기 ({data.monthlyAdViews.length}건)</summary>
       <div className="max-h-80 overflow-auto"><table className="w-full min-w-[520px] text-left text-xs"><thead><tr><th className="py-2">성과 날짜</th><th className="py-2">매체</th><th className="py-2 text-right">유입</th><th className="px-3 py-2">수집시각 (한국 시간)</th></tr></thead><tbody>{data.monthlyAdViews.map((row, index) => <tr key={index} className="border-t border-slate-100"><td className="whitespace-nowrap py-2 pr-2">{row.date}</td><td className="break-all py-2">{row.media}</td><td className="text-right">{number(row.count)}</td><td className="px-3 py-2">{time(observedAt.get(JSON.stringify([row.date, row.media])))}</td></tr>)}</tbody></table></div>
     </details>
