@@ -247,7 +247,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         docker('push', proxy_tag)
         fixture = root / 'fixture'
         shutil.copy(ROOT / 'tests/deploy-lab-worker.mjs', fixture / 'worker.mjs')
-        (fixture / 'Dockerfile').write_text('FROM evn-marketing:ci\nUSER root\nARG REVISION\nRUN node -e "const f=require(\'fs\');const p=\'/app/schema-manifest.json\';const m=JSON.parse(f.readFileSync(p));m.revision=process.env.REVISION;f.writeFileSync(p,JSON.stringify(m))"\nCOPY worker.mjs /app/worker.mjs\nUSER node\n')
+        (fixture / 'Dockerfile').write_text('FROM evn-marketing:controller-base\nUSER root\nARG REVISION\nRUN node -e "const f=require(\'fs\');const p=\'/app/schema-manifest.json\';const m=JSON.parse(f.readFileSync(p));m.revision=process.env.REVISION;f.writeFileSync(p,JSON.stringify(m))"\nCOPY worker.mjs /app/worker.mjs\nUSER node\n')
         releases = []
         for character, slot in (('a', 'blue'), ('b', 'green')):
             revision = character * 40

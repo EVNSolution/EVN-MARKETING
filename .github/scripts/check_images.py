@@ -100,6 +100,14 @@ def main():
         build('bridge-build', bridge, 'runtime', 'evn-marketing:compat-a', source, 'marketing-bridge-d6d7df8')
         command('compatibility', ['bash', 'tests/release-compat.sh'])
 
+    def controller_lab():
+        # Already built and cached as part of runtime. No second Next build or browser payload.
+        command('controller-base', ['docker', 'buildx', 'build', '--platform', 'linux/amd64',
+                '--load', '--provenance=false', '--target', 'application',
+                '--build-arg', 'MARKETING_BUILD_REVISION=' + revision,
+                '--tag', 'evn-marketing:controller-base', '.'])
+        command('controller', ['python3', 'tests/deploy-controller-lab.py'])
+
     def registry():
         spec = importlib.util.spec_from_file_location('artifact', ROOT / '.github/scripts/release_artifact.py')
         artifact = importlib.util.module_from_spec(spec)
@@ -108,7 +116,7 @@ def main():
 
     tasks = {'smoke': lambda: command('smoke', ['bash', 'tests/container-smoke.sh'])}
     if controller:
-        tasks['controller'] = lambda: command('controller', ['python3', 'tests/deploy-controller-lab.py'])
+        tasks['controller'] = controller_lab
     if compat:
         tasks['compatibility'] = compatibility
     if os.environ.get('GITHUB_EVENT_NAME') == 'push' and os.environ.get('GITHUB_REF') == 'refs/heads/main':

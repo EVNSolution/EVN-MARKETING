@@ -9,6 +9,7 @@
 이전 수동 workflow는 제거했습니다. 실제 30분 합성 관찰이 필요하면 아래 CLI를 Linux에서 실행합니다. 매 PR이나 매 배포의 필수 검사가 아니며 시간 동작을 변경하거나 문제를 조사할 때 실행합니다. label 자동 실행, 빠른 모드 중복 실행, 자동 재전송이나 주기 실행은 없습니다. lease 180초와 관측 1,800초를 유지합니다. 이 workflow에는 AWS 역할, 운영 environment, 실제 비밀값이 없습니다. 실행 명령은 다음과 같습니다.
 
 ```text
+docker build --target application --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:controller-base .
 python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
 ```
 
@@ -18,8 +19,10 @@ python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
 
 - CI concurrency는 PR 또는 브랜치별로 이전 실행을 취소한다. 배포는 취소하지 않는다.
 - Markdown도 workflow를 시작하며 경로 분류로 추가 Docker lab을 선택한다.
-- runtime, operations, 고정 schema bridge, proxy는 각각 BuildKit GHA cache를 사용한다. operations는 잠긴 dependency layer와 Prisma/schema 파일만 사용하며 Next 빌드 결과를 복사하지 않는다.
+- runtime, operations, 고정 schema bridge, proxy는 각각 BuildKit GHA cache를 사용한다. operations는 잠금 파일의 Prisma·dotenv·SQLite 의존성만 오프라인으로 남기고 버전·무결성 값이 바뀌지 않았는지 검사한다. Next 빌드 결과를 복사하지 않는다.
 - runtime/proxy 준비 후 기본 검사, controller 검사, compatibility 준비·검사를 자동으로 병렬 실행한다. main의 이미지 업로드·scan도 겹쳐 실행하지만 모든 필수 검사 성공 후에만 배포 receipt를 승격한다. 배포는 기존처럼 전체 main CI 성공도 확인한다.
+- controller fixture는 동일한 application stage와 기본 OS를 사용하고 사용하지 않는 Chromium만 제외한다. 실제 배포 이미지는 Chromium을 유지하며 기본 검사와 구버전 호환 브라우저 검사를 실행한다.
+- 정상 응답 3회 사이에는 각각 1초를 기다리며 마지막 성공 뒤의 불필요한 대기는 하지 않는다. 스키마 메타데이터는 이미지별 한 컨테이너로 읽지만 DB·migration ledger·integrity는 매 호출 다시 검사한다.
 - 실행자가 선택하는 빠른 모드나 생략 옵션은 없다. 단계별 시간과 controller 명령·대기 시간은 Actions 요약 및 `marketing-ci-timings-*` artifact에 자동 기록된다.
 - main CI의 검증 이미지를 배포에서 그대로 사용한다. 배포에서는 재빌드하지 않는다.
 - 분류 경계 selftest와 workflow YAML parse를 확인하고 Linux CI에서 실제 선택된 경로·시나리오 수·실행 시간을 기록합니다. 최종 선택형 CI의 시간 실측치는 해당 실행 이후에만 기재합니다.

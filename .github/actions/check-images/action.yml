@@ -2,4 +2,4 @@ name: Check built images
 description: Run automatic image checks with the Actions runtime cache environment
 runs:
   using: node24
-  main: index.cjs
+  main: index.mjs

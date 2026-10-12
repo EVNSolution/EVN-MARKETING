@@ -119,7 +119,10 @@ try {
     writeFileSync('/control/traffic-result.json', JSON.stringify({ ...counters, cycles: cycle }))
   }
 } catch (error) {
-  console.error(JSON.stringify({ ok: false, httpStatus: failedStatus, errorType: error.name }))
+  const known = new Set(['held_request_timeout', 'synthetic_request_timeout', 'synthetic_http_failure'])
+  console.error(JSON.stringify({ ok: false, httpStatus: failedStatus, errorType: error.name,
+    reason: known.has(error.message) ? error.message : 'synthetic_request_failed',
+    code: ['ECONNRESET', 'EPIPE', 'ECONNREFUSED'].includes(error.code) ? error.code : null }))
   writeFileSync('/control/traffic-failed', 'synthetic_traffic_failed\n')
   process.exitCode = 1
 }

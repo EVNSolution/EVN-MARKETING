@@ -43,10 +43,17 @@ RUN test -n "$MARKETING_BUILD_REVISION" \
     && ./node_modules/.bin/esbuild scripts/warp-recovery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-recovery.mjs \
     && ./node_modules/.bin/esbuild workers/health.ts --bundle --platform=node --format=esm --packages=external --outfile=worker-health.mjs
 
+FROM dependencies AS migration-dependencies
+COPY scripts/migration-dependencies.mjs scripts/migration-dependencies.mjs
+RUN node scripts/migration-dependencies.mjs prepare \
+    && npm prune --omit=dev --ignore-scripts --offline --no-audit --no-fund \
+    && node scripts/migration-dependencies.mjs verify
+
 FROM base AS operations
 WORKDIR /app
-COPY --from=dependencies /app/node_modules ./node_modules
-COPY package.json package-lock.json prisma.config.ts ./
+COPY --from=migration-dependencies /app/node_modules ./node_modules
+COPY --from=migration-dependencies /app/package.json /app/package-lock.json ./
+COPY prisma.config.ts ./
 COPY prisma/schema.prisma prisma/schema.prisma
 COPY prisma/migrations prisma/migrations
 COPY scripts/schema-check.mjs scripts/schema-compatibility.mjs scripts/landing-schema-policy.json ./scripts/
@@ -56,8 +63,8 @@ RUN node scripts/schema-check.mjs manifest /app "$MARKETING_BUILD_REVISION" /app
 USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 
-FROM base AS runtime
-ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0 PORT=3000
+FROM base AS browser
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 WORKDIR /app
 COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
 RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
@@ -67,6 +74,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade libpng16-16t64 \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libpng16-16t64)" ge 1.6.43-5ubuntu0.7 \
     && rm -rf /var/lib/apt/lists/*
+
+# The controller lab replaces the collector with a synthetic worker. Its image
+# uses the exact same application files and base OS, without unused browsers.
+FROM base AS application
+ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
+WORKDIR /app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
@@ -86,6 +99,13 @@ COPY --from=build /app/node_modules/dotenv ./node_modules/dotenv
 COPY --from=build /app/node_modules/@prisma/adapter-better-sqlite3 ./node_modules/@prisma/adapter-better-sqlite3
 COPY --from=build /app/node_modules/@prisma/driver-adapter-utils ./node_modules/@prisma/driver-adapter-utils
 COPY --from=build /app/node_modules/@prisma/debug ./node_modules/@prisma/debug
+RUN mkdir -p /data/uploads && chown -R node:node /data
+USER node
+CMD ["node", "server.js"]
+
+FROM browser AS runtime
+ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
+COPY --from=application /app /app
 RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 CMD ["node", "server.js"]
