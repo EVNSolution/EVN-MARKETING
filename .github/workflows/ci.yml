@@ -34,17 +34,12 @@ jobs:
       - name: Offline backup and bounded receipt recovery
         run: npm run test:backup && npm run test:warp-recovery
       - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
-  images:
+  build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || 'ci' }}
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      AWS_REGION: ap-northeast-2
-      AWS_DEFAULT_REGION: ap-northeast-2
-      AWS_PAGER: ''
+    timeout-minutes: 20
+    outputs:
+      compat: ${{ steps.changes.outputs.compat }}
+      controller: ${{ steps.changes.outputs.controller }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -65,12 +60,6 @@ jobs:
             true:true|true:false|false:true|false:false) ;;
             *) echo 'Invalid CI check selection'; exit 1 ;;
           esac
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build runtime once
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
@@ -97,6 +86,65 @@ jobs:
           tags: evn-marketing:proxy-ci
           cache-from: type=gha,scope=marketing-proxy
           cache-to: type=gha,mode=max,scope=marketing-proxy
+      - name: Export exact test images
+        env:
+          CHECK_COMPAT: ${{ steps.changes.outputs.compat }}
+          CHECK_CONTROLLER: ${{ steps.changes.outputs.controller }}
+        run: |
+          runtime_images=(evn-marketing:ci)
+          if [ "$CHECK_COMPAT" = true ]; then runtime_images+=(evn-marketing:proxy-ci); fi
+          docker save "${runtime_images[@]}" | zstd -T2 -1 -o "$RUNNER_TEMP/runtime.tar.zst"
+          if [ "$CHECK_CONTROLLER" = true ]; then
+            docker buildx build --platform linux/amd64 --load --provenance=false --target application \
+              --build-arg "MARKETING_BUILD_REVISION=$GITHUB_SHA" \
+              --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag evn-marketing:controller-base .
+            docker save evn-marketing:controller-base evn-marketing:proxy-ci | zstd -T2 -1 -o "$RUNNER_TEMP/controller.tar.zst"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-images-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime.tar.zst
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.changes.outputs.controller == 'true'
+        with:
+          name: controller-images-${{ github.sha }}
+          path: ${{ runner.temp }}/controller.tar.zst
+          compression-level: 0
+          retention-days: 1
+  application:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || 'ci' }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ap-northeast-2
+      AWS_DEFAULT_REGION: ap-northeast-2
+      AWS_PAGER: ''
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: runtime-images-${{ github.sha }}
+          path: ${{ runner.temp }}/images
+      - name: Load exact built runtime
+        run: |
+          zstd -dc "$RUNNER_TEMP/images/runtime.tar.zst" | docker load
+          test "$(docker image inspect evn-marketing:ci --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
       - name: Authenticate the protected main publisher
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
@@ -109,8 +157,7 @@ jobs:
       - name: Run automatically selected checks and prepare release
         timeout-minutes: 25
         env:
-          CHECK_COMPAT: ${{ steps.changes.outputs.compat }}
-          CHECK_CONTROLLER: ${{ steps.changes.outputs.controller }}
+          CHECK_COMPAT: ${{ needs.build.outputs.compat }}
           MARKETING_AWS_ACCOUNT_ID: ${{ vars.MARKETING_AWS_ACCOUNT_ID }}
         uses: ./.github/actions/check-images
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -121,12 +168,97 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: success() && steps.changes.outputs.compat == 'true'
+        if: success() && needs.build.outputs.compat == 'true'
         with:
           name: marketing-recovery-${{ github.sha }}
           path: ${{ runner.temp }}/marketing-recovery-summary.json
           if-no-files-found: error
           retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: pending-release-${{ github.sha }}
+          path: candidate-release-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+  controller:
+    needs: build
+    if: needs.build.outputs.controller == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [transitions, recovery]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: controller-images-${{ github.sha }}
+          path: ${{ runner.temp }}/images
+      - name: Load exact controller application
+        run: |
+          zstd -dc "$RUNNER_TEMP/images/controller.tar.zst" | docker load
+          test "$(docker image inspect evn-marketing:controller-base --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+      - name: Run mandatory controller suite
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: python3 tests/deploy-controller-lab.py --suite "$SUITE" --report "$RUNNER_TEMP/controller-summary.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: controller-${{ matrix.suite }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/controller-summary.json
+            ${{ runner.temp }}/marketing-controller-timings.jsonl
+          if-no-files-found: warn
+          retention-days: 7
+  images:
+    if: always()
+    needs: [build, verify, application, controller]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Require every automatically selected job
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          APPLICATION_RESULT: ${{ needs.application.result }}
+          CONTROLLER_REQUIRED: ${{ needs.build.outputs.controller }}
+          CONTROLLER_RESULT: ${{ needs.controller.result }}
+        run: python3 .github/scripts/require_checks.py
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.build.outputs.controller == 'true'
+        with:
+          name: controller-transitions-${{ github.sha }}
+          path: ${{ runner.temp }}/controller-reports/transitions
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.build.outputs.controller == 'true'
+        with:
+          name: controller-recovery-${{ github.sha }}
+          path: ${{ runner.temp }}/controller-reports/recovery
+      - name: Require complete transition and recovery evidence
+        if: needs.build.outputs.controller == 'true'
+        env:
+          CONTROLLER_REPORTS: ${{ runner.temp }}/controller-reports
+        run: python3 .github/scripts/require_checks.py
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: pending-release-${{ github.sha }}
+      - name: Promote the fully tested receipt
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: mv candidate-release-receipt.json release-receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:

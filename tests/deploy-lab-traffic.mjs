@@ -111,7 +111,17 @@ try {
       }))
       cycle++
       writeFileSync('/control/traffic-ready', 'ready\n')
+      if (process.argv[2] === 'seed-recovery') break
       await delay(1000)
+    }
+    if (process.argv[2] === 'seed-recovery') {
+      // Populate recovery's baseline through the real API, including an upload.
+      // The transitions suite separately checks interrupted uploads and old workers.
+      const revision = JSON.parse((await request('/api/readyz')).body).revision
+      const { body, headers: extra } = multipart('%PDF-synthetic-recovery-baseline')
+      const doc = JSON.parse((await request('/api/customers/synthetic-held/documents', 'POST', body,
+        { ...extra, 'x-deployment-id': revision })).body).doc
+      assert.equal((await request(doc.path)).body.toString(), '%PDF-synthetic-recovery-baseline')
     }
     assert.ok(cycle > 0)
     assert.equal(db.pragma('integrity_check', { simple: true }), 'ok')

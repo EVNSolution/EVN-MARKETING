@@ -61,7 +61,7 @@ class ClassificationTests(unittest.TestCase):
 
     def test_cloud_helpers_keep_mandatory_tests_and_no_operator_skip_input(self):
         workflow = (SCRIPT.parents[1] / 'workflows/ci.yml').read_text()
-        verify = workflow.split('  verify:\n', 1)[1].split('  images:\n', 1)[0]
+        verify = workflow.split('  verify:\n', 1)[1].split('  build:\n', 1)[0]
         self.assertNotRegex(verify, r'(?m)^\s*if:')
         for name in ('cloud-release', 'manual-release', 'operator-release', 'selective-ci'):
             self.assertIn(f'python3 tests/{name}.test.py', verify)

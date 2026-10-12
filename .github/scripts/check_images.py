@@ -1,4 +1,4 @@
-"""Run independent image checks together; promote a receipt only after all pass."""
+"""Run application checks and stage a candidate; the workflow gates deployment."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import importlib.util
 import json
@@ -57,16 +57,15 @@ def run_checks(tasks, pending, receipt, report):
 
 def main():
     compat = selected(os.environ.get('CHECK_COMPAT'))
-    controller = selected(os.environ.get('CHECK_CONTROLLER'))
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise ValueError('ephemeral CI runner required')
     temporary = Path(os.environ['RUNNER_TEMP'])
     revision = os.environ['GITHUB_SHA']
     pending = temporary / 'marketing-pending-receipt.json'
-    receipt = ROOT / 'release-receipt.json'
+    # The final workflow gate promotes this only after both controller suites and verify pass.
+    receipt = ROOT / 'candidate-release-receipt.json'
     report = temporary / 'marketing-ci-timings.json'
-    profile = temporary / 'marketing-controller-timings.jsonl'
-    profile.unlink(missing_ok=True)
+    browser_lock = threading.Lock()
 
     def command(name, args, timeout=900):
         log = temporary / f'marketing-{name}.log'
@@ -87,6 +86,7 @@ def main():
                       '--build-arg', 'MARKETING_BUILD_REVISION=' + source,
                       '--label', 'org.opencontainers.image.revision=' + source,
                       '--cache-from', 'type=gha,scope=' + scope,
+                      '--cache-from', 'type=gha,scope=marketing-runtime',
                       '--cache-to', 'type=gha,mode=max,scope=' + scope, str(context)])
 
     def compatibility():
@@ -98,15 +98,12 @@ def main():
         command('bridge-source', ['git', 'archive', '--output', str(archive), source])
         command('bridge-extract', ['tar', '-xf', str(archive), '-C', str(bridge)])
         build('bridge-build', bridge, 'runtime', 'evn-marketing:compat-a', source, 'marketing-bridge-d6d7df8')
-        command('compatibility', ['bash', 'tests/release-compat.sh'])
+        with browser_lock:
+            command('compatibility', ['bash', 'tests/release-compat.sh'])
 
-    def controller_lab():
-        # Already built and cached as part of runtime. No second Next build or browser payload.
-        command('controller-base', ['docker', 'buildx', 'build', '--platform', 'linux/amd64',
-                '--load', '--provenance=false', '--target', 'application',
-                '--build-arg', 'MARKETING_BUILD_REVISION=' + revision,
-                '--tag', 'evn-marketing:controller-base', '.'])
-        command('controller', ['python3', 'tests/deploy-controller-lab.py'])
+    def smoke():
+        with browser_lock:
+            command('smoke', ['bash', 'tests/container-smoke.sh'])
 
     def registry():
         spec = importlib.util.spec_from_file_location('artifact', ROOT / '.github/scripts/release_artifact.py')
@@ -114,9 +111,7 @@ def main():
         spec.loader.exec_module(artifact)
         artifact.publish(pending)
 
-    tasks = {'smoke': lambda: command('smoke', ['bash', 'tests/container-smoke.sh'])}
-    if controller:
-        tasks['controller'] = controller_lab
+    tasks = {'smoke': smoke}
     if compat:
         tasks['compatibility'] = compatibility
     if os.environ.get('GITHUB_EVENT_NAME') == 'push' and os.environ.get('GITHUB_REF') == 'refs/heads/main':
@@ -126,24 +121,12 @@ def main():
     finally:
         if report.exists():
             result = json.loads(report.read_text())
-            if profile.exists():
-                totals = {}
-                for line in profile.read_text().splitlines():
-                    item = json.loads(line)
-                    total = totals.setdefault(item['stage'], {'calls': 0, 'seconds': 0})
-                    total['calls'] += 1
-                    total['seconds'] = round(total['seconds'] + item['seconds'], 4)
-                result['controllerProfile'] = totals
-                report.write_text(json.dumps(result, indent=2) + '\n')
             with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
                 output.write('\n## Image check timings\n\n| Stage | Seconds | Passed |\n| --- | ---: | --- |\n')
                 for item in result['stages']:
                     output.write(f"| {item['stage']} | {item['seconds']} | {item['ok']} |\n")
                 output.write(f"\nConcurrent wall time: {result['wallSeconds']} seconds.\n")
-                if 'controllerProfile' in result:
-                    output.write('\n### Controller timings\n\nSections contain commands and waits; do not sum both.\n\n| Operation | Calls | Seconds |\n| --- | ---: | ---: |\n')
-                    for name, item in sorted(result['controllerProfile'].items()):
-                        output.write(f"| {name} | {item['calls']} | {item['seconds']:.2f} |\n")
+
 
 
 if __name__ == '__main__':
