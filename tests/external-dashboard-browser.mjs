@@ -211,7 +211,16 @@ async function checkChartSpacing({ page, base, record, save, output }) {
           if (count <= 6) assert.ok(geometry.svgWidth <= geometry.containerWidth + 1, 'short mobile ranges fit the visible chart')
           else assert.ok(last - first > (geometry.right - geometry.left) * 0.85, 'long ranges use the available width')
           positions.push(xs)
-          if (output && count !== 3) await chart.screenshot({ path: path.join(output, `dashboard-spacing-${width}-${count}d-${index ? 'media' : 'visitors'}.png`) })
+          const viewport = chart.locator('..')
+          if (output && count !== 3) await viewport.screenshot({ path: path.join(output, `dashboard-spacing-${width}-${count}d-${index ? 'media' : 'visitors'}.png`) })
+          if (geometry.svgWidth > geometry.containerWidth + 1) {
+            await viewport.evaluate(element => { element.scrollLeft = element.scrollWidth })
+            const lastMark = await chart.locator('circle, rect').last().boundingBox()
+            const bounds = await viewport.boundingBox()
+            assert.ok(lastMark.x >= bounds.x && lastMark.x + lastMark.width <= bounds.x + bounds.width, 'last date remains reachable by horizontal scrolling')
+            if (output) await viewport.screenshot({ path: path.join(output, `dashboard-spacing-${width}-${count}d-${index ? 'media' : 'visitors'}-right.png`) })
+            await viewport.evaluate(element => { element.scrollLeft = 0 })
+          }
         }
         assert.deepEqual(positions[0], positions[1], 'visitor and media charts share date positions')
         const span = positions[0].at(-1) - positions[0][0]
