@@ -72,6 +72,9 @@ def fake_aws(*args):
 
 
 def poll(args, **kwargs):
+    if args[:3] == ["aws", "ecr", "describe-image-scan-findings"]:
+        assert args[-5:] == ["--region", cloud.REGION, "--output", "json", "--no-cli-pager"]
+        return SimpleNamespace(returncode=0, stdout=json.dumps(fake_aws(*args[1:-5])), stderr="")
     assert args[:3] == ["aws", "ssm", "get-command-invocation"]
     assert args[args.index("--query") + 1] == "{Status:Status,ResponseCode:ResponseCode}"
     assert args[args.index("--command-id") + 1] == COMMAND
