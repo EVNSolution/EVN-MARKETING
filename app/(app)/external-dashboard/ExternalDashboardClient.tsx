@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { SectionCard } from '@/components/SectionCard'
 import { FIELD_CLS } from '@/lib/ui'
 import { apiFetch } from '@/lib/release-client'
@@ -108,8 +109,8 @@ export default function ExternalDashboardClient() {
     </div>
     <p className="text-xs leading-5 text-slate-500">방문자는 일별 합계이며, 같은 방문자는 날짜마다 포함될 수 있습니다.</p>
     {data && <>
-      <SectionCard color="slate" title="일별 방문자 · 페이지뷰"><VisitorChart data={data} days={history?.days} today={today} /></SectionCard>
-      <SectionCard color="slate" title="매체별 일별 광고 유입"><MediaChart data={data} days={history?.days} /></SectionCard>
+      <SectionCard color="slate" title="일별 방문자 · 페이지뷰"><VisitorChart key={filter} data={data} days={history?.days} today={today} /></SectionCard>
+      <SectionCard color="slate" title="매체별 일별 광고 유입"><MediaChart key={filter} data={data} days={history?.days} /></SectionCard>
     </>}
     {rankingData && <>
       <section aria-label="원본 전체 기간 집계" className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
@@ -148,9 +149,33 @@ const xSpacing = (size: number, width: number) => {
 const xAt = (index: number, size: number, width: number) =>
   (65 + chartRight(width)) / 2 + (index - (size - 1) / 2) * xSpacing(size, width)
 const yAt = (value: number, maximum: number) => 190 - value / Math.max(1, maximum) * 160
-function ChartFrame({ size, label, children }: { size: number; label: string; children: (width: number) => ReactNode }) {
+type ChartDay = { date: string; values: { label: string; color: string; value: number | null }[] }
+function ChartFrame({ days, label, children }: { days: ChartDay[]; label: string; children: (width: number) => ReactNode }) {
+  const size = days.length
   const container = useRef<HTMLDivElement>(null)
+  const card = useRef<HTMLDivElement>(null)
+  const targets = useRef<(SVGRectElement | null)[]>([])
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const tooltipId = useId()
   const [width, setWidth] = useState(820)
+  const [focused, setFocused] = useState(0)
+  const [active, setActive] = useState<{ index: number; mode: 'hover' | 'focus' | 'pinned' } | null>(null)
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
+  const keepOpen = () => clearTimeout(closeTimer.current)
+  const dismiss = () => { keepOpen(); setActive(null) }
+  const leave = () => {
+    keepOpen()
+    if (active?.mode === 'hover') closeTimer.current = setTimeout(() => setActive(null), 220)
+  }
+  const show = (index: number, mode: 'hover' | 'focus') => {
+    keepOpen()
+    setActive(current => current?.index === index && current.mode === 'pinned' ? current : { index, mode })
+  }
+  const toggle = (index: number) => {
+    keepOpen()
+    setActive(current => current?.index === index && current.mode === 'pinned' ? null : { index, mode: 'pinned' })
+  }
+  useEffect(() => () => clearTimeout(closeTimer.current), [])
   const minimum = size > 6 ? 560 : 240
   useLayoutEffect(() => {
     if (!container.current) return
@@ -160,11 +185,81 @@ function ChartFrame({ size, label, children }: { size: number; label: string; ch
     observer.observe(container.current)
     return () => observer.disconnect()
   }, [minimum])
-  return <div ref={container} className="overflow-x-auto">
-    <svg className={`w-full ${size > 6 ? 'min-w-[560px]' : ''}`} viewBox={`0 0 ${width} 235`} role="img" aria-label={label}>
+  useLayoutEffect(() => {
+    if (!active) return
+    const place = () => {
+      const target = targets.current[active.index], popup = card.current, viewport = container.current
+      if (!target || !popup || !viewport) return
+      const anchor = target.getBoundingClientRect(), clip = viewport.getBoundingClientRect()
+      const center = anchor.left + anchor.width / 2
+      if (center < Math.max(0, clip.left) || center > Math.min(innerWidth, clip.right) || anchor.bottom < 0 || anchor.top > innerHeight) {
+        setActive(null)
+        return
+      }
+      const box = popup.getBoundingClientRect()
+      const left = Math.max(8, Math.min(center - box.width / 2, innerWidth - box.width - 8))
+      const above = anchor.top - box.height - 8
+      const top = Math.max(8, Math.min(above >= 8 ? above : anchor.bottom + 8, innerHeight - box.height - 8))
+      setPosition({ left, top })
+    }
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !container.current?.contains(event.target) && !card.current?.contains(event.target)) setActive(null)
+    }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setActive(null) }
+    place()
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    document.addEventListener('pointerdown', outside)
+    document.addEventListener('keydown', escape)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+      document.removeEventListener('pointerdown', outside)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [active, width, days])
+  const selected = active ? days[active.index] : undefined
+  return <><p className="sr-only">날짜에 마우스를 올리거나 터치하면 상세 수치가 표시됩니다. 방향키로 날짜 이동, Enter로 고정, Escape로 닫기.</p>
+  <div ref={container} className="overflow-x-auto">
+    <svg className={`w-full ${size > 6 ? 'min-w-[560px]' : ''}`} viewBox={`0 0 ${width} 235`} role="group" aria-label={label}>
       {children(width)}
+      {days.map((day, index) => <rect key={day.date} ref={element => { targets.current[index] = element }}
+        data-chart-date={day.date} role="button" tabIndex={focused === index ? 0 : -1}
+        aria-label={`${day.date} · ${day.values.map(value => `${value.label} ${value.value === null ? '미수집' : number(value.value)}`).join(' · ')}`}
+        aria-describedby={active?.index === index ? tooltipId : undefined}
+        aria-pressed={active?.index === index && active.mode === 'pinned'}
+        x={xAt(index, size, width) - Math.min(44, xSpacing(size, width)) / 2} y="22"
+        width={Math.min(44, xSpacing(size, width))} height="176" rx="4"
+        fill={active?.index === index ? '#64748b' : 'transparent'} fillOpacity="0.08"
+        className="cursor-pointer outline-none focus-visible:stroke-blue-600 focus-visible:stroke-2"
+        onPointerEnter={event => { if (event.pointerType !== 'touch') show(index, 'hover') }} onPointerLeave={leave}
+        onFocus={() => { setFocused(index); show(index, 'focus') }}
+        onBlur={event => { if (active?.mode !== 'pinned' && (!(event.relatedTarget instanceof Node) || !container.current?.contains(event.relatedTarget))) dismiss() }}
+        onClick={() => toggle(index)}
+        onKeyDown={event => {
+          if (event.key === 'Escape') { event.preventDefault(); dismiss(); return }
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(index); return }
+          const next = event.key === 'ArrowRight' ? Math.min(size - 1, index + 1) : event.key === 'ArrowLeft' ? Math.max(0, index - 1)
+            : event.key === 'Home' ? 0 : event.key === 'End' ? size - 1 : null
+          if (next !== null) {
+            event.preventDefault()
+            targets.current[next]?.focus({ preventScroll: true })
+            targets.current[next]?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+          }
+        }} />)}
     </svg>
   </div>
+  {selected && createPortal(<div ref={card} id={tooltipId} role="tooltip" aria-label={`${selected.date} 상세 수치`}
+    className="fixed z-[100] max-h-[calc(100dvh-16px)] w-64 max-w-[calc(100vw-16px)] overflow-auto rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800 shadow-xl"
+    style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? 'visible' : 'hidden' }}
+    onPointerEnter={keepOpen} onPointerLeave={leave}>
+    <p className="mb-3 font-semibold text-slate-950">{Number(selected.date.slice(5, 7))}/{Number(selected.date.slice(8, 10))}</p>
+    <dl className="space-y-2">{selected.values.map(value => <div key={value.label} className="flex items-center justify-between gap-5">
+      <dt className="flex min-w-0 items-center gap-2"><span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: value.color }} />{value.label}</dt>
+      <dd className="shrink-0 font-semibold tabular-nums">{value.value === null ? '미수집' : number(value.value)}</dd>
+    </div>)}</dl>
+    <p className="mt-3 text-xs text-slate-500">다시 누르거나 바깥을 누르면 닫힙니다.</p>
+  </div>, document.body)}</>
 }
 function ChartGrid({ maximum, dates, width }: { maximum: number; dates: string[]; width: number }) {
   return <>
@@ -183,7 +278,10 @@ function VisitorChart({ data, days, today }: { data: ExternalDashboard; days?: D
   const maximum = Math.max(1, ...rows.flatMap(row => [row.visitorCount ?? 0, row.pageViewCount ?? 0]))
   return <>
     <div className="flex flex-wrap gap-4 text-xs"><span className="text-blue-700">● 방문자</span><span className="text-emerald-700">● 페이지뷰</span></div>
-    <ChartFrame size={rows.length} label="일별 방문자와 페이지뷰 추이. 정확한 수치는 아래 일별 수치 펼치기에서 확인할 수 있습니다.">{width => <>
+    <ChartFrame key={rows.map(row => row.date).join(',')} days={rows.map(row => ({ date: row.date, values: [
+      { label: '방문자', color: '#2563eb', value: row.visitorCount },
+      { label: '페이지뷰', color: '#059669', value: row.pageViewCount },
+    ] }))} label="일별 방문자와 페이지뷰 추이. 정확한 수치는 아래 일별 수치 펼치기에서 확인할 수 있습니다.">{width => <>
         <ChartGrid maximum={maximum} dates={rows.map(row => row.date)} width={width} />
         {(['visitorCount', 'pageViewCount'] as const).map((key, k) => <g key={key}>
           <path fill="none" stroke={k ? '#059669' : '#2563eb'} strokeWidth="2.5" d={rows.map((row, i) => row[key] === null ? '' : `${i && rows[i - 1][key] !== null ? 'L' : 'M'}${xAt(i, rows.length, width)},${yAt(row[key], maximum)}`).join(' ')} />
@@ -205,10 +303,13 @@ function MediaChart({ data, days: observations }: { data: ExternalDashboard; day
     if (Object.hasOwn(mediaColors, label)) grouped.get(row.date)!.set(label, (grouped.get(row.date)!.get(label) ?? 0) + row.count)
   }
   const media = Object.keys(mediaColors).filter(label => days.some(day => (grouped.get(day)!.get(label) ?? 0) > 0))
+  const tooltipMedia = Object.keys(mediaColors).filter(label => days.some(day => grouped.get(day)!.has(label)))
   const maximum = Math.max(1, ...days.map(day => media.reduce((total, label) => total + (grouped.get(day)!.get(label) ?? 0), 0)))
   return <>
     <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">{media.map(label => <span key={label} style={{ color: mediaColors[label] }}>● {label}</span>)}</div>
-    {media.length ? <ChartFrame size={days.length} label="매체별 일별 광고 유입. 정확한 수치는 아래 매체별 원본 수치 펼치기에서 확인할 수 있습니다.">{width => {
+    {media.length ? <ChartFrame key={days.join(',')} days={days.map(date => ({ date, values: tooltipMedia.map(label => ({
+      label, color: mediaColors[label], value: grouped.get(date)!.get(label) ?? null,
+    })) }))} label="매체별 일별 광고 유입. 정확한 수치는 아래 매체별 원본 수치 펼치기에서 확인할 수 있습니다.">{width => {
       const barWidth = Math.min(width < 560 ? 28 : 32, 500 / Math.max(1, days.length), xSpacing(days.length, width) * 0.75)
       return <>
       <ChartGrid maximum={maximum} dates={days} width={width} />

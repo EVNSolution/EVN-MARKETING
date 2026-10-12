@@ -67,6 +67,7 @@ export async function checkExternalDashboardUi({ page, context, db, base, upload
     if (output) await page.screenshot({ path: path.join(output, `external-dashboard-${width}.png`), fullPage: true })
   }
   await checkChartSpacing({ page, base, record, save, output })
+  await checkChartTooltips({ page, context, base, record, save, output })
   const historical = { date: '2026-08-31', view: { date: '2026-08-31', visitorCount: 77, pageViewCount: 88, collectedAt: '2026-09-28T00:00:00.000Z' },
     media: [{ date: '2026-08-31', media: '구글', count: 55, collectedAt: '2026-09-28T00:00:00.000Z' }] }
   const history = { format: 1, latest: record, days: [historical, ...dates.map(date => ({ date,
@@ -176,12 +177,12 @@ async function checkChartSpacing({ page, base, record, save, output }) {
         await page.getByRole('button', { name: '화면 새로고침', exact: true }).waitFor()
         await page.evaluate(() => document.fonts.ready)
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-        const charts = [page.getByRole('img', { name: /^일별 방문자와 페이지뷰 추이/ }),
-          page.getByRole('img', { name: /^매체별 일별 광고 유입/ })]
+        const charts = [page.getByRole('group', { name: /^일별 방문자와 페이지뷰 추이/ }),
+          page.getByRole('group', { name: /^매체별 일별 광고 유입/ })]
         const positions = [], readability = []
         for (const [index, chart] of charts.entries()) {
           const geometry = await chart.evaluate(svg => {
-            const marks = [...svg.querySelectorAll('circle, rect')]
+            const marks = [...svg.querySelectorAll('circle, rect:not([data-chart-date])')]
             const x = element => element.tagName === 'circle' ? Number(element.getAttribute('cx'))
               : Number(element.getAttribute('x')) + Number(element.getAttribute('width')) / 2
             const grid = svg.querySelector('line')
@@ -225,7 +226,7 @@ async function checkChartSpacing({ page, base, record, save, output }) {
           if (output && count !== 3) await viewport.screenshot({ path: path.join(output, `dashboard-spacing-${width}-${count}d-${index ? 'media' : 'visitors'}.png`) })
           if (geometry.svgWidth > geometry.containerWidth + 1) {
             await viewport.evaluate(element => { element.scrollLeft = element.scrollWidth })
-            const lastMark = await chart.locator('circle, rect').last().boundingBox()
+            const lastMark = await chart.locator('circle, rect:not([data-chart-date])').last().boundingBox()
             const bounds = await viewport.boundingBox()
             assert.ok(lastMark.x >= bounds.x && lastMark.x + lastMark.width <= bounds.x + bounds.width, 'last date remains reachable by horizontal scrolling')
             if (output) await viewport.screenshot({ path: path.join(output, `dashboard-spacing-${width}-${count}d-${index ? 'media' : 'visitors'}-right.png`) })
@@ -242,5 +243,133 @@ async function checkChartSpacing({ page, base, record, save, output }) {
     }
     if (output) await writeFile(path.join(output, 'dashboard-spacing-qa.json'), JSON.stringify(results, null, 2) + '\n')
     console.log('Chart spacing passed: 1440/390/320px, 1/2/3/6/30 days, centered spacing, readable labels, sufficient height, no overlaps, line/point/bar/date alignment')
+  } finally { record.data = original; await save() }
+}
+
+async function checkChartTooltips({ page, context, base, record, save, output }) {
+  const original = record.data
+  const evidence = []
+  const chartNames = [/^일별 방문자와 페이지뷰 추이/, /^매체별 일별 광고 유입/]
+  const storageState = await context.storageState()
+  const load = async view => {
+    await view.goto(base + '/external-dashboard')
+    await view.getByRole('button', { name: '화면 새로고침', exact: true }).waitFor()
+  }
+  async function checkCard(view, date, expected) {
+    const card = view.getByRole('tooltip', { name: `${date} 상세 수치`, exact: true })
+    await card.waitFor({ state: 'visible' })
+    assert.equal(await card.locator('p').first().innerText(), `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`)
+    const values = await card.locator('dl > div').evaluateAll(rows => rows.map(row => ({
+      label: row.querySelector('dt').textContent.trim(), value: row.querySelector('dd').textContent.trim(),
+      color: row.querySelector('dt span').style.backgroundColor,
+    })))
+    assert.deepEqual(values.map(({ label, value }) => [label, value]), expected)
+    assert.ok(values.every(value => value.color), 'each series has its colored marker')
+    const bounds = await card.boundingBox(), viewport = view.viewportSize()
+    assert.ok(bounds.x >= 7 && bounds.y >= 7 && bounds.x + bounds.width <= viewport.width - 7
+      && bounds.y + bounds.height <= viewport.height - 7, 'tooltip stays inside the visible viewport')
+    return { card, bounds, values }
+  }
+  try {
+    for (const width of [1440, 390, 320]) {
+      const touch = width < 1000
+      const mobile = touch ? await context.browser().newContext({ storageState, viewport: { width, height: 1000 }, hasTouch: true, isMobile: true }) : null
+      if (mobile) await mobile.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort())
+      const view = mobile ? await mobile.newPage() : page
+      view.setDefaultTimeout(15000)
+      await view.setViewportSize({ width, height: 1000 })
+      try {
+        for (const count of [1, 2, 30]) {
+          const dates = Array.from({ length: count }, (_, i) => `2026-09-${String((count === 30 ? 1 : 23) + i).padStart(2, '0')}`)
+          record.data = { ...original, aggregationDates: dates,
+            monthlyViews: dates.map((date, i) => ({ date, visitorCount: 1359 + i, pageViewCount: 1489 + i })),
+            monthlyAdViews: dates.flatMap((date, i) => [
+              { date, media: '구글', count: 400 + i }, { date, media: '네이버', count: 500 + i },
+              ...(i === 0 ? [{ date, media: '메타', count: 0 }] : []),
+            ]),
+          }
+          await save(); await load(view)
+          if (touch) await view.evaluate(() => { window.tooltipPointers = []; document.addEventListener('pointerdown', event => window.tooltipPointers.push(event.pointerType)) })
+          for (const [kind, name] of chartNames.entries()) {
+            const chart = view.getByRole('group', { name })
+            for (const index of [...new Set([0, count - 1])]) {
+              const date = dates[index], target = chart.locator(`[data-chart-date="${date}"]`)
+              const expected = kind === 0 ? [['방문자', (1359 + index).toLocaleString('ko-KR')], ['페이지뷰', (1489 + index).toLocaleString('ko-KR')]]
+                : [['구글', String(400 + index)], ['네이버', String(500 + index)], ['메타', index === 0 ? '0' : '미수집']]
+              if (touch) await target.tap(); else await target.hover()
+              const { card, bounds, values } = await checkCard(view, date, expected)
+              if (output) await view.screenshot({ path: path.join(output, `tooltip-${width}-${count}d-${kind ? 'media' : 'visitors'}-${index ? 'last' : 'first'}.png`) })
+              evidence.push({ viewport: width, input: touch ? 'touch' : 'mouse', days: count, date, kind, bounds, values })
+              if (touch) {
+                await card.tap()
+                assert.equal(await card.isVisible(), true, 'touching the card does not dismiss it unexpectedly')
+                await target.tap()
+                await card.waitFor({ state: 'hidden' })
+              } else {
+                await card.hover()
+                // Outlast the hover close delay to detect flicker when crossing into the card.
+                await view.waitForTimeout(300)
+                assert.equal(await card.isVisible(), true, 'moving onto the tooltip keeps it open')
+                await view.keyboard.press('Escape')
+                await card.waitFor({ state: 'hidden' })
+              }
+            }
+            if (!touch) {
+              const first = chart.locator('[data-chart-date]').first()
+              await first.focus()
+              await view.getByRole('tooltip', { name: `${dates[0]} 상세 수치`, exact: true }).waitFor()
+              if (count > 1) {
+                await view.keyboard.press('ArrowRight')
+                await view.getByRole('tooltip', { name: `${dates[1]} 상세 수치`, exact: true }).waitFor()
+                await view.keyboard.press('End')
+                await view.getByRole('tooltip', { name: `${dates.at(-1)} 상세 수치`, exact: true }).waitFor()
+              }
+              await view.keyboard.press('Escape')
+              await view.getByRole('tooltip').waitFor({ state: 'hidden' })
+              await view.keyboard.press('Enter')
+              await view.getByRole('tooltip').waitFor()
+              await view.keyboard.press('Enter')
+              await view.getByRole('tooltip').waitFor({ state: 'hidden' })
+              await first.evaluate(element => element.blur())
+            }
+          }
+          if (touch) assert.ok((await view.evaluate(() => window.tooltipPointers)).every(type => type === 'touch'), 'mobile cases use real touch input')
+          if (count === 30) {
+            const chart = view.getByRole('group', { name: chartNames[0] })
+            const first = chart.locator('[data-chart-date]').first()
+            if (touch) {
+              await first.tap()
+              await view.getByRole('tooltip').waitFor()
+              await chart.locator('..').evaluate(element => { element.scrollLeft = element.scrollWidth })
+              await view.getByRole('tooltip').waitFor({ state: 'hidden' })
+              await chart.locator('[data-chart-date]').last().tap()
+            } else await first.click()
+            const changed = view.waitForResponse(response => response.url().includes('/api/external-dashboard?'))
+            await view.getByLabel('성과 시작일', { exact: true }).fill(dates.at(-1))
+            await view.getByLabel('성과 종료일', { exact: true }).fill(dates.at(-1))
+            await view.getByRole('button', { name: '기간 조회', exact: true }).click()
+            await changed
+            await view.getByRole('button', { name: '화면 새로고침', exact: true }).waitFor()
+            assert.equal(await view.getByRole('tooltip').count(), 0, 'changing the period clears the old tooltip')
+            assert.equal(await chart.locator('[data-chart-date]').count(), 1)
+          }
+        }
+      } finally { if (mobile) await mobile.close() }
+    }
+    // A real zero and an absent observation remain distinguishable, including keyboard access to missing days.
+    record.data = { ...original, aggregationDates: ['2026-09-23', '2026-09-25'],
+      monthlyViews: [{ date: '2026-09-23', visitorCount: 0, pageViewCount: 0 }, { date: '2026-09-25', visitorCount: 7, pageViewCount: 9 }],
+      monthlyAdViews: [{ date: '2026-09-23', media: '구글', count: 1 }],
+    }
+    await save(); await page.setViewportSize({ width: 1440, height: 1000 }); await load(page)
+    const chart = page.getByRole('group', { name: chartNames[0] })
+    await chart.locator('[data-chart-date="2026-09-23"]').focus()
+    await checkCard(page, '2026-09-23', [['방문자', '0'], ['페이지뷰', '0']])
+    await page.keyboard.press('ArrowRight')
+    await checkCard(page, '2026-09-24', [['방문자', '미수집'], ['페이지뷰', '미수집']])
+    if (output) await page.screenshot({ path: path.join(output, 'tooltip-missing-keyboard.png') })
+    await page.keyboard.press('Escape')
+    if (output) await writeFile(path.join(output, 'tooltip-qa.json'), JSON.stringify(evidence, null, 2) + '\n')
+    console.log('Chart tooltips passed: PC hover/card handoff, real 390/320 touch, keyboard/arrows/Enter/Escape, 1/2/30-day edges, scroll dismissal, range reset, zero versus missing, viewport bounds')
   } finally { record.data = original; await save() }
 }
