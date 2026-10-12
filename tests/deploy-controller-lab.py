@@ -216,8 +216,8 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         docker('volume', 'create', 'evn-marketing-data')
         docker('run', '-d', '--name', 'marketing-lab-registry', '-p', '127.0.0.1:5000:5000', 'registry:2')
         proxy_tag = '127.0.0.1:5000/evn-marketing-proxy:ci'
-        docker('build', '--builder', 'default', '--platform', 'linux/amd64', '-f', 'deploy/Dockerfile.proxy',
-               '-t', 'evn-marketing:proxy-ci', '-t', proxy_tag, str(ROOT))
+        docker('image', 'inspect', 'evn-marketing:proxy-ci')
+        docker('tag', 'evn-marketing:proxy-ci', proxy_tag)
         docker('push', proxy_tag)
         fixture = root / 'fixture'
         shutil.copy(ROOT / 'tests/deploy-lab-worker.mjs', fixture / 'worker.mjs')

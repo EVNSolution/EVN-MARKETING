@@ -31,9 +31,6 @@
     "worker:inquiries": "tsx workers/inquiry-sync.ts",
     "preview:inquiries": "tsx tests/setup-inquiry-preview.ts",
     "warp:delivery": "tsx scripts/warp-delivery.ts",
-    "deploy:check": "python3 deploy/aws/operator-release.py check",
-    "deploy:publish": "python3 deploy/aws/operator-release.py publish",
-    "deploy:publish-ops": "python3 deploy/aws/operator-release.py publish-ops",
     "deploy": "python3 deploy/aws/operator-release.py release",
     "deploy:rollback": "python3 deploy/aws/operator-release.py rollback"
   },

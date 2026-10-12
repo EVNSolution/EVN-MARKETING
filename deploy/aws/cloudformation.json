@@ -5,8 +5,11 @@
     "EnableGitHubRelease": {
       "Type": "String",
       "Default": "false",
-      "AllowedValues": ["false", "true"],
-      "Description": "Enable the GitHub OIDC release role only after private environment approval protections are verified. Leave false for administrator deployment."
+      "AllowedValues": [
+        "false",
+        "true"
+      ],
+      "Description": "Enable the GitHub role after verifying the exact immutable OIDC subject and main-only production environment."
     },
     "MarketingDataVolumeId": {
       "Type": "String",
@@ -32,7 +35,12 @@
   },
   "Conditions": {
     "GitHubReleaseEnabled": {
-      "Fn::Equals": [{"Ref": "EnableGitHubRelease"}, "true"]
+      "Fn::Equals": [
+        {
+          "Ref": "EnableGitHubRelease"
+        },
+        "true"
+      ]
     }
   },
   "Resources": {
@@ -108,7 +116,7 @@
                   "import stat",
                   "import subprocess",
                   "",
-                  "BUNDLE = (\"deploy/controller.py\", \"deploy/nginx-config.mjs\")",
+                  "BUNDLE = (\"deploy/controller.py\", \"deploy/nginx-config.mjs\", \"deploy/start-release.py\")",
                   "",
                   "def run():",
                   "    action = os.environ.get(\"SSM_Action\", \"\")",
@@ -137,7 +145,7 @@
                   "                       + \"  \" + name + \"\\n\" for name in BUNDLE)",
                   "    if hashlib.sha256(manifest.encode()).hexdigest() != expected:",
                   "        raise ValueError(\"installed controller bundle mismatch\")",
-                  "    command = [\"/usr/bin/python3\", \"-I\", str(root / \"deploy/controller.py\"), action]",
+                  "    command = [\"/usr/bin/python3\", \"-I\", str(root / \"deploy/start-release.py\"), action]",
                   "    if action == \"release\":",
                   "        command += [\"--revision\", revision, \"--digest\", digest]",
                   "    # Fixed config is the controller default. No path/command is supplied by CI.",
@@ -156,7 +164,7 @@
                   "        run()",
                   "    except Exception:",
                   "        raise SystemExit(\"Marketing controller refused or failed; administrator review required\")",
-                  "    print(\"Marketing controller completed\")",
+                  "    print(\"Marketing activated; host observation continues for 1800 seconds\")",
                   "PY"
                 ]
               }
@@ -221,7 +229,9 @@
                     "ecr:UploadLayerPart",
                     "ecr:CompleteLayerUpload",
                     "ecr:PutImage",
-                    "ecr:DescribeImageScanFindings"
+                    "ecr:DescribeImageScanFindings",
+                    "ecr:BatchGetImage",
+                    "ecr:GetDownloadUrlForLayer"
                   ],
                   "Resource": {
                     "Fn::GetAtt": [
@@ -410,25 +420,56 @@
                 },
                 {
                   "Effect": "Allow",
-                  "Action": ["ec2:CreateSnapshot"],
-                  "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:volume/${MarketingDataVolumeId}"},
-                  "Condition": {"StringEquals": {"aws:RequestedRegion": "ap-northeast-2"}}
-                },
-                {
-                  "Effect": "Allow",
-                  "Action": ["ec2:CreateSnapshot"],
-                  "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2::snapshot/*"},
+                  "Action": [
+                    "ec2:CreateSnapshot"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:volume/${MarketingDataVolumeId}"
+                  },
                   "Condition": {
-                    "StringEquals": {"aws:RequestedRegion": "ap-northeast-2", "aws:RequestTag/Service": "evn-marketing"},
-                    "Null": {"aws:RequestTag/BackupId": "false"},
-                    "ForAllValues:StringEquals": {"aws:TagKeys": ["Service", "BackupId"]}
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
                   }
                 },
                 {
                   "Effect": "Allow",
-                  "Action": ["ec2:CreateTags"],
-                  "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2::snapshot/*"},
-                  "Condition": {"StringEquals": {"ec2:CreateAction": "CreateSnapshot", "aws:RequestedRegion": "ap-northeast-2"}}
+                  "Action": [
+                    "ec2:CreateSnapshot"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2::snapshot/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2",
+                      "aws:RequestTag/Service": "evn-marketing"
+                    },
+                    "Null": {
+                      "aws:RequestTag/BackupId": "false"
+                    },
+                    "ForAllValues:StringEquals": {
+                      "aws:TagKeys": [
+                        "Service",
+                        "BackupId"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:CreateTags"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:ap-northeast-2::snapshot/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:CreateAction": "CreateSnapshot",
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
                 }
               ]
             }

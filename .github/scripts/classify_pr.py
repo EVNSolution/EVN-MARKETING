@@ -107,7 +107,7 @@ def changed_paths(repo, base, head):
 
 
 def decide(event, base, head, repo):
-    if event != 'pull_request':
+    if event not in ('pull_request', 'push'):
         return True, True
     try:
         return classify_paths(changed_paths(repo, base, head))

@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[2]
-BUNDLE = ("deploy/controller.py", "deploy/nginx-config.mjs")
+BUNDLE = ("deploy/controller.py", "deploy/nginx-config.mjs", "deploy/start-release.py")
 REGION = "ap-northeast-2"
 REPOSITORY = "EVNSolution/EVN-MARKETING"
 DOCUMENT = "EVN-Marketing-Release"
@@ -181,7 +181,7 @@ def dispatch(digest, *, manual=False):
                           f"Image: {digest}\n\nController bundle: {request['Parameters']['BundleSha256'][0]}\n\n"
                           f"SSM command: {command}\n")
     # Only status/code are requested. Remote stdout/stderr never enter CI logs/artifacts.
-    for _ in range(390):
+    for _ in range(100):
         result = subprocess.run([
             "aws", "ssm", "get-command-invocation", "--command-id", command,
             "--instance-id", request["InstanceIds"][0], "--region", REGION,
@@ -193,7 +193,7 @@ def dispatch(digest, *, manual=False):
         else:
             invocation = json.loads(result.stdout)
             if invocation.get("Status") == "Success" and invocation.get("ResponseCode") == 0:
-                print("SSM command succeeded; operational acceptance remains separate")
+                print("SSM activation succeeded; host observation continues; operational acceptance remains separate")
                 return
             if invocation.get("Status") not in ("Pending", "InProgress", "Delayed"):
                 raise RuntimeError("SSM command did not succeed; inspect command ID before retry")
