@@ -188,7 +188,9 @@ def run_recovery(controller_class, root, releases, fixture_lease_ms):
         state = controller.state
         _check(state['phase'] == 'stable' and state['active'] == origin
                and not state.get('origin') and not state.get('candidate'), 'origin_not_restored')
-        controller.healthy_web(origin, public=True)
+        # The actual recovery already required three spaced successful probes.
+        # Independently check the final response without repeating that startup wait.
+        controller.probe(origin, public=True)
         controller.worker_ready(origin)
         _check(controller.gate(origin).read_text() == 'active\n', 'worker_not_activated')
         leases = _node(controller, LEASE_SCRIPT)

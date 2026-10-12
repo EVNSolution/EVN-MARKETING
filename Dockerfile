@@ -64,9 +64,9 @@ USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 
 FROM base AS browser
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app
-COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
+COPY --from=dependencies /app/node_modules/playwright-core ./node_modules/playwright-core
 RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
 # CVE-2026-46675: refresh libpng after any cached Chromium dependencies.

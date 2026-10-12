@@ -22,7 +22,7 @@ python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
 - runtime, operations, 고정 schema bridge, proxy는 각각 BuildKit GHA cache를 사용한다. operations는 잠금 파일의 Prisma·dotenv·SQLite 의존성만 오프라인으로 남기고 버전·무결성 값이 바뀌지 않았는지 검사한다. Next 빌드 결과를 복사하지 않는다.
 - runtime/proxy 준비 후 기본 검사, controller 검사, compatibility 준비·검사를 자동으로 병렬 실행한다. main의 이미지 업로드·scan도 겹쳐 실행하지만 모든 필수 검사 성공 후에만 배포 receipt를 승격한다. 배포는 기존처럼 전체 main CI 성공도 확인한다.
 - controller fixture는 동일한 application stage와 기본 OS를 사용하고 사용하지 않는 Chromium만 제외한다. 실제 배포 이미지는 Chromium을 유지하며 기본 검사와 구버전 호환 브라우저 검사를 실행한다.
-- 정상 응답 3회 사이에는 각각 1초를 기다리며 마지막 성공 뒤의 불필요한 대기는 하지 않는다. 스키마 메타데이터는 이미지별 한 컨테이너로 읽지만 DB·migration ledger·integrity는 매 호출 다시 검사한다.
+- 운영 컨트롤러는 정상 응답 3회 사이에 각각 1초를 기다리며 마지막 성공 뒤의 불필요한 대기는 하지 않는다. 스키마 메타데이터는 이미지별 한 컨테이너로 읽지만 DB·migration ledger·integrity는 매 호출 다시 검사한다. 복구 테스트는 이 검증을 마친 컨트롤러의 최종 공개 응답을 독립 확인하고 동일한 시작 대기를 중복하지 않는다.
 - 실행자가 선택하는 빠른 모드나 생략 옵션은 없다. 단계별 시간과 controller 명령·대기 시간은 Actions 요약 및 `marketing-ci-timings-*` artifact에 자동 기록된다.
 - main CI의 검증 이미지를 배포에서 그대로 사용한다. 배포에서는 재빌드하지 않는다.
 - 분류 경계 selftest와 workflow YAML parse를 확인하고 Linux CI에서 실제 선택된 경로·시나리오 수·실행 시간을 기록합니다. 최종 선택형 CI의 시간 실측치는 해당 실행 이후에만 기재합니다.

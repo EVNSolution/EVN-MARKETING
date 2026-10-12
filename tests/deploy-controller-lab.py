@@ -316,7 +316,8 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
                 raise AssertionError('injected source failure was not rejected')
             except m.Blocked as error:
                 assert str(error) == 'release_reverted', str(error)
-            controller.healthy_web(a, public=True)
+            # restore_origin already runs the full readiness sequence.
+            controller.probe(a, public=True)
             assert controller.state['active']['digest'] == a['digest']
         result = docker('exec', controller.web_name(controller.state['active']), 'node', '-e', "const D=require('better-sqlite3');const d=new D('/data/marketing.db',{readonly:true});if(d.pragma('integrity_check',{simple:true})!=='ok'||d.prepare('SELECT count(*) n FROM User').get().n!==1||d.prepare('SELECT memo FROM Customer WHERE id=?').get('synthetic-parallel').memo!=='synthetic worker committed after activation')process.exit(1);console.log('data_preserved')")
         assert result == 'data_preserved'
