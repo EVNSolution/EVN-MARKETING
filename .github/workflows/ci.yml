@@ -13,6 +13,29 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npx prisma generate
+      - name: Homepage intake and duplicate submission checks
+        run: npm run test:landing
+      - name: External dashboard read-only collection and private storage
+        run: npm run test:external-dashboard
+      - name: Release controller and cloud declaration checks
+        run: python3 tests/start-release.test.py && python3 tests/release-artifact.test.py && python3 tests/selective-ci.test.py && python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/operator-release.test.py && python3 tests/landing-expand.test.py && python3 tests/deploy-controller-lab.py --self-test
+      - name: Offline backup and bounded receipt recovery
+        run: npm run test:backup && npm run test:warp-recovery
+      - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
+  images:
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || 'ci' }}
     permissions:
@@ -38,17 +61,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
-      - name: Homepage intake and duplicate submission checks
-        run: npm run test:landing
-      - name: External dashboard read-only collection and private storage
-        run: npm run test:external-dashboard
-      - name: Release controller and cloud declaration checks
-        run: python3 tests/start-release.test.py && python3 tests/release-artifact.test.py && python3 tests/selective-ci.test.py && python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/operator-release.test.py && python3 tests/landing-expand.test.py && python3 tests/deploy-controller-lab.py --self-test
-      - name: Offline backup and bounded receipt recovery
-        run: npm run test:backup && npm run test:warp-recovery
-      - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build runtime once
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
@@ -97,7 +110,7 @@ jobs:
           cache-from: type=gha,scope=marketing-bridge-d6d7df8
           cache-to: type=gha,mode=max,scope=marketing-bridge-d6d7df8
       - name: Cache test proxy
-        if: steps.changes.outputs.compat == 'true'
+        if: steps.changes.outputs.compat == 'true' || steps.changes.outputs.controller == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
@@ -131,14 +144,29 @@ jobs:
           test "$started" = true
           docker exec marketing-smoke node /src/tests/readiness-http.mjs
           docker exec marketing-smoke node /src/tests/mvp-browser.mjs
-      - name: Two-image browser and concurrent upload compatibility
-        if: steps.changes.outputs.compat == 'true'
-        timeout-minutes: 12
-        run: bash tests/release-compat.sh
-      - name: Isolated release controller Docker lab
-        if: steps.changes.outputs.controller == 'true'
+      - name: Run independent compatibility and controller labs together
+        if: steps.changes.outputs.compat == 'true' || steps.changes.outputs.controller == 'true'
         timeout-minutes: 25
-        run: python3 tests/deploy-controller-lab.py
+        env:
+          CHECK_COMPAT: ${{ steps.changes.outputs.compat }}
+          CHECK_CONTROLLER: ${{ steps.changes.outputs.controller }}
+        run: |
+          pids=()
+          logs=()
+          if [ "$CHECK_COMPAT" = true ]; then
+            bash tests/release-compat.sh > "$RUNNER_TEMP/compat.log" 2>&1 &
+            pids+=("$!"); logs+=("$RUNNER_TEMP/compat.log")
+          fi
+          if [ "$CHECK_CONTROLLER" = true ]; then
+            python3 tests/deploy-controller-lab.py > "$RUNNER_TEMP/controller.log" 2>&1 &
+            pids+=("$!"); logs+=("$RUNNER_TEMP/controller.log")
+          fi
+          failed=0
+          for index in "${!pids[@]}"; do
+            wait "${pids[$index]}" || failed=1
+            cat "${logs[$index]}"
+          done
+          exit "$failed"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: steps.changes.outputs.compat == 'true'
         with:

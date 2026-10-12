@@ -58,7 +58,10 @@ MARKETING_SSM_DOCUMENT_VERSION, MARKETING_SSM_DOCUMENT_SHA256.
 
 ## CI 비용
 
+코드 검사와 이미지 검사는 별도 job으로 병렬 실행한다. 배포는 전체 CI 성공을 요구한다.
 runtime·operations·고정 schema bridge·proxy에 각각 BuildKit GHA cache scope를 사용한다.
+호환 검사와 controller lab은 별도 Docker 이름·네트워크·볼륨을 사용하여 병렬 실행한다.
+같은 proxy 이미지를 두 검사에서 재사용한다.
 operations와 bridge는 compatibility 경로에서만 준비한다.
 일반 화면은 compatibility, worker/배포는 controller lab을 추가한다.
 공유 코드·의존성·API·schema·CI 변경이나 분류 실패는 둘 다 검사한다.
