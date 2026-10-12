@@ -111,7 +111,17 @@ try {
       }))
       cycle++
       writeFileSync('/control/traffic-ready', 'ready\n')
+      if (process.argv[2] === 'seed-recovery') break
       await delay(1000)
+    }
+    if (process.argv[2] === 'seed-recovery') {
+      // Populate recovery's baseline through the real API, including an upload.
+      // The transitions suite separately checks interrupted uploads and old workers.
+      const revision = JSON.parse((await request('/api/readyz')).body).revision
+      const { body, headers: extra } = multipart('%PDF-synthetic-recovery-baseline')
+      const doc = JSON.parse((await request('/api/customers/synthetic-held/documents', 'POST', body,
+        { ...extra, 'x-deployment-id': revision })).body).doc
+      assert.equal((await request(doc.path)).body.toString(), '%PDF-synthetic-recovery-baseline')
     }
     assert.ok(cycle > 0)
     assert.equal(db.pragma('integrity_check', { simple: true }), 'ok')
@@ -119,7 +129,10 @@ try {
     writeFileSync('/control/traffic-result.json', JSON.stringify({ ...counters, cycles: cycle }))
   }
 } catch (error) {
-  console.error(JSON.stringify({ ok: false, httpStatus: failedStatus, errorType: error.name }))
+  const known = new Set(['held_request_timeout', 'synthetic_request_timeout', 'synthetic_http_failure'])
+  console.error(JSON.stringify({ ok: false, httpStatus: failedStatus, errorType: error.name,
+    reason: known.has(error.message) ? error.message : 'synthetic_request_failed',
+    code: ['ECONNRESET', 'EPIPE', 'ECONNREFUSED'].includes(error.code) ? error.code : null }))
   writeFileSync('/control/traffic-failed', 'synthetic_traffic_failed\n')
   process.exitCode = 1
 }

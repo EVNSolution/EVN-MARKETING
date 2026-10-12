@@ -187,19 +187,25 @@ class Controller:
             except Exception:
                 consecutive = 0
                 require(self.now() < deadline, 'readiness')
-            self.wait(1)
+            if consecutive < 3:
+                self.wait(1)
 
     def check_schema(self, release, other):
         manifests = []
+        verified = {}
         for item in (release, other):
-            capability = self.docker('run', '--rm', '--network', 'none', '--entrypoint', 'cat', self.image(item), '/app/worker-activation.version')
-            require(capability.strip() == '1', 'worker_gate_unsupported')
+            # Read both immutable files in one container. Reuse only within this call,
+            # keyed by digest and revision; the live database is still checked each time.
+            key = (item['digest'], item['revision'])
+            if key not in verified:
+                value = json.loads(self.docker('run', '--rm', '--network', 'none', self.image(item), 'node', '-e',
+                    "const f=require('fs');console.log(JSON.stringify({capability:f.readFileSync('/app/worker-activation.version','utf8'),manifest:f.readFileSync('/app/schema-manifest.json','utf8')}))"))
+                require(value['capability'].strip() == '1', 'worker_gate_unsupported')
+                require(json.loads(value['manifest'])['revision'] == item['revision'], 'manifest_identity')
+                verified[key] = value['manifest']
             directory = self.root / 'releases' / item['revision']
             directory.mkdir(exist_ok=True)
-            text = self.docker('run', '--rm', '--network', 'none', '--entrypoint', 'cat',
-                               self.image(item), '/app/schema-manifest.json')
-            require(json.loads(text)['revision'] == item['revision'], 'manifest_identity')
-            atomic(directory / 'schema.json', text)
+            atomic(directory / 'schema.json', verified[key])
             os.chmod(directory / 'schema.json', 0o644)
             manifests.append(directory / 'schema.json')
         result = self.docker('run', '--rm', '--network', 'none',

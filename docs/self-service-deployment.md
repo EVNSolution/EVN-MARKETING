@@ -58,10 +58,10 @@ MARKETING_SSM_DOCUMENT_VERSION, MARKETING_SSM_DOCUMENT_SHA256.
 
 ## CI 비용
 
-코드 검사와 이미지 검사는 별도 job으로 병렬 실행한다. 배포는 전체 CI 성공을 요구한다.
+코드 검사, 배포용 runtime 빌드·검사, controller 전용 이미지 빌드를 병렬 실행한다. 작은 controller 이미지만 transitions·recovery 작업에 자동 전달한다. runtime은 빌드한 환경에서 바로 검사·게시한다. 최종 images gate가 모든 필수 작업과 검사 증거를 대조한다. 배포는 전체 CI 성공을 요구한다.
 runtime·operations·고정 schema bridge·proxy에 각각 BuildKit GHA cache scope를 사용한다.
-호환 검사와 controller lab은 별도 Docker 이름·네트워크·볼륨을 사용하여 병렬 실행한다.
-같은 proxy 이미지를 두 검사에서 재사용한다.
+브라우저 검사와 두 controller 작업은 독립 실행 환경에서 실행한다. 복구 8개 시나리오는 한 DB에서 순서대로 실행하며 신규 데이터 보존을 계속 확인한다.
+proxy는 같은 고정 Dockerfile과 캐시를 사용한다.
 operations와 bridge는 compatibility 경로에서만 준비한다.
 검사 선택은 `.github/scripts/classify_pr.py`가 Git 변경 경로로 결정한다.
 실행자·PR label·수동 입력으로 검사를 생략할 수 없다.
@@ -80,6 +80,7 @@ main 이미지는 실제 merge SHA로 검증한다.
 실제 시간 합성 관찰이 필요하면 Linux에서 다음 명령을 실행한다.
 
 ```sh
+docker build --target application --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:controller-base .
 python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
 ```
 

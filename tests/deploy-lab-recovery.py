@@ -171,6 +171,7 @@ def run_recovery(controller_class, root, releases, fixture_lease_ms):
     records, completed = [], []
     prefix = 'synthetic-recovery-' + uuid.uuid4().hex + '-'
     expected_data = None
+    scenario_started = time.monotonic()
 
     def data(controller, write=None):
         return _node(controller, DATA_SCRIPT, json.dumps({'ids': records, 'write': write}))
@@ -187,7 +188,9 @@ def run_recovery(controller_class, root, releases, fixture_lease_ms):
         state = controller.state
         _check(state['phase'] == 'stable' and state['active'] == origin
                and not state.get('origin') and not state.get('candidate'), 'origin_not_restored')
-        controller.healthy_web(origin, public=True)
+        # The actual recovery already required three spaced successful probes.
+        # Independently check the final response without repeating that startup wait.
+        controller.probe(origin, public=True)
         controller.worker_ready(origin)
         _check(controller.gate(origin).read_text() == 'active\n', 'worker_not_activated')
         leases = _node(controller, LEASE_SCRIPT)
@@ -202,9 +205,12 @@ def run_recovery(controller_class, root, releases, fixture_lease_ms):
             controller_class(root).recover()
 
     def done(label):
+        nonlocal scenario_started
         stable()
         completed.append(label)
-        print(json.dumps({'recoveryScenario': label, 'ok': True}), flush=True)
+        print(json.dumps({'recoveryScenario': label, 'ok': True,
+                          'seconds': round(time.monotonic() - scenario_started, 2)}), flush=True)
+        scenario_started = time.monotonic()
 
     try:
         expected_data = data(stable())

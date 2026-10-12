@@ -437,6 +437,40 @@ class Tests(unittest.TestCase):
             self.c.release('bad', 'bad')
         self.assertEqual(self.c.events, [])
 
+    def test_readiness_keeps_three_consecutive_probes_with_spacing(self):
+        c = module.Controller(self.root)
+        for responses, calls, waits in (([None] * 3, 3, 2),
+                                       ([None, module.Blocked('readiness'), None, None, None], 5, 4)):
+            with self.subTest(calls=calls), patch.object(c, 'identity'), \
+                    patch.object(c, 'probe', side_effect=responses) as probe, patch.object(c, 'wait') as wait:
+                c.healthy_web(A, public=True)
+                self.assertEqual(probe.call_count, calls)
+                self.assertEqual(wait.call_count, waits)
+                self.assertTrue(all(call.args == (1,) for call in wait.call_args_list))
+
+    def test_schema_batches_metadata_but_rechecks_live_database(self):
+        c = module.Controller(self.root)
+        (self.root / 'releases').mkdir()
+        def metadata(release):
+            return json.dumps({'capability': '1\n', 'manifest': json.dumps({'revision': release['revision']})})
+        for other in (A, B):
+            replies = [metadata(A)] + ([] if other == A else [metadata(B)]) + [json.dumps({'ok': True})]
+            with self.subTest(other=other['slot']), patch.object(c, 'docker', side_effect=replies * 2) as docker:
+                c.check_schema(A, other)
+                c.check_schema(A, other)
+                self.assertEqual(docker.call_count, len(replies) * 2)
+                for call in (docker.call_args_list[len(replies) - 1], docker.call_args_list[-1]):
+                    self.assertIn(self.c.config['volume'] + ':/data', call.args)
+                    self.assertIn('schema-check.mjs', call.args)
+        for value, reason in (({'capability':'0', 'manifest':json.dumps({'revision':A['revision']})}, 'worker_gate_unsupported'),
+                              ({'capability':'1', 'manifest':json.dumps({'revision':B['revision']})}, 'manifest_identity')):
+            with self.subTest(reason=reason), patch.object(c, 'docker', return_value=json.dumps(value)), \
+                    self.assertRaisesRegex(module.Blocked, reason):
+                c.check_schema(A, A)
+        with patch.object(c, 'docker', side_effect=[metadata(A), json.dumps({'ok': False})]), \
+                self.assertRaisesRegex(module.Blocked, '^schema$'):
+            c.check_schema(A, A)
+
 
 class CompatibilityReloadTests(unittest.TestCase):
     """A reload signal must not acknowledge a completed browser fixture switch."""

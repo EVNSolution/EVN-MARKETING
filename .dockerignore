@@ -28,6 +28,7 @@
 !scripts/landing-expansion-audit.mjs
 !scripts/data-backup.mjs
 !scripts/build-landing-public.mjs
+!scripts/migration-dependencies.mjs
 !previews/
 !previews/evn-landing/
 !previews/evn-landing/**

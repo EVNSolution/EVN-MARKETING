@@ -6,12 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && groupmod -n node ubuntu && usermod -l node -d /home/node -m ubuntu \
     && rm -rf /var/lib/apt/lists/*
 
-FROM base AS build
+FROM base AS dependencies
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
+
+FROM dependencies AS build
 COPY prisma.config.ts tsconfig.json next.config.ts postcss.config.mjs ./
 COPY prisma/schema.prisma prisma/schema.prisma
 COPY prisma/migrations prisma/migrations
@@ -41,16 +43,30 @@ RUN test -n "$MARKETING_BUILD_REVISION" \
     && ./node_modules/.bin/esbuild scripts/warp-recovery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-recovery.mjs \
     && ./node_modules/.bin/esbuild workers/health.ts --bundle --platform=node --format=esm --packages=external --outfile=worker-health.mjs
 
+FROM dependencies AS migration-dependencies
+COPY scripts/migration-dependencies.mjs scripts/migration-dependencies.mjs
+RUN node scripts/migration-dependencies.mjs prepare \
+    && npm prune --omit=dev --ignore-scripts --offline --no-audit --no-fund \
+    && node scripts/migration-dependencies.mjs verify
+
 FROM base AS operations
 WORKDIR /app
-COPY --from=build /app ./
+COPY --from=migration-dependencies /app/node_modules ./node_modules
+COPY --from=migration-dependencies /app/package.json /app/package-lock.json ./
+COPY prisma.config.ts ./
+COPY prisma/schema.prisma prisma/schema.prisma
+COPY prisma/migrations prisma/migrations
+COPY scripts/schema-check.mjs scripts/schema-compatibility.mjs scripts/landing-schema-policy.json ./scripts/
+ARG MARKETING_BUILD_REVISION
+RUN node scripts/schema-check.mjs manifest /app "$MARKETING_BUILD_REVISION" /app/schema-manifest.json \
+    && chmod 644 /app/schema-manifest.json
 USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 
-FROM base AS runtime
+FROM base AS browser
 ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app
-COPY --from=build /app/node_modules/playwright-core ./node_modules/playwright-core
+COPY --from=dependencies /app/node_modules/playwright-core ./node_modules/playwright-core
 RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
 # CVE-2026-46675: refresh libpng after any cached Chromium dependencies.
@@ -58,6 +74,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade libpng16-16t64 \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libpng16-16t64)" ge 1.6.43-5ubuntu0.7 \
     && rm -rf /var/lib/apt/lists/*
+
+# The controller lab replaces the collector with a synthetic worker. Its image
+# uses the exact same application files and base OS, without unused browsers.
+FROM base AS application
+ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
+WORKDIR /app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
@@ -77,6 +99,13 @@ COPY --from=build /app/node_modules/dotenv ./node_modules/dotenv
 COPY --from=build /app/node_modules/@prisma/adapter-better-sqlite3 ./node_modules/@prisma/adapter-better-sqlite3
 COPY --from=build /app/node_modules/@prisma/driver-adapter-utils ./node_modules/@prisma/driver-adapter-utils
 COPY --from=build /app/node_modules/@prisma/debug ./node_modules/@prisma/debug
+RUN mkdir -p /data/uploads && chown -R node:node /data
+USER node
+CMD ["node", "server.js"]
+
+FROM browser AS runtime
+ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
+COPY --from=application /app /app
 RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 CMD ["node", "server.js"]

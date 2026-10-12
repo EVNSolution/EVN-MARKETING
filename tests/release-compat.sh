@@ -70,10 +70,12 @@ for slot in blue green; do
     -e MARKETING_IMAGE_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
     -e WARP_DELIVERY_ENABLED=false "$image"
 done
+# Chromium can leave speculative sockets with no HTTP headers. Bound only their
+# idle lifetime in this fixture; request-body/read/drain deadlines stay unchanged.
 node --input-type=module - "$compat_dir" "$release_a" <<'NODE'
 import { writeFileSync } from 'node:fs';
 import { renderNginx } from './deploy/nginx-config.mjs';
-writeFileSync(`${process.argv[2]}/nginx/nginx.conf`, renderNginx({ active: { id: process.argv[3], slot: 'blue' } }));
+writeFileSync(`${process.argv[2]}/nginx/nginx.conf`, renderNginx({ active: { id: process.argv[3], slot: 'blue' } }).replace('http {', 'http {\n  client_header_timeout 5s;'));
 NODE
 docker run -d --name marketing-compat-proxy --network marketing-compat --network-alias proxy \
   -v "$compat_dir/nginx:/etc/nginx:ro" evn-marketing:proxy-ci nginx -g 'daemon off;'
@@ -97,7 +99,7 @@ import { writeFileSync, renameSync } from 'node:fs';
 import { renderNginx } from './deploy/nginx-config.mjs';
 const [directory, a, b, phase] = process.argv.slice(2);
 const previous = { id: a, slot: 'blue', expiresAt: phase === 'switch' ? Date.now() + 30 * 60_000 : Date.now() - 1 };
-writeFileSync(`${directory}/nginx/next.conf`, renderNginx({ active: { id: b, slot: 'green' }, previous }));
+writeFileSync(`${directory}/nginx/next.conf`, renderNginx({ active: { id: b, slot: 'green' }, previous }).replace('http {', 'http {\n  client_header_timeout 5s;'));
 renameSync(`${directory}/nginx/next.conf`, `${directory}/nginx/nginx.conf`);
 NODE
   docker exec marketing-compat-proxy nginx -t
