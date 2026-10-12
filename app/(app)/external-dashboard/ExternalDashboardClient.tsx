@@ -139,7 +139,12 @@ function Metric({ title, value, detail, small = false }: { title: string; value:
   </section>
 }
 
-const xAt = (index: number, size: number) => 65 + index * 700 / Math.max(1, size - 1)
+const xAt = (index: number, size: number) => {
+  // Keep short ranges together around the plot midpoint; leave 35px at each
+  // end of longer ranges so bars and date labels stay clear of the y-axis.
+  const spacing = Math.min(100, 630 / Math.max(1, size - 1))
+  return 415 + (index - (size - 1) / 2) * spacing
+}
 const yAt = (value: number, maximum: number) => 190 - value / Math.max(1, maximum) * 160
 function ChartGrid({ maximum, dates }: { maximum: number; dates: string[] }) {
   return <>
@@ -159,7 +164,7 @@ function VisitorChart({ data, days, today }: { data: ExternalDashboard; days?: D
   return <>
     <div className="flex flex-wrap gap-4 text-xs"><span className="text-blue-700">● 방문자</span><span className="text-emerald-700">● 페이지뷰</span></div>
     <div className="overflow-x-auto">
-      <svg className="w-full min-w-[560px]" viewBox="0 0 820 235" role="img" aria-label="일별 방문자와 페이지뷰 추이. 정확한 수치는 아래 일별 수치 펼치기에서 확인할 수 있습니다.">
+      <svg className={`w-full ${rows.length > 6 ? 'min-w-[560px]' : ''}`} viewBox="0 0 820 235" role="img" aria-label="일별 방문자와 페이지뷰 추이. 정확한 수치는 아래 일별 수치 펼치기에서 확인할 수 있습니다.">
         <ChartGrid maximum={maximum} dates={rows.map(row => row.date)} />
         {(['visitorCount', 'pageViewCount'] as const).map((key, k) => <g key={key}>
           <path fill="none" stroke={k ? '#059669' : '#2563eb'} strokeWidth="2.5" d={rows.map((row, i) => row[key] === null ? '' : `${i && rows[i - 1][key] !== null ? 'L' : 'M'}${xAt(i, rows.length)},${yAt(row[key], maximum)}`).join(' ')} />
@@ -186,7 +191,7 @@ function MediaChart({ data, days: observations }: { data: ExternalDashboard; day
   const barWidth = Math.min(32, 500 / Math.max(1, days.length))
   return <>
     <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">{media.map(label => <span key={label} style={{ color: mediaColors[label] }}>● {label}</span>)}</div>
-    {media.length ? <div className="overflow-x-auto"><svg className="w-full min-w-[560px]" viewBox="0 0 820 235" role="img" aria-label="매체별 일별 광고 유입. 정확한 수치는 아래 매체별 원본 수치 펼치기에서 확인할 수 있습니다.">
+    {media.length ? <div className="overflow-x-auto"><svg className={`w-full ${days.length > 6 ? 'min-w-[560px]' : ''}`} viewBox="0 0 820 235" role="img" aria-label="매체별 일별 광고 유입. 정확한 수치는 아래 매체별 원본 수치 펼치기에서 확인할 수 있습니다.">
       <ChartGrid maximum={maximum} dates={days} />
       {days.map((day, i) => {
         let total = 0
