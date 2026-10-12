@@ -438,5 +438,30 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.c.events, [])
 
 
+class CompatibilityReloadTests(unittest.TestCase):
+    """A reload signal must not acknowledge a completed browser fixture switch."""
+
+    def script(self):
+        fixture = (Path(__file__).resolve().parents[1] / 'tests/release-compat.sh').read_text()
+        return fixture.split('python3 - "$phase" <<\'PY\'\n', 1)[1].split('\nPY', 1)[0]
+
+    def test_both_phases_wait_for_old_workers(self):
+        for phase in ('switch', 'expire'):
+            with self.subTest(phase=phase), patch('sys.argv', ['-', phase]), \
+                    patch('subprocess.check_output', side_effect=['/proc/8/cmdline\n', '/proc/8/cmdline\n', '/proc/9/cmdline\n']), \
+                    patch('subprocess.run') as reload, patch('time.monotonic', return_value=0), patch('time.sleep') as sleep:
+                exec(compile(self.script(), 'compatibility-reload-fixture', 'exec'), {})
+                reload.assert_called_once()
+                sleep.assert_called_once_with(0.2)
+
+    def test_stuck_worker_fails_within_each_phase_deadline(self):
+        for phase, expired in (('switch', 21), ('expire', 121)):
+            with self.subTest(phase=phase), patch('sys.argv', ['-', phase]), \
+                    patch('subprocess.check_output', return_value='/proc/8/cmdline\n'), \
+                    patch('subprocess.run'), patch('time.monotonic', side_effect=[0, 0, expired]), patch('time.sleep'):
+                with self.assertRaisesRegex(RuntimeError, 'compatibility proxy drain timed out'):
+                    exec(compile(self.script(), 'compatibility-reload-fixture', 'exec'), {})
+
+
 if __name__ == '__main__':
     unittest.main()

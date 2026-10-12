@@ -68,7 +68,7 @@ async function login(page) {
 }
 async function phase(name) {
   writeFileSync(`/control/${name}`, '')
-  // release-compat.sh acknowledges expiry after its bounded 120-second proxy drain.
+  // The fixture acknowledges switch/expiry after a bounded 20/120-second proxy drain.
   // Keep the overall 150-second browser deadline and all expiry assertions intact.
   await until(() => existsSync(`/control/${name}.done`), name === 'expire' ? 1_250 : 300)
 }
