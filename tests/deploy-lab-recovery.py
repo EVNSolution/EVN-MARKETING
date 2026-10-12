@@ -171,6 +171,7 @@ def run_recovery(controller_class, root, releases, fixture_lease_ms):
     records, completed = [], []
     prefix = 'synthetic-recovery-' + uuid.uuid4().hex + '-'
     expected_data = None
+    scenario_started = time.monotonic()
 
     def data(controller, write=None):
         return _node(controller, DATA_SCRIPT, json.dumps({'ids': records, 'write': write}))
@@ -202,9 +203,12 @@ def run_recovery(controller_class, root, releases, fixture_lease_ms):
             controller_class(root).recover()
 
     def done(label):
+        nonlocal scenario_started
         stable()
         completed.append(label)
-        print(json.dumps({'recoveryScenario': label, 'ok': True}), flush=True)
+        print(json.dumps({'recoveryScenario': label, 'ok': True,
+                          'seconds': round(time.monotonic() - scenario_started, 2)}), flush=True)
+        scenario_started = time.monotonic()
 
     try:
         expected_data = data(stable())

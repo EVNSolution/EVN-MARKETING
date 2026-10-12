@@ -26,7 +26,7 @@ def validate(receipt, run, revision, run_id, bundle):
     return release.checked(receipt.get('digest'), r'sha256:[0-9a-f]{64}', 'receipt digest')
 
 
-def publish():
+def publish(receipt_path=None):
     env = os.environ
     revision = release.checked(env.get('GITHUB_SHA'), r'[0-9a-f]{40}', 'source SHA')
     if env.get('GITHUB_EVENT_NAME') != 'push' or env.get('GITHUB_REF') != 'refs/heads/main' or env.get('GITHUB_REPOSITORY') != release.REPOSITORY:
@@ -59,7 +59,7 @@ def publish():
     release.scan(digest)
     receipt = {'format': 1, 'repository': release.REPOSITORY, 'sourceSha': revision,
                'runId': int(env['GITHUB_RUN_ID']), 'digest': digest, 'bundleSha256': release.bundle_hash(ROOT)}
-    (ROOT / 'release-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    (receipt_path or ROOT / 'release-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
 
 
 if __name__ == '__main__':

@@ -6,12 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && groupmod -n node ubuntu && usermod -l node -d /home/node -m ubuntu \
     && rm -rf /var/lib/apt/lists/*
 
-FROM base AS build
+FROM base AS dependencies
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
+
+FROM dependencies AS build
 COPY prisma.config.ts tsconfig.json next.config.ts postcss.config.mjs ./
 COPY prisma/schema.prisma prisma/schema.prisma
 COPY prisma/migrations prisma/migrations
@@ -43,7 +45,14 @@ RUN test -n "$MARKETING_BUILD_REVISION" \
 
 FROM base AS operations
 WORKDIR /app
-COPY --from=build /app ./
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY package.json package-lock.json prisma.config.ts ./
+COPY prisma/schema.prisma prisma/schema.prisma
+COPY prisma/migrations prisma/migrations
+COPY scripts/schema-check.mjs scripts/schema-compatibility.mjs scripts/landing-schema-policy.json ./scripts/
+ARG MARKETING_BUILD_REVISION
+RUN node scripts/schema-check.mjs manifest /app "$MARKETING_BUILD_REVISION" /app/schema-manifest.json \
+    && chmod 644 /app/schema-manifest.json
 USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "status"]
 

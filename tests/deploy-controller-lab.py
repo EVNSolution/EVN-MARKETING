@@ -20,18 +20,42 @@ parser.add_argument('--self-test', action='store_true', help='check lab timing w
 parser.add_argument('--report', type=Path)
 options = parser.parse_args()
 ROOT = Path.cwd()
+TIMINGS = Path(os.environ['RUNNER_TEMP']) / 'marketing-controller-timings.jsonl' if os.environ.get('RUNNER_TEMP') else None
+STARTED = time.monotonic()
 spec = importlib.util.spec_from_file_location('controller', ROOT / 'deploy/controller.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
+def record_timing(stage, started):
+    if TIMINGS:
+        # One append per record also preserves timings from abruptly terminated children.
+        line = json.dumps({'stage': stage, 'seconds': round(time.monotonic() - started, 4)}) + '\n'
+        fd = os.open(TIMINGS, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, line.encode())
+        finally:
+            os.close(fd)
+
+
 def command(*args):
-    return subprocess.check_output(args, text=True).strip()
+    started = time.monotonic()
+    try:
+        return subprocess.check_output(args, text=True).strip()
+    finally:
+        record_timing('setup.' + '.'.join(args[:2]), started)
 
 def docker(*args):
     return command('docker', *args)
 
 
 class Lab(m.Controller):
+    def command(self, args, **kwargs):
+        started = time.monotonic()
+        try:
+            return super().command(args, **kwargs)
+        finally:
+            record_timing('controller.' + '.'.join(args[:2]), started)
+
     def __init__(self, root):
         super().__init__(root)
         self.clock = time.time()
@@ -50,12 +74,14 @@ class Lab(m.Controller):
         return time.monotonic() if self.real_time else self.clock
 
     def wait(self, seconds):
+        started = time.monotonic()
         if not self.real_time and self.state['phase'] == 'observing':
             self.clock += seconds * 30
             time.sleep(0.01)
         else:
             self.clock += seconds
             time.sleep(seconds)
+        record_timing('wait.' + self.state['phase'], started)
 
     def save(self, **changes):
         if changes.get('phase') == 'switching':
@@ -261,6 +287,8 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         controller.start(a, worker=True)
         controller.worker_ready(a)
         controller.activate_worker(a)
+        record_timing('section.setup', STARTED)
+        transition_started = time.monotonic()
         start_traffic()
         controller.exercise_drain = True
         observer = threading.Thread(target=observe, daemon=True)
@@ -300,6 +328,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         summary['controllerPublicProbes'] = controller.probes
         summary['publicErrors'] = len(errors)
         summary['heldUploadDrains'] = controller.drains
+        record_timing('section.transitions', transition_started)
         if options.real_time:
             assert controller.observation_seconds >= m.WINDOW, 'real observation was shorter than 1800 seconds'
             assert controller.drains == 1 and controller.state['previous']['drained']
@@ -310,10 +339,12 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
                 'maxGapSeconds': max(b-a for a,b in zip(probe_times, probe_times[1:])),
                 'heldUploadDrains': controller.drains, 'activeDigest': controller.state['active']['digest']})
         else:
+            recovery_started = time.monotonic()
             recovery_spec = importlib.util.spec_from_file_location('lab_recovery', ROOT/'tests/deploy-lab-recovery.py')
             recovery = importlib.util.module_from_spec(recovery_spec)
             recovery_spec.loader.exec_module(recovery)
             summary['recovery'] = recovery.run_recovery(Lab, root, releases, fixture_lease_ms)
+            record_timing('section.recovery', recovery_started)
         summary['ok'] = True
         if options.report:
             options.report.write_text(json.dumps(summary, indent=2)+'\n')

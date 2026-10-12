@@ -18,7 +18,9 @@ python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
 
 - CI concurrency는 PR 또는 브랜치별로 이전 실행을 취소한다. 배포는 취소하지 않는다.
 - Markdown도 workflow를 시작하며 경로 분류로 추가 Docker lab을 선택한다.
-- runtime, operations, 고정 schema bridge, proxy는 각각 BuildKit GHA cache를 사용한다.
+- runtime, operations, 고정 schema bridge, proxy는 각각 BuildKit GHA cache를 사용한다. operations는 잠긴 dependency layer와 Prisma/schema 파일만 사용하며 Next 빌드 결과를 복사하지 않는다.
+- runtime/proxy 준비 후 기본 검사, controller 검사, compatibility 준비·검사를 자동으로 병렬 실행한다. main의 이미지 업로드·scan도 겹쳐 실행하지만 모든 필수 검사 성공 후에만 배포 receipt를 승격한다. 배포는 기존처럼 전체 main CI 성공도 확인한다.
+- 실행자가 선택하는 빠른 모드나 생략 옵션은 없다. 단계별 시간과 controller 명령·대기 시간은 Actions 요약 및 `marketing-ci-timings-*` artifact에 자동 기록된다.
 - main CI의 검증 이미지를 배포에서 그대로 사용한다. 배포에서는 재빌드하지 않는다.
 - 분류 경계 selftest와 workflow YAML parse를 확인하고 Linux CI에서 실제 선택된 경로·시나리오 수·실행 시간을 기록합니다. 최종 선택형 CI의 시간 실측치는 해당 실행 이후에만 기재합니다.
 - 비교 기록은 [이전 PR checks 17분 45초·lab 11분 01초](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35807195118), [최근 PR checks 12분 09초·lab 5분 19초](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35811912599), [중복되던 수동 빠른 인수 8분 25초](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35811915367)입니다. 모두 이번 선택형 CI 이전 실행이며 새 시간의 예측값은 아닙니다.

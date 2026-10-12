@@ -30,7 +30,7 @@ jobs:
       - name: External dashboard read-only collection and private storage
         run: npm run test:external-dashboard
       - name: Release controller and cloud declaration checks
-        run: python3 tests/start-release.test.py && python3 tests/release-artifact.test.py && python3 tests/selective-ci.test.py && python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/operator-release.test.py && python3 tests/landing-expand.test.py && python3 tests/deploy-controller-lab.py --self-test
+        run: python3 tests/start-release.test.py && python3 tests/release-artifact.test.py && python3 tests/selective-ci.test.py && python3 tests/ci-images.test.py && python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/operator-release.test.py && python3 tests/landing-expand.test.py && python3 tests/deploy-controller-lab.py --self-test
       - name: Offline backup and bounded receipt recovery
         run: npm run test:backup && npm run test:warp-recovery
       - run: npm run test:schema && npm run test:data-recovery && npm run test:server-runtime && npm run test:worker-runtime && npm run test:worker-health && npm run test:worker-processes && npm run test:upload-security && npm run test:upload-processes && npm run test:release-routing && npm run test:db && npm run test:inquiries && npm run test:warp-delivery && npm run test:integration-contract && npm run typecheck && npm run lint
@@ -85,39 +85,6 @@ jobs:
           tags: evn-marketing:ci
           cache-from: type=gha,scope=marketing-runtime
           cache-to: type=gha,mode=max,scope=marketing-runtime
-      - name: Build migration tools only for compatibility checks
-        if: steps.changes.outputs.compat == 'true'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          provenance: false
-          target: operations
-          build-args: MARKETING_BUILD_REVISION=${{ github.sha }}
-          labels: org.opencontainers.image.revision=${{ github.sha }}
-          tags: evn-marketing:ops
-          cache-from: type=gha,scope=marketing-operations
-          cache-to: type=gha,mode=max,scope=marketing-operations
-      - name: Export the immutable schema bridge source
-        if: steps.changes.outputs.compat == 'true'
-        run: |
-          mkdir -p "$RUNNER_TEMP/marketing-bridge"
-          git archive d6d7df889f1a1ca52769a1615e352034f09c3bb8 | tar -x -C "$RUNNER_TEMP/marketing-bridge"
-      - name: Cache the immutable compatibility image
-        if: steps.changes.outputs.compat == 'true'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
-        with:
-          context: ${{ runner.temp }}/marketing-bridge
-          platforms: linux/amd64
-          load: true
-          provenance: false
-          target: runtime
-          build-args: MARKETING_BUILD_REVISION=d6d7df889f1a1ca52769a1615e352034f09c3bb8
-          labels: org.opencontainers.image.revision=d6d7df889f1a1ca52769a1615e352034f09c3bb8
-          tags: evn-marketing:compat-a
-          cache-from: type=gha,scope=marketing-bridge-d6d7df8
-          cache-to: type=gha,mode=max,scope=marketing-bridge-d6d7df8
       - name: Cache test proxy
         if: steps.changes.outputs.compat == 'true' || steps.changes.outputs.controller == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
@@ -130,59 +97,6 @@ jobs:
           tags: evn-marketing:proxy-ci
           cache-from: type=gha,scope=marketing-proxy
           cache-to: type=gha,mode=max,scope=marketing-proxy
-      - name: Synthetic container smoke
-        run: |
-          mkdir -p "$RUNNER_TEMP/marketing-smoke"
-          chmod 777 "$RUNNER_TEMP/marketing-smoke"
-          docker run --rm --network none -v "$PWD:/src:ro" -v "$RUNNER_TEMP/marketing-smoke:/data" evn-marketing:ci node /src/tests/container-smoke.mjs
-          docker run --rm --network none evn-marketing:ci node worker.mjs
-          docker run -d --name marketing-smoke --network none -v "$RUNNER_TEMP/marketing-smoke:/data" -v "$PWD:/src:ro" \
-            -e AUTH_SECRET=synthetic-ci-only-secret-at-least-32-characters \
-            -e AUTH_TRUST_HOST=true -e AUTH_URL=http://127.0.0.1:3100 \
-            -e DATABASE_URL=file:/data/marketing.db -e UPLOADS_DIR=/data/uploads \
-            -e MARKETING_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-            -e MARKETING_IMAGE_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
-            -e MARKETING_VOLUME_ID=synthetic-volume-ci \
-            -e WARP_DELIVERY_ENABLED=false evn-marketing:ci
-          trap 'docker logs marketing-smoke; docker rm -f marketing-smoke' EXIT
-          started=false
-          for _attempt in $(seq 1 30); do
-            if docker exec marketing-smoke node -e "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then started=true; break; fi
-            sleep 2
-          done
-          test "$started" = true
-          docker exec marketing-smoke node /src/tests/readiness-http.mjs
-          docker exec marketing-smoke node /src/tests/mvp-browser.mjs
-      - name: Run independent compatibility and controller labs together
-        if: steps.changes.outputs.compat == 'true' || steps.changes.outputs.controller == 'true'
-        timeout-minutes: 25
-        env:
-          CHECK_COMPAT: ${{ steps.changes.outputs.compat }}
-          CHECK_CONTROLLER: ${{ steps.changes.outputs.controller }}
-        run: |
-          pids=()
-          logs=()
-          if [ "$CHECK_COMPAT" = true ]; then
-            bash tests/release-compat.sh > "$RUNNER_TEMP/compat.log" 2>&1 &
-            pids+=("$!"); logs+=("$RUNNER_TEMP/compat.log")
-          fi
-          if [ "$CHECK_CONTROLLER" = true ]; then
-            python3 tests/deploy-controller-lab.py > "$RUNNER_TEMP/controller.log" 2>&1 &
-            pids+=("$!"); logs+=("$RUNNER_TEMP/controller.log")
-          fi
-          failed=0
-          for index in "${!pids[@]}"; do
-            wait "${pids[$index]}" || failed=1
-            cat "${logs[$index]}"
-          done
-          exit "$failed"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: steps.changes.outputs.compat == 'true'
-        with:
-          name: marketing-recovery-${{ github.sha }}
-          path: ${{ runner.temp }}/marketing-recovery-summary.json
-          if-no-files-found: error
-          retention-days: 7
       - name: Authenticate the protected main publisher
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
@@ -192,11 +106,27 @@ jobs:
           role-session-name: marketing-ci-${{ github.run_id }}
           aws-region: ap-northeast-2
           unset-current-credentials: true
-      - name: Publish the tested image and immutable deployment receipt
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Run automatically selected checks and prepare release
+        timeout-minutes: 25
         env:
+          CHECK_COMPAT: ${{ steps.changes.outputs.compat }}
+          CHECK_CONTROLLER: ${{ steps.changes.outputs.controller }}
           MARKETING_AWS_ACCOUNT_ID: ${{ vars.MARKETING_AWS_ACCOUNT_ID }}
-        run: python3 .github/scripts/release_artifact.py publish
+        uses: ./.github/actions/check-images
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: marketing-ci-timings-${{ github.sha }}
+          path: ${{ runner.temp }}/marketing-ci-timings.json
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success() && steps.changes.outputs.compat == 'true'
+        with:
+          name: marketing-recovery-${{ github.sha }}
+          path: ${{ runner.temp }}/marketing-recovery-summary.json
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
