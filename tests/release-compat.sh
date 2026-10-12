@@ -101,7 +101,8 @@ writeFileSync(`${directory}/nginx/next.conf`, renderNginx({ active: { id: b, slo
 renameSync(`${directory}/nginx/next.conf`, `${directory}/nginx/nginx.conf`);
 NODE
   docker exec marketing-compat-proxy nginx -t
-  # Match the production controller: expiry completes only after old proxy workers drain.
+  # Reload is asynchronous. Existing browser connections can still reach old workers.
+  # Acknowledge switch/expiry only after they drain; never retry a failed browser assertion.
   python3 - "$phase" <<'PY'
 import subprocess, sys, time
 def workers():
@@ -109,8 +110,8 @@ def workers():
     return set(subprocess.check_output(['docker','exec','marketing-compat-proxy','sh','-c',command],text=True).splitlines())
 old = workers()
 subprocess.run(['docker','exec','marketing-compat-proxy','nginx','-s','reload'],check=True)
-deadline = time.monotonic() + 120
-while sys.argv[1] == 'expire' and old & workers():
+deadline = time.monotonic() + (120 if sys.argv[1] == 'expire' else 20)
+while old & workers():
     if time.monotonic() >= deadline: raise RuntimeError('compatibility proxy drain timed out')
     time.sleep(0.2)
 PY

@@ -26,10 +26,16 @@ python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
 | 변경 경로 | 추가 검사 선택 |
 | --- | --- |
 | 일반 화면 코드 | `compat` — operations 이미지·브라우저 호환·recovery artifact |
-| 배포·worker 코드 | `controller` — 격리 Docker controller lab |
+| 명시된 호스트 배포·worker 코드 | `controller` — 격리 Docker controller lab |
+| `deploy/aws/release.py`, `deploy/aws/operator-release.py`, 해당 cloud/manual/operator 테스트 | 추가 Docker lab 없음. 관련 단위 테스트·runtime 빌드·smoke는 유지 |
 | 공유 dependency·API/auth/schema·CI 설정, 미분류 경로 | `compat`와 `controller` 모두 |
 
-rename은 이전·새 경로를 모두 평가합니다. diff 추출 실패·빈 변경·`Marketing CI` 수동 dispatch도 두 경로를 모두 실행합니다. [분류 스크립트](../.github/scripts/classify_pr.py)
+실행자가 아닌 [분류 스크립트](../.github/scripts/classify_pr.py)가 Git 변경 전체를 평가합니다.
+여러 종류를 변경하면 필요한 검사를 합칩니다. rename은 이전·새 경로를 모두 평가합니다.
+push 이력 재작성·diff 추출 실패·빈 변경·`Marketing CI` 수동 dispatch는 두 경로를 모두 실행합니다.
+새 파일은 기존 경로 규칙에 해당하지 않으면 두 검사를 실행합니다. deploy 폴더 전체를 생략하지 않습니다.
+분류 코드·분류 테스트·workflow 변경도 두 검사를 실행합니다. 분류 출력이 잘못되면 CI를 실패시킵니다.
+비교 SHA·경로별 이유·최종 결정은 Actions 요약에 자동 기록합니다. 검사 생략 입력이나 label은 없습니다.
 
 ## 확인하는 내용
 

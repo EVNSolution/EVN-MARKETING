@@ -56,6 +56,15 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 .github/scripts/classify_pr.py
+      - name: Require a complete automated check selection
+        env:
+          CHECK_COMPAT: ${{ steps.changes.outputs.compat }}
+          CHECK_CONTROLLER: ${{ steps.changes.outputs.controller }}
+        run: |
+          case "$CHECK_COMPAT:$CHECK_CONTROLLER" in
+            true:true|true:false|false:true|false:false) ;;
+            *) echo 'Invalid CI check selection'; exit 1 ;;
+          esac
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22

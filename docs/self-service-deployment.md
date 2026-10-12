@@ -63,9 +63,19 @@ runtime·operations·고정 schema bridge·proxy에 각각 BuildKit GHA cache sc
 호환 검사와 controller lab은 별도 Docker 이름·네트워크·볼륨을 사용하여 병렬 실행한다.
 같은 proxy 이미지를 두 검사에서 재사용한다.
 operations와 bridge는 compatibility 경로에서만 준비한다.
-일반 화면은 compatibility, worker/배포는 controller lab을 추가한다.
-공유 코드·의존성·API·schema·CI 변경이나 분류 실패는 둘 다 검사한다.
-PR과 main push 모두 변경 경로를 평가한다. main 이미지는 실제 merge SHA로 검증한다.
+검사 선택은 `.github/scripts/classify_pr.py`가 Git 변경 경로로 결정한다.
+실행자·PR label·수동 입력으로 검사를 생략할 수 없다.
+일반 화면은 compatibility, worker와 명시된 호스트 배포 파일은 controller lab을 추가한다.
+`deploy/aws/release.py`, `deploy/aws/operator-release.py`와 해당 cloud/manual/operator 테스트만
+변경하면 추가 Docker lab을 생략한다. 두 helper는 Docker lab에서 실행되지 않는다.
+관련 단위 테스트, runtime 빌드, smoke는 이 경우에도 항상 실행한다.
+공유 코드·의존성·API·schema·CI/분류 규칙 변경이나 미분류 파일은 둘 다 검사한다.
+여러 종류를 함께 변경하면 필요한 검사를 모두 합친다. 삭제와 rename 이전 경로도 평가한다.
+PR은 base와 head의 merge-base diff, main push는 before와 after 전체 diff를 사용한다.
+diff 실패·빈 변경·새 브랜치·이력 재작성·수동 실행은 둘 다 검사한다.
+분류 출력이 누락되거나 잘못되면 CI가 실패하므로 배포할 수 없다.
+Actions 요약에는 비교 SHA, 경로별 판단 근거, 최종 검사 선택을 기록한다.
+main 이미지는 실제 merge SHA로 검증한다.
 
 실제 시간 합성 관찰이 필요하면 Linux에서 다음 명령을 실행한다.
 
