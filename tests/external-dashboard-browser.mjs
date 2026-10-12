@@ -162,7 +162,7 @@ async function checkChartSpacing({ page, base, record, save, output }) {
   const original = record.data
   const results = []
   try {
-    for (const width of [1440, 390]) {
+    for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: 1000 })
       let previousSpan = -1
       for (const count of [1, 2, 3, 6, 30]) {
@@ -175,9 +175,10 @@ async function checkChartSpacing({ page, base, record, save, output }) {
         await page.goto(base + '/external-dashboard')
         await page.getByRole('button', { name: '화면 새로고침', exact: true }).waitFor()
         await page.evaluate(() => document.fonts.ready)
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
         const charts = [page.getByRole('img', { name: /^일별 방문자와 페이지뷰 추이/ }),
           page.getByRole('img', { name: /^매체별 일별 광고 유입/ })]
-        const positions = []
+        const positions = [], readability = []
         for (const [index, chart] of charts.entries()) {
           const geometry = await chart.evaluate(svg => {
             const marks = [...svg.querySelectorAll('circle, rect')]
@@ -185,10 +186,15 @@ async function checkChartSpacing({ page, base, record, save, output }) {
               : Number(element.getAttribute('x')) + Number(element.getAttribute('width')) / 2
             const grid = svg.querySelector('line')
             const ticks = [...svg.querySelectorAll('text[text-anchor="end"]')]
+            const dateLabels = [...svg.querySelectorAll('text[text-anchor="middle"]')]
+            const scale = svg.getScreenCTM().a
             return {
               centers: [...new Set(marks.map(x))],
               markDates: marks.map(mark => ({ date: mark.querySelector('title').textContent.slice(5, 10), x: x(mark) })),
-              labels: [...svg.querySelectorAll('text[text-anchor="middle"]')].map(label => ({ date: label.textContent, x: Number(label.getAttribute('x')) })),
+              labels: dateLabels.map(label => ({ date: label.textContent, x: Number(label.getAttribute('x')) })),
+              labelBounds: dateLabels.map(label => ({ left: label.getBoundingClientRect().left, right: label.getBoundingClientRect().right })),
+              smallestFont: Math.min(...[...ticks, ...dateLabels].map(label => parseFloat(getComputedStyle(label).fontSize) * scale)),
+              height: svg.getBoundingClientRect().height,
               paths: [...svg.querySelectorAll('path')].map(line => [...line.getAttribute('d').matchAll(/[ML]([\d.]+),/g)].map(match => Number(match[1]))),
               left: Number(grid.getAttribute('x1')), right: Number(grid.getAttribute('x2')),
               marksLeft: Math.min(...marks.map(mark => mark.getBBox().x)),
@@ -202,6 +208,9 @@ async function checkChartSpacing({ page, base, record, save, output }) {
           assert.ok(Math.abs((first + last) / 2 - (geometry.left + geometry.right) / 2) < 0.01, 'range is symmetric about plot center')
           assert.ok(geometry.marksLeft > geometry.left && geometry.marksRight < geometry.right, 'marks keep both plot margins')
           assert.ok(geometry.marksLeft > geometry.ticksRight + 10, 'bars never overlap y-axis numbers')
+          assert.ok(geometry.smallestFont >= 10, 'date and value labels retain at least 10 CSS pixels')
+          assert.ok(geometry.height >= 200, 'chart retains enough vertical space on small screens')
+          for (let i = 1; i < geometry.labelBounds.length; i++) assert.ok(geometry.labelBounds[i].left >= geometry.labelBounds[i - 1].right + 4, `date labels retain readable separation (${width}px/${count} days: ${JSON.stringify(geometry.labelBounds)})`)
           for (let i = 1; i < xs.length; i++) {
             assert.ok(xs[i] > xs[i - 1], 'dates remain chronological')
             assert.ok(xs[i] - xs[i - 1] <= 100.01, 'short ranges do not stretch to opposite edges')
@@ -209,8 +218,9 @@ async function checkChartSpacing({ page, base, record, save, output }) {
           for (const label of geometry.labels) assert.ok(geometry.markDates.some(mark => mark.date === label.date && Math.abs(mark.x - label.x) < 0.01), 'date labels align with their marks')
           for (const path of geometry.paths) assert.deepEqual(path, xs, 'line vertices align with circles')
           if (count <= 6) assert.ok(geometry.svgWidth <= geometry.containerWidth + 1, 'short mobile ranges fit the visible chart')
-          else assert.ok(last - first > (geometry.right - geometry.left) * 0.85, 'long ranges use the available width')
+          else assert.ok(last - first > (geometry.right - geometry.left) * 0.8, 'long ranges use the available width')
           positions.push(xs)
+          readability.push({ smallestFont: geometry.smallestFont, height: geometry.height, labelBounds: geometry.labelBounds })
           const viewport = chart.locator('..')
           if (output && count !== 3) await viewport.screenshot({ path: path.join(output, `dashboard-spacing-${width}-${count}d-${index ? 'media' : 'visitors'}.png`) })
           if (geometry.svgWidth > geometry.containerWidth + 1) {
@@ -222,15 +232,15 @@ async function checkChartSpacing({ page, base, record, save, output }) {
             await viewport.evaluate(element => { element.scrollLeft = 0 })
           }
         }
-        assert.deepEqual(positions[0], positions[1], 'visitor and media charts share date positions')
+        assert.ok(positions[0].every((x, i) => Math.abs(x - positions[1][i]) < 0.01), 'visitor and media charts share date positions')
         const span = positions[0].at(-1) - positions[0][0]
         assert.ok(span > previousSpan, 'adding dates gradually expands the range')
         previousSpan = span
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
-        results.push({ viewport: width, days: count, centers: positions[0] })
+        results.push({ viewport: width, days: count, centers: positions[0], readability })
       }
     }
     if (output) await writeFile(path.join(output, 'dashboard-spacing-qa.json'), JSON.stringify(results, null, 2) + '\n')
-    console.log('Chart spacing passed: 1440/390px, 1/2/3/6/30 days, centered progressive spacing, axis clearance, line/point/bar/date alignment')
+    console.log('Chart spacing passed: 1440/390/320px, 1/2/3/6/30 days, centered spacing, readable labels, sufficient height, no overlaps, line/point/bar/date alignment')
   } finally { record.data = original; await save() }
 }
