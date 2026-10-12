@@ -1,3 +1,9 @@
+# 현재 운영 절차
+
+현재 CI와 배포는 [Marketing CI와 배포](self-service-deployment.md)를 따른다.
+아래 내용은 초기 구축 기록이다. 로컬 빌드·135분 job·동기식 SSM 관찰 설명은 현재 절차가 아니다.
+현재 bundle은 controller.py, nginx-config.mjs, start-release.py 세 파일이다.
+
 # Marketing cloud release wiring
 
 This implements the bounded cloud boundary of M3 in [the existing deployment plan](zero-downtime-deployment-plan.md), alongside the [dedicated-server plan](dedicated-server-plan.md). It is source code and declarations, **not an AWS deployment or operational acceptance record**. No instance, domain, secret, initial journal, backup or proxy is assumed to exist. The initial M3 work made no AWS calls; the later foundation preflight below records live checks separately.
@@ -69,7 +75,7 @@ Local manual-path checks: `python3 tests/manual-release.test.py`. Image publicat
 
 ## Optional GitHub workflow boundary and inputs
 
-`.github/workflows/release.yml` accepts only `workflow_dispatch` on `EVNSolution/EVN-MARKETING` main. Required input `source_sha` must be the full lowercase 40-character SHA, equal to the dispatched workflow SHA, checkout HEAD and current remote main. A second check immediately before dispatch rejects main advancement during approval/build. Select `release` or `rollback`; there is no remote recovery, expiry, shell, URL, path, arbitrary image or arbitrary rollback target input.
+`.github/workflows/deploy.yml` accepts only `workflow_dispatch` on `EVNSolution/EVN-MARKETING` main. Required input `source_sha` must be the full lowercase 40-character SHA, equal to the dispatched workflow SHA, checkout HEAD and current remote main. A second check immediately before dispatch rejects main advancement during approval/build. Select `release` or `rollback`; there is no remote recovery, expiry, shell, URL, path, arbitrary image or arbitrary rollback target input.
 
 All steps run in the `production` environment, with a shared release/rollback concurrency group and `cancel-in-progress: false`. Third-party actions are pinned to full commits. Checkout cannot persist credentials. OIDC provides a short-lived Marketing-only role; runtime secrets never enter GitHub Actions. The actual GitHub protection settings must be configured before activation; declaring the environment in YAML does not create its approval rules.
 

@@ -18,10 +18,10 @@ cleanup() {
   docker network rm marketing-compat >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-docker build --platform linux/amd64 -f deploy/Dockerfile.proxy -t evn-marketing:proxy-ci .
+docker image inspect evn-marketing:proxy-ci >/dev/null
 mkdir "$compat_dir/previous"
 git archive "$release_a" | tar -x -C "$compat_dir/previous"
-docker build --build-arg MARKETING_BUILD_REVISION="$release_a" -t evn-marketing:compat-a "$compat_dir/previous"
+test "$(docker image inspect evn-marketing:compat-a --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$release_a"
 # Read the capability from the real image; never manufacture it for an old image.
 docker run --rm --network none --entrypoint cat evn-marketing:compat-a /app/schema-manifest.json > "$compat_dir/previous-manifest.json"
 chmod 644 "$compat_dir/previous-manifest.json"

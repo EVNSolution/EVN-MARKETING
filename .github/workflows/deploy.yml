@@ -1,0 +1,75 @@
+name: Marketing deploy
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Activate the tested image, or restore the host's previous release
+        type: choice
+        options: [release, rollback]
+        required: true
+      source_sha:
+        description: Exact current main SHA
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful main Marketing CI run ID (release only)
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: evn-marketing-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.repository == 'EVNSolution/EVN-MARKETING' && github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_REGION: ap-northeast-2
+      AWS_DEFAULT_REGION: ap-northeast-2
+      AWS_PAGER: ''
+      AWS_MAX_ATTEMPTS: '1'
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      RELEASE_ACTION: ${{ inputs.action }}
+      MARKETING_AWS_ACCOUNT_ID: ${{ vars.MARKETING_AWS_ACCOUNT_ID }}
+      MARKETING_INSTANCE_ID: ${{ vars.MARKETING_INSTANCE_ID }}
+      MARKETING_SSM_DOCUMENT_VERSION: ${{ vars.MARKETING_SSM_DOCUMENT_VERSION }}
+      MARKETING_SSM_DOCUMENT_SHA256: ${{ vars.MARKETING_SSM_DOCUMENT_SHA256 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Require current main and pinned host bundle
+        run: python3 deploy/aws/release.py validate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: inputs.action == 'release'
+        with:
+          name: marketing-release-${{ inputs.source_sha }}
+          run-id: ${{ inputs.ci_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify successful CI source, run, bundle and digest
+        id: receipt
+        if: inputs.action == 'release'
+        run: python3 .github/scripts/release_artifact.py verify
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.MARKETING_AWS_ACCOUNT_ID }}:role/EVN-Marketing-Release
+          allowed-account-ids: ${{ vars.MARKETING_AWS_ACCOUNT_ID }}
+          role-session-name: marketing-deploy-${{ github.run_id }}
+          aws-region: ap-northeast-2
+          unset-current-credentials: true
+      - name: Activate without rebuilding; hand observation to the host
+        env:
+          IMAGE_DIGEST: ${{ steps.receipt.outputs.digest }}
+        run: |
+          if [ "$RELEASE_ACTION" = rollback ]; then IMAGE_DIGEST=previous; fi
+          python3 deploy/aws/release.py dispatch "$IMAGE_DIGEST"
+          echo 'Traffic and worker activated. The host continues 30-minute observation and automatic rollback. Stable completion is recorded in state/release.json.' >> "$GITHUB_STEP_SUMMARY"

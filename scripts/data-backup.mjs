@@ -1,4 +1,4 @@
-// Offline DB + uploads operations. The host coordinator must stop every writer.
+// Consistent DB + uploads operations. Stop worker leases; reject concurrent data changes.
 import { createHash } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
 import { chmod, copyFile, lstat, mkdir, open, readFile, readdir, realpath } from 'node:fs/promises'

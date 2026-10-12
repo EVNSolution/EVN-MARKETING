@@ -55,7 +55,7 @@ class Fake(m.DataOps):
     def data_command(self,arguments,mounts):
         m.require(not self.fail_data,'data_verification')
         if arguments[0] == 'snapshot':
-            assert not self.live and self.state['phase'] == 'maintenance'
+            assert 'evn-marketing-worker' not in self.live and self.state['phase'] == 'maintenance'
         self.events.append(arguments[0])
         return {'ok':True,'summarySha256':'b'*64,'restoreSeconds':0.1,'rows':{},'files':0}
     def recover(self): self.events.append('resume'); self.live.update(('evn-marketing-worker','evn-marketing-web-blue'))
@@ -82,6 +82,16 @@ class Checks(unittest.TestCase):
         self.assertLess(self.ops.events.index('snapshot'),self.ops.events.index('resume'))
         self.assertLess(self.ops.events.index('resume'),self.ops.events.index('create-snapshot'))
         self.assertEqual(self.ops.state['phase'],'stable')
+
+    def test_keep_web_preserves_service_and_resumes_worker_on_copy_failure(self):
+        self.ops.backup(keep_web=True)
+        self.assertNotIn('stop_web', self.ops.events)
+        self.assertIn('stop_worker', self.ops.events)
+        self.assertIn('evn-marketing-web-blue', self.ops.live)
+        self.ops.fail_data = True
+        with self.assertRaises(m.Blocked): self.ops.backup(keep_web=True)
+        self.assertEqual(self.ops.state['phase'], 'stable')
+        self.assertIn('evn-marketing-worker', self.ops.live)
 
     def test_backup_failure_persists_maintenance_and_explicit_resume(self):
         self.ops.fail_data = True

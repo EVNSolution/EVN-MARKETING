@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory() as directory:
             patch.object(host, "Path", return_value=root), patch.object(Path, "lstat", root_owned), \
             patch.object(host.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run:
         host.run()
-        assert run.call_args.args[0] == ["/usr/bin/python3", "-I", str(root / "deploy/controller.py"),
+        assert run.call_args.args[0] == ["/usr/bin/python3", "-I", str(root / "deploy/start-release.py"),
                                          "release", "--revision", SHA, "--digest", DIGEST]
         assert run.call_args.kwargs["stdout"] == subprocess.DEVNULL
         assert run.call_args.kwargs["stderr"] == subprocess.DEVNULL
@@ -162,7 +162,7 @@ with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {**ENV, 
         refuses(lambda: cloud.dispatch(DIGEST))
     assert events == [("ecr", "describe-images")]
 
-assert host.BUNDLE == cloud.BUNDLE == ("deploy/controller.py", "deploy/nginx-config.mjs")
+assert host.BUNDLE == cloud.BUNDLE == ("deploy/controller.py", "deploy/nginx-config.mjs", "deploy/start-release.py")
 assert document["schemaVersion"] == "2.2"
 assert set(document["parameters"]) == set(request["Parameters"])
 assert all(p["interpolationType"] == "ENV_VAR" for p in document["parameters"].values())
@@ -212,14 +212,15 @@ tag_policy = next(s for s in host_policy if 'ec2:CreateTags' in s['Action'])
 assert tag_policy['Condition']['StringEquals']['ec2:CreateAction'] == 'CreateSnapshot'
 assert not any(action in ('ec2:DeleteSnapshot','ec2:CreateVolume','ec2:AttachVolume') for s in host_policy for action in s['Action'])
 
-workflow = (ROOT / ".github/workflows/release.yml").read_text()
+workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
 assert "workflow_dispatch:" in workflow and "pull_request" not in workflow and "\n  push:" not in workflow
 assert "environment: production" in workflow and "cancel-in-progress: false" in workflow
 assert "persist-credentials: false" in workflow and "github.ref == 'refs/heads/main'" in workflow
-assert "docker-credential-ecr-login" in workflow and "docker login" not in workflow
-assert "AWS_ECR_DISABLE_CACHE=true" in workflow and "upload-artifact" not in workflow
-assert "npm audit --omit=dev --audit-level=high" in workflow
-assert "MARKETING_BUILD_REVISION=$SOURCE_SHA" in workflow and "--platform linux/amd64" in workflow
+assert "download-artifact" in workflow and "release_artifact.py verify" in workflow
+assert "docker build" not in workflow and "npm ci" not in workflow
+ci = (ROOT / ".github/workflows/ci.yml").read_text()
+assert "npm audit --omit=dev --audit-level=high" in ci
+assert "cache-from: type=gha" in ci and "cache-to: type=gha" in ci
 unit = (ROOT / "deploy/marketing-release.service").read_text()
 assert "controller.py expire" in unit and "recover" not in unit and "SuccessExitStatus=75" in unit
 assert "OnUnitInactiveSec=60s" in (ROOT / "deploy/marketing-release.timer").read_text()

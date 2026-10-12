@@ -57,16 +57,21 @@ class DataOps(Controller):
             item = self.inspect(identity)
             require(item['Name'].lstrip('/') in allowed or not any(m.get('Name') == self.config['volume'] and m.get('RW') for m in item['Mounts']), 'volume_writer_running')
 
-    def quiesce(self, backup_id, operation='backup'):
+    def quiesce(self, backup_id, operation='backup', keep_web=False):
         require(self.state['phase'] == 'stable' and not self.state.get('origin') and not self.state.get('candidate'), 'recovery_required')
         previous = self.state.get('previous')
         require(not previous or previous.get('drained'), 'compatibility_window')
         self.save(phase='maintenance', maintenance={'operation': operation, 'id': backup_id})
         self.stop_worker(self.state['active'])
+        allowed = []
         for release in [self.state['active'], previous]:
             if release:
-                self.stop_web(release)
-        self.no_writers()
+                if keep_web and self.running(self.web_name(release)):
+                    self.identity(self.web_name(release), release)
+                    allowed.append(self.web_name(release))
+                elif not keep_web:
+                    self.stop_web(release)
+        self.no_writers(allowed)
         self.lease_clear(self.state['active'])
 
     def resume(self):
@@ -104,17 +109,24 @@ class DataOps(Controller):
         directory.mkdir(mode=0o700, exist_ok=True)
         return directory / (backup_id + '.json')
 
-    def backup(self):
+    def backup(self, keep_web=False):
         self.encrypted_storage(self.volume(), self.config['ebsVolumeId'])
         backup_id = str(uuid.uuid4())
         record = self.record_path(backup_id)
-        self.quiesce(backup_id)
+        self.quiesce(backup_id, keep_web=keep_web)
         # Errors/crashes leave maintenance recorded. An explicit resume is required.
         self.docker('run', '--rm', '--network', 'none', '--user', '0', '-v', self.config['volume'] + ':/data',
                     self.image(self.state['active']), 'node', '-e',
                     "const f=require('fs');f.mkdirSync('/data/backups',{recursive:true,mode:0o700});if(!f.lstatSync('/data/backups').isDirectory()||f.realpathSync('/data/backups')!=='/data/backups')process.exit(1);f.chownSync('/data/backups',0,0);f.chmodSync('/data/backups',0o700)")
         bundle = '/data/backups/' + backup_id
-        result = self.data_command(['snapshot', '/data', bundle], ['-v', self.config['volume'] + ':/data'])
+        try:
+            # SQLite backup plus before/copied/after row and upload hashes must agree.
+            # Concurrent web writes reject the backup; they never alter live data.
+            result = self.data_command(['snapshot', '/data', bundle], ['-v', self.config['volume'] + ':/data'])
+        except BaseException:
+            if keep_web:
+                self.resume()
+            raise
         pending = {'backupId': backup_id, 'revision': self.state['active']['revision'],
                    'digest': self.state['active']['digest'], 'manifestSha256': result['summarySha256'],
                    'volumeId': self.config['volumeId'], 'ebsVolumeId': self.config['ebsVolumeId']}
@@ -231,7 +243,8 @@ class DataOps(Controller):
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest='operation', required=True)
-    sub.add_parser('backup')
+    backup_parser = sub.add_parser('backup')
+    backup_parser.add_argument('--keep-web', action='store_true', help='Keep web serving; reject backup if data changes during copy')
     sub.add_parser('resume')
     restore_parser = sub.add_parser('restore')
     restore_parser.add_argument('--bundle', required=True)
@@ -258,7 +271,7 @@ def main():
         with host_lock(ROOT):
             ops = DataOps()
             if args.operation == 'backup':
-                result = ops.backup()
+                result = ops.backup(keep_web=args.keep_web)
             elif args.operation == 'resume':
                 ops.resume(); result = {'ok': True, 'resumed': True}
             elif args.operation == 'restore':
