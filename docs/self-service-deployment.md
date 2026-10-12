@@ -58,10 +58,10 @@ MARKETING_SSM_DOCUMENT_VERSION, MARKETING_SSM_DOCUMENT_SHA256.
 
 ## CI 비용
 
-코드 검사와 이미지 빌드를 병렬 실행한다. 빌드한 이미지를 application·controller transitions·controller recovery 작업에 자동 전달한다. 최종 images gate가 모든 필수 작업과 검사 증거를 대조한다. 배포는 전체 CI 성공을 요구한다.
+코드 검사, 배포용 runtime 빌드·검사, controller 전용 이미지 빌드를 병렬 실행한다. 작은 controller 이미지만 transitions·recovery 작업에 자동 전달한다. runtime은 빌드한 환경에서 바로 검사·게시한다. 최종 images gate가 모든 필수 작업과 검사 증거를 대조한다. 배포는 전체 CI 성공을 요구한다.
 runtime·operations·고정 schema bridge·proxy에 각각 BuildKit GHA cache scope를 사용한다.
 브라우저 검사와 두 controller 작업은 독립 실행 환경에서 실행한다. 복구 8개 시나리오는 한 DB에서 순서대로 실행하며 신규 데이터 보존을 계속 확인한다.
-같은 proxy 이미지를 두 검사에서 재사용한다.
+proxy는 같은 고정 Dockerfile과 캐시를 사용한다.
 operations와 bridge는 compatibility 경로에서만 준비한다.
 검사 선택은 `.github/scripts/classify_pr.py`가 Git 변경 경로로 결정한다.
 실행자·PR label·수동 입력으로 검사를 생략할 수 없다.

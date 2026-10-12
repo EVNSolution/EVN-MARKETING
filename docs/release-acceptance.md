@@ -20,12 +20,13 @@ python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
 - CI concurrency는 PR 또는 브랜치별로 이전 실행을 취소한다. 배포는 취소하지 않는다.
 - Markdown도 workflow를 시작하며 경로 분류로 추가 Docker lab을 선택한다.
 - runtime, operations, 고정 schema bridge, proxy는 각각 BuildKit GHA cache를 사용한다. operations는 잠금 파일의 Prisma·dotenv·SQLite 의존성만 오프라인으로 남기고 버전·무결성 값이 바뀌지 않았는지 검사한다. Next 빌드 결과를 복사하지 않는다.
-- 이미지를 한 번 빌드해 소스 SHA가 고정된 artifact로 전달한다. application, controller transitions, controller recovery를 독립된 실행 환경에 자동 배정한다. application의 두 브라우저 검사는 자원 경쟁을 피하려고 한 번에 하나만 실행한다. main 이미지 업로드·scan은 병행한다.
-- 최종 images gate는 verify·build·application과 자동으로 필요한 controller 작업의 성공을 확인한다. controller가 필요하면 두 보고서의 소스 SHA, 진행 중 업로드 2회, 공개 응답 오류 0, 복구 8개 시나리오와 신규 데이터 보존 8회를 대조한다. 모두 성공해야 배포 receipt를 승격한다. 누락·취소·예상하지 않은 skipped는 실패한다.
+- 배포용 runtime은 application 작업에서 한 번 빌드하고 같은 환경에서 검사·게시한다. controller 전용 application 이미지는 같은 소스 SHA로 병렬 빌드한 뒤 두 controller 작업에 전달한다. Chromium 이미지의 중복 전송·재로딩을 하지 않는다. application, controller transitions, controller recovery를 독립된 실행 환경에 자동 배정한다. application의 두 브라우저 검사는 자원 경쟁을 피하려고 한 번에 하나만 실행한다. main 이미지 업로드·scan은 병행한다.
+- 최종 images gate는 verify·plan·application과 자동으로 필요한 controller 작업의 성공을 확인한다. controller가 필요하면 두 보고서의 소스 SHA, 진행 중 업로드 2회, 공개 응답 오류 0, 복구 8개 시나리오와 신규 데이터 보존 8회를 대조한다. 모두 성공해야 배포 receipt를 승격한다. 누락·취소·예상하지 않은 skipped는 실패한다.
 - recovery 작업은 실제 API로 기본 데이터를 만든 뒤 한 DB에서 8개 시나리오를 순서대로 실행한다. 이전 시나리오와 중단 후 새로 기록한 고객·업로드·전송 이력을 모두 보존해야 한다. transitions 작업은 별도 DB에서 A→B→A와 worker 준비 실패·진행 중 업로드를 검사한다. 전송용 이미지 artifact는 1일, 검사 증거는 7일 보관한다.
-- controller fixture는 동일한 application stage와 기본 OS를 사용하고 사용하지 않는 Chromium만 제외한다. 실제 배포 이미지는 Chromium을 유지하며 기본 검사와 구버전 호환 브라우저 검사를 실행한다.
+- controller fixture는 같은 소스의 application stage와 기본 OS를 사용하고 사용하지 않는 Chromium만 제외한다. 실제 배포 이미지는 Chromium을 유지하며 기본 검사와 구버전 호환 브라우저 검사를 실행한다.
 - 운영 컨트롤러는 정상 응답 3회 사이에 각각 1초를 기다리며 마지막 성공 뒤의 불필요한 대기는 하지 않는다. 스키마 메타데이터는 이미지별 한 컨테이너로 읽지만 DB·migration ledger·integrity는 매 호출 다시 검사한다. 복구 테스트는 이 검증을 마친 컨트롤러의 최종 공개 응답을 독립 확인하고 동일한 시작 대기를 중복하지 않는다.
-- 실행자가 선택하는 빠른 모드나 생략 옵션은 없다. 단계별 시간과 controller 명령·대기 시간은 Actions 요약 및 `marketing-ci-timings-*` artifact에 자동 기록된다.
+- 실행자가 선택하는 빠른 모드나 생략 옵션은 없다. 애플리케이션 단계 시간은 Actions 요약과 `marketing-ci-timings-*`에 기록한다. controller 명령·대기 시간과 검사 결과는 `controller-transitions-*`·`controller-recovery-*` artifact에 자동 기록한다.
+- 호환 브라우저 fixture는 HTTP 헤더를 보내지 않은 유휴 연결만 5초로 제한한다. 운영 프록시 설정, 요청 본문·응답·drain 제한과 진행 중 업로드 검사는 유지한다.
 - main CI의 검증 이미지를 배포에서 그대로 사용한다. 배포에서는 재빌드하지 않는다.
 - 분류 경계 selftest와 workflow YAML parse를 확인하고 Linux CI에서 실제 선택된 경로·시나리오 수·실행 시간을 기록합니다. 최종 선택형 CI의 시간 실측치는 해당 실행 이후에만 기재합니다.
 - 비교 기록은 [이전 PR checks 17분 45초·lab 11분 01초](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35807195118), [최근 PR checks 12분 09초·lab 5분 19초](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35811912599), [중복되던 수동 빠른 인수 8분 25초](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35811915367)입니다. 모두 이번 선택형 CI 이전 실행이며 새 시간의 예측값은 아닙니다.
