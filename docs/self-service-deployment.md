@@ -24,6 +24,12 @@ SSM은 root 소유의 고정 bundle을 검증하고 `deploy/start-release.py`를
 이 helper는 `marketing-deploy.service`라는 systemd transient unit으로 기존 controller를 실행한다.
 동일 이름의 활성 unit은 두 번째 요청을 거부한다. Controller의 host lock도 유지한다.
 
+기존 worker 종료와 이전 웹 정리 전에 프록시 사전 검사를 자동 실행한다.
+새 버전과 복구용 버전의 실제 컨테이너 사용자로 renderer 파일을 읽고 설정을 생성한다.
+생성한 설정은 네트워크와 운영 데이터가 없는 별도 Nginx 컨테이너에서 문법을 검사한다.
+권한·파일 누락·설정 오류가 있으면 `proxy_preflight_failed`로 배포를 거부한다.
+기존 웹·worker·프록시 설정·배포 journal은 변경하지 않는다. 작업자가 선택하거나 생략할 수 없다.
+
 새 웹 readiness, 기존 worker 종료·lease 해제, 새 worker 준비·활성화까지 확인하면 `Marketing activate` Actions가 끝난다.
 이 성공은 활성화 확인이다. 서버는 기존 1,800초 검증과 자동 복귀를 계속 수행한다. 러너는 기다리지 않는다.
 서버는 시작 전에 GitHub production deployment를 만들고 `in_progress`를 기록한다.
@@ -33,6 +39,7 @@ SSM은 root 소유의 고정 bundle을 검증하고 `deploy/start-release.py`를
 |---|---|
 | 검증 종료, 대상 SHA/digest가 stable | success |
 | 배포 실패, 이전 버전 복귀 확인 | failure — rollback succeeded |
+| 사전 검사 실패, 기존 버전 유지 확인 | failure — original version restored/retained |
 | 복귀 또는 복구 확인 불가 | error — recovery unconfirmed |
 | 명시적 rollback 정상 완료 | success — rollback completed |
 
@@ -67,6 +74,9 @@ GitHub 전송 실패는 배포 결과를 바꾸지 않는다. `marketing-result.
 
 `deploy/aws/cloudformation.json`의 host 역할만 이 파라미터와 해당 KMS encryption context를 읽는다.
 컨트롤러 bundle에 reporter와 timer/service도 포함된다. 검증한 bundle과 SSM 문서를 설치한 뒤 다음을 실행한다.
+`deploy/nginx-config.mjs`는 컨테이너의 일반 사용자가 읽으므로 root 소유, `0644`로 설치한다.
+호스트 전용 Python 파일의 `0600` 권한을 renderer에 적용하지 않는다.
+배포 사전 검사는 설치 권한이 잘못된 경우에도 서비스 전환 전에 자동으로 차단한다.
 
 ```sh
 install -o root -g root -m 0644 deploy/marketing-result.service deploy/marketing-result.timer /etc/systemd/system/
@@ -109,6 +119,9 @@ MARKETING_SSM_DOCUMENT_VERSION, MARKETING_SSM_DOCUMENT_SHA256.
 코드 검사, 배포용 runtime 빌드·검사, controller 전용 이미지 빌드를 병렬 실행한다. 작은 controller 이미지만 transitions·recovery 작업에 자동 전달한다. runtime은 빌드한 환경에서 바로 검사·게시한다. 최종 images gate가 모든 필수 작업과 검사 증거를 대조한다. 배포는 전체 CI 성공을 요구한다.
 runtime·operations·고정 schema bridge·proxy에 각각 BuildKit GHA cache scope를 사용한다.
 브라우저 검사와 두 controller 작업은 독립 실행 환경에서 실행한다. 복구 8개 시나리오는 한 DB에서 순서대로 실행하며 신규 데이터 보존을 계속 확인한다.
+transitions 작업은 renderer 읽기 권한 오류·파일 누락·JavaScript 오류·Nginx 문법 오류와 rollback 권한 오류를 실제 컨테이너로 재현한다.
+각 거부 뒤 기존 컨테이너 ID·프로세스·worker 활성화 파일·프록시 설정·journal이 같은지 확인한다.
+다섯 시나리오의 성공 증거가 누락되면 최종 images gate가 실패한다.
 proxy는 같은 고정 Dockerfile과 캐시를 사용한다.
 operations와 bridge는 compatibility 경로에서만 준비한다.
 검사 선택은 `.github/scripts/classify_pr.py`가 Git 변경 경로로 결정한다.

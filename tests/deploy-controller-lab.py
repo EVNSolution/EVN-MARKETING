@@ -111,10 +111,10 @@ class Lab(m.Controller):
             self.probes += 1
         return result
 
-    def proxy(self, active, previous=None):
+    def render_proxy(self, active, previous=None):
         if previous and not self.real_time:
             previous = {**previous, 'expiresAt': time.time() + max(0, previous['expiresAt'] - self.clock)}
-        return super().proxy(active, previous)
+        return super().render_proxy(active, previous)
 
     def retire(self):
         previous = self.state.get('previous')
@@ -300,6 +300,10 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
             start_traffic(seed_recovery=True)
             summary['traffic'] = finish_traffic()
         else:
+            preflight_spec = importlib.util.spec_from_file_location('lab_preflight', ROOT/'tests/deploy-lab-preflight.py')
+            preflight = importlib.util.module_from_spec(preflight_spec)
+            preflight_spec.loader.exec_module(preflight)
+            summary['preflightRejections'] = preflight.run_preflight(controller, root, b)
             start_traffic()
             controller.exercise_drain = True
             observer = threading.Thread(target=observe, daemon=True)
@@ -308,6 +312,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
             assert controller.state['active']['digest'] == b['digest']
             assert controller.state['previous']['drained']
             if not options.real_time:
+                summary['preflightRejections'] += preflight.run_preflight(controller, root, a, rollback=True)
                 controller.release('', '', rollback=True)
                 assert controller.state['active']['digest'] == a['digest']
                 # Fast probes exercise two state transitions; they are not 3600 real seconds of observation.

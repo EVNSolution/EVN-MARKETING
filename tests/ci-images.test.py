@@ -18,14 +18,17 @@ spec.loader.exec_module(gate)
 class Tests(unittest.TestCase):
     def test_missing_suite_or_partial_recovery_evidence_is_rejected(self):
         a = {'sourceSha':'a'*40, 'suite':'transitions', 'ok':True, 'traffic':{'errors':0,'reads':2},
-             'publicErrors':0, 'heldUploadDrains':2, 'controllerPublicProbes':120}
+             'publicErrors':0, 'heldUploadDrains':2, 'controllerPublicProbes':120,
+             'preflightRejections':['release:'+name for name in ('unreadable_renderer','missing_renderer','invalid_renderer','invalid_nginx')]
+                                   + ['rollback:unreadable_renderer']}
         b = {'sourceSha':'a'*40, 'suite':'recovery', 'ok':True, 'traffic':{'errors':0,'reads':2},
              'recovery':{'ok':True, 'recoveryScenarios':8, 'recoveryRecordsAdded':8, 'finalPhase':'stable',
                          'scenarios':['death_'+p for p in ('preparing','draining','switching','starting','observing')]
                          + ['host_flock','stopped_containers_and_proxy','killed_worker_natural_lease_expiry']}}
         gate.validate_reports(a,b,'a'*40)
         for field, value in [('sourceSha','b'*40),('suite','full'),('ok',False),('publicErrors',1),
-                             ('heldUploadDrains',1),('controllerPublicProbes',119),('traffic',{'errors':1,'reads':2})]:
+                             ('heldUploadDrains',1),('controllerPublicProbes',119),('traffic',{'errors':1,'reads':2}),
+                             ('preflightRejections',[]),('preflightRejections',a['preflightRejections'][:-1])]:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 gate.validate_reports({**a,field:value},b,'a'*40)
         for field, value in [('recoveryScenarios',7),('recoveryRecordsAdded',7),('finalPhase','blocked'),('scenarios',[])]:

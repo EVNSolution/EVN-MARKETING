@@ -65,6 +65,9 @@ class Fake(module.Controller):
         self.event('preflight')
         self.check_schema(release, other)
 
+    def preflight_proxy(self, candidate, origin):
+        self.event('proxy_preflight')
+
     def start(self, release, worker=False):
         if worker:
             assert self.worker is None, 'must prove the other worker stopped'
@@ -318,6 +321,72 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.c.worker, A)
         self.assertEqual(self.c.public, A)
         self.assertEqual(self.c.state['phase'], 'stable')
+
+    def test_proxy_preflight_failure_preserves_release_and_rollback_runtime(self):
+        for rollback in (False, True):
+            with self.subTest(rollback=rollback):
+                self.c.webs['green'] = copy.deepcopy(B)
+                self.c.save(previous={**B, 'expiresAt': 0, 'drained': False})
+                before = self.c.state_file.read_bytes()
+                webs = copy.deepcopy(self.c.webs)
+                self.c.events.clear()
+                self.c.failures = {'proxy_preflight'}
+                with self.assertRaisesRegex(module.Blocked, 'injected_proxy_preflight'):
+                    self.c.release('c' * 40, 'sha256:' + 'c' * 64, rollback=rollback)
+                self.assertEqual(self.c.state_file.read_bytes(), before)
+                self.assertEqual(self.c.webs, webs)
+                self.assertEqual(self.c.worker, A)
+                self.assertEqual(self.c.public, A)
+                self.assertFalse(any(e.startswith(('stop_', 'start_', 'proxy_blue', 'proxy_green', 'activate_'))
+                                     for e in self.c.events))
+
+    def test_real_proxy_preflight_uses_runtime_users_and_isolated_syntax_check(self):
+        c = module.Controller(self.root)
+        (self.root / 'nginx').mkdir()
+        live = self.root / 'nginx/nginx.conf'
+        live.write_text('live configuration must stay unchanged')
+        calls = []
+        def docker(*args, **kwargs):
+            calls.append((args, kwargs))
+            self.assertEqual(args[:2], ('run', '--rm'))
+            self.assertEqual(args[args.index('--network') + 1], 'none')
+            self.assertNotIn('--user', args)
+            self.assertFalse(any(':/data' in arg for arg in args))
+            if '/renderer.mjs' in args:
+                mapping = json.loads(kwargs['stdin'])
+                self.assertIn(c.image(B) if mapping['active']['slot'] == 'green' else c.image(A), args)
+                return 'events {}\nhttp {}\n'
+            mount = args[args.index('-v') + 1]
+            directory = Path(mount.split(':/etc/nginx:ro')[0])
+            self.assertEqual((directory / 'nginx.conf').read_text(), 'events {}\nhttp {}\n')
+            self.assertEqual(args[-3:], ('-t', '-c', '/etc/nginx/nginx.conf'))
+            return ''
+        with patch.object(c, 'docker', side_effect=docker):
+            c.preflight_proxy(B, A)
+        self.assertEqual(len(calls), 4)
+        mappings = [json.loads(kwargs['stdin']) for args, kwargs in calls if 'stdin' in kwargs]
+        self.assertEqual(mappings[0]['previous']['id'], A['revision'])
+        self.assertIsNone(mappings[1]['previous'])
+        self.assertEqual(live.read_text(), 'live configuration must stay unchanged')
+        self.assertEqual(list((self.root / 'nginx').iterdir()), [live])
+
+    def test_proxy_preflight_refuses_render_syntax_and_staging_errors_without_live_changes(self):
+        c = module.Controller(self.root)
+        (self.root / 'nginx').mkdir()
+        live = self.root / 'nginx/nginx.conf'
+        live.write_text('unchanged')
+        before = c.state_file.read_bytes()
+        for failed_call in range(4):
+            with self.subTest(failed_call=failed_call):
+                replies = ['events {}\nhttp {}\n'] * failed_call + [module.Blocked('command_failed')]
+                with patch.object(c, 'docker', side_effect=replies), self.assertRaisesRegex(module.Blocked, '^proxy_preflight_failed$'):
+                    c.preflight_proxy(B, A)
+                self.assertEqual(live.read_text(), 'unchanged')
+                self.assertEqual(c.state_file.read_bytes(), before)
+                self.assertEqual(list((self.root / 'nginx').iterdir()), [live])
+        with patch.object(module.tempfile, 'TemporaryDirectory', side_effect=PermissionError), \
+                self.assertRaisesRegex(module.Blocked, '^proxy_preflight_failed$'):
+            c.preflight_proxy(B, A)
 
     def test_candidate_failure_does_not_stop_active_worker(self):
         for failure in ('start_web_green', 'ready_green'):

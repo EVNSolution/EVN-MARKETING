@@ -20,6 +20,11 @@ def validate_reports(transitions, recovery, source):
     if (transitions.get('publicErrors') != 0 or transitions.get('heldUploadDrains') != 2
             or transitions.get('controllerPublicProbes', 0) < 120):
         raise ValueError('transition evidence incomplete')
+    required_preflight = {'release:' + name for name in (
+        'unreadable_renderer', 'missing_renderer', 'invalid_renderer', 'invalid_nginx')}
+    required_preflight.add('rollback:unreadable_renderer')
+    if set(transitions.get('preflightRejections', [])) != required_preflight:
+        raise ValueError('preflight rejection must preserve the live web and worker in all five scenarios')
     expected = {'death_' + phase for phase in ('preparing', 'draining', 'switching', 'starting', 'observing')}
     expected |= {'host_flock', 'stopped_containers_and_proxy', 'killed_worker_natural_lease_expiry'}
     result = recovery.get('recovery', {})

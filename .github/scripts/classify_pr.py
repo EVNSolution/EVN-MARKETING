@@ -15,6 +15,7 @@ COMPAT_TESTS = {
 CONTROLLER_TESTS = {
     'tests/deploy-controller-lab.py',
     'tests/deploy-controller.test.py',
+    'tests/deploy-lab-preflight.py',
     'tests/deploy-lab-recovery.py',
     'tests/deploy-lab-traffic.mjs',
     'tests/deploy-lab-worker.mjs',
