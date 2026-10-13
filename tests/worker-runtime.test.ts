@@ -20,6 +20,7 @@ import {
   type SourcePage,
 } from '@/lib/inquiry-sync'
 import { warpActivityId } from '@/lib/warp-delivery'
+import { completedLead } from './customer-lead-helper'
 import { runInquiryWorker, type WorkerDependencies } from '@/workers/worker-runtime'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
@@ -327,8 +328,11 @@ async function testDrainDuringSend() {
     const response = deferred<Response>()
     const controller = new AbortController()
     let sends = 0
+    let registrationPolicy: string | undefined
     const deps = dependencies(worker)
-    deps.dispatchPendingWarp = (db, owner, signal) => dispatchPendingWarp(db, owner, async () => {
+    deps.dispatchPendingWarp = (db, owner, signal) => dispatchPendingWarp(db, owner, async (_url, init) => {
+      registrationPolicy = JSON.parse(String(init?.body)).registrationPolicy
+      assert.equal(registrationPolicy, 'customer-lead-v1')
       sends++
       entered.resolve()
       return response.promise
@@ -338,7 +342,8 @@ async function testDrainDuringSend() {
     controller.abort()
     assert.equal(await claimWorker(inspect, 'competitor'), false, 'stop retains the lease until response acknowledgment')
     const activityId = warpActivityId(syntheticInquiry(1).sourceId)
-    response.resolve(Response.json({ ok: true, customerId: 'synthetic-customer', activityId, created: true, duplicate: false }))
+    response.resolve(Response.json({ ok: true, customerId: 'synthetic-customer', activityId, created: true, duplicate: false,
+      ...completedLead({ registrationPolicy }, activityId) }))
     assert.equal(await running, 0)
     const rows = await inspect.inquiry.findMany({ orderBy: { sourceId: 'asc' } })
     assert.equal(sends, 1)
