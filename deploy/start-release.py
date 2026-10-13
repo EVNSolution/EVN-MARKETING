@@ -1,6 +1,6 @@
-"""Hand the unchanged release transaction to systemd; return only after activation.
+"""Hand the release transaction to systemd; return only after activation.
 
-The controller retains its host lock, 1800-second probes, worker lease and rollback.
+The controller retains its host lock, bounded health checks, worker lease and rollback.
 An SSM/GitHub disconnect cannot terminate the host transaction. Boot recovery still
 rolls an interrupted transaction back. Success here means observing, not stable.
 """
@@ -52,7 +52,7 @@ def start(action, revision='', digest='', key=''):
     state_file = ROOT / 'state/release.json'
     before = json.loads(state_file.read_text())
     if before.get('phase') != 'stable':
-        raise ValueError('another transaction requires observation or recovery')
+        raise ValueError('another transaction requires validation or recovery')
     target = before.get('previous') if action == 'rollback' else {'revision': revision, 'digest': digest}
     if not target or target['revision'] == before['active']['revision']:
         raise ValueError('no different release selected')

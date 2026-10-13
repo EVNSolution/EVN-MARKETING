@@ -1,5 +1,6 @@
 """State-machine/fault tests; Docker/AWS/TLS effects are modelled explicitly, not production evidence."""
 import copy
+from datetime import datetime, timezone
 import importlib.util
 import json
 import multiprocessing
@@ -87,6 +88,7 @@ class Fake(module.Controller):
     def worker_ready(self, release, retry=True):
         self.event('worker_ready_' + release['slot'])
         assert self.worker and self.worker['digest'] == release['digest']
+        return {'heartbeatAt': datetime.fromtimestamp(self.clock, timezone.utc).isoformat()}
 
     def activate_worker(self, release):
         self.event('activate_' + release['slot'])
@@ -302,12 +304,15 @@ class Tests(unittest.TestCase):
             controller.start(A)
             self.assertEqual(docker.call_args_list[-1].kwargs['env']['WARP_DELIVERY_ENABLED'], 'false')
 
-    def test_success_rollback_and_window(self):
+    def test_success_keeps_previous_and_rollback_needs_no_retention_wait(self):
+        started = self.c.clock
         self.c.release(B['revision'], B['digest'])
         self.assertEqual(self.c.state['active']['digest'], B['digest'])
         self.assertEqual(self.c.state['phase'], 'stable')
-        self.assertTrue(self.c.state['previous']['drained'])
-        self.assertEqual(self.c.events.count('probe_green'), module.WINDOW)
+        self.assertFalse(self.c.state['previous']['drained'])
+        self.assertNotIn('expiresAt', self.c.state['previous'])
+        self.assertEqual(self.c.events.count('probe_green'), module.ACTIVATION_CHECKS)
+        self.assertEqual(self.c.clock - started, (module.ACTIVATION_CHECKS - 1) * module.ACTIVATION_INTERVAL)
         self.assertLess(self.c.events.index('stop_worker_blue'), self.c.events.index('start_worker_green'))
         self.assertLess(self.c.events.index('worker_ready_green'), self.c.events.index('activate_green'))
         self.c.release('', '', rollback=True)
@@ -431,19 +436,71 @@ class Tests(unittest.TestCase):
             self.c.recover()
         self.assertNotIn('start_worker_blue', self.c.events)
 
-    def test_slot_reuse_waits_for_window_and_proxy_drain(self):
+    def test_slot_reuse_ignores_legacy_time_but_requires_request_drain(self):
         self.c.webs['green'] = B
-        self.c.save(previous={**B, 'expiresAt': self.c.clock + 30, 'drained': False})
-        with self.assertRaisesRegex(module.Blocked, 'compatibility_window'):
-            self.c.release('c' * 40, 'sha256:' + 'c' * 64)
-        self.assertNotIn('stop_web_green', self.c.events)
-        self.c.clock += 30
+        self.c.save(previous={**B, 'expiresAt': self.c.clock + 1800, 'drained': False})
         self.c.failures = {'proxy_drained'}
         with self.assertRaises(module.Blocked):
             self.c.release('c' * 40, 'sha256:' + 'c' * 64)
         self.assertEqual(self.c.state['phase'], 'retiring')
         self.assertNotIn('stop_web_green', self.c.events)
         self.c.recover()
+        self.assertTrue(self.c.state['previous']['drained'])
+
+    def test_three_immediate_releases_drain_before_reusing_slots(self):
+        for letter in ('b', 'c', 'd'):
+            before = self.c.clock
+            self.c.events.clear()
+            previous = self.c.state.get('previous')
+            self.c.release(letter * 40, 'sha256:' + letter * 64)
+            self.assertLess(self.c.clock - before, module.ACTIVATION_TIMEOUT)
+            self.assertFalse(self.c.state['previous']['drained'])
+            if previous:
+                self.assertLess(self.c.events.index('proxy_drained'), self.c.events.index('stop_web_' + previous['slot']))
+            self.assertEqual(self.c.worker['revision'], letter * 40)
+        self.assertEqual(self.c.business_data, {'newCustomer': 'preserved', 'receipt': 'preserved'})
+
+    def test_short_validation_requires_new_heartbeat_and_rejects_stalled_worker(self):
+        self.c.release(B['revision'], B['digest'])
+        prepared = {'heartbeatAt': '2026-10-13T00:00:00.000Z'}
+        with patch.object(self.c, 'worker_ready', return_value=prepared):
+            with self.assertRaisesRegex(module.Blocked, 'activation_validation_timeout'):
+                self.c.validate_activation(B, prepared)
+        with patch.object(self.c, 'worker_ready', side_effect=module.Blocked('worker_health')):
+            with self.assertRaisesRegex(module.Blocked, 'worker_health'):
+                self.c.validate_activation(B, prepared)
+        self.c.config['collectorEnabled'] = False
+        with patch.object(self.c, 'worker_ready', return_value=None):
+            result = self.c.validate_activation(B, None)
+        self.assertEqual(result['publicChecks'], module.ACTIVATION_CHECKS)
+
+    def test_stalled_heartbeat_after_activation_restores_origin_and_data(self):
+        original = self.c.worker_ready
+        prepared = {'heartbeatAt': '2026-10-13T00:00:00.000Z'}
+        def health(release, retry=True):
+            result = original(release, retry)
+            return prepared if release['slot'] == 'green' else result
+        with patch.object(self.c, 'worker_ready', side_effect=health):
+            with self.assertRaisesRegex(module.Blocked, 'release_reverted'):
+                self.c.release(B['revision'], B['digest'])
+        self.assertEqual(self.c.state['phase'], 'stable')
+        self.assertEqual(self.c.worker, A)
+        self.assertEqual(self.c.public, A)
+        self.assertEqual(self.c.business_data, {'newCustomer': 'preserved', 'receipt': 'preserved'})
+        self.assertIn('activate_green', self.c.events)
+        self.assertLess(self.c.events.index('stop_worker_green'), self.c.events.index('start_worker_blue'))
+
+    def test_recovery_keeps_previous_screen_without_expiry_and_finishes_interrupted_retirement(self):
+        self.c.webs['green'] = B
+        self.c.save(previous={**B, 'drained': False})
+        with patch.object(self.c, 'proxy', wraps=self.c.proxy) as proxy:
+            self.c.recover()
+            self.assertEqual(proxy.call_args.args, (A, self.c.state['previous']))
+        self.assertFalse(self.c.state['previous']['drained'])
+        self.c.save(phase='retiring')
+        with patch.object(self.c, 'proxy', wraps=self.c.proxy) as proxy:
+            self.c.recover()
+            self.assertEqual(proxy.call_args.args, (A, None))
         self.assertTrue(self.c.state['previous']['drained'])
 
     def test_reboot_starts_only_recorded_active(self):

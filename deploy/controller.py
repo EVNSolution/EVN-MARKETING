@@ -18,7 +18,9 @@ import urllib.request
 import uuid
 
 ROOT = Path('/opt/evn-marketing-runtime')
-WINDOW = 1800
+ACTIVATION_CHECKS = 5
+ACTIVATION_INTERVAL = 2
+ACTIVATION_TIMEOUT = 90
 SHA = re.compile(r'[0-9a-f]{40}')
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
 
@@ -330,7 +332,7 @@ class Controller:
                 value = json.loads(self.docker('exec', 'evn-marketing-worker', 'node', 'worker-health.mjs'))
                 require(value.get('ok') and value['revision'] == release['revision']
                         and value['imageDigest'] == release['digest'], 'worker_health')
-                return
+                return value
             except Blocked:
                 require(retry and self.now() < deadline, 'worker_health')
                 self.wait(1)
@@ -339,6 +341,26 @@ class Controller:
         if self.config['collectorEnabled']:
             atomic(self.gate(release), 'active\n')
             os.chmod(self.gate(release), 0o644)
+
+    def validate_activation(self, release, prepared_health):
+        # Complete on evidence, not elapsed retention time. A stalled heartbeat
+        # must not pass merely because the worker's old lease is still valid.
+        deadline = self.monotonic() + ACTIVATION_TIMEOUT
+        initial = prepared_health.get('heartbeatAt') if prepared_health else None
+        require(not self.config['collectorEnabled'] or initial, 'worker_heartbeat_missing')
+        renewed = not self.config['collectorEnabled']
+        checks = 0
+        while True:
+            self.probe(release, public=True)
+            health = self.worker_ready(release, retry=False)
+            if health:
+                heartbeat = health.get('heartbeatAt')
+                renewed = renewed or bool(heartbeat and heartbeat > initial)
+            checks += 1
+            require(self.monotonic() < deadline, 'activation_validation_timeout')
+            if checks >= ACTIVATION_CHECKS and renewed:
+                return {'publicChecks': checks, 'workerHeartbeatAdvanced': renewed}
+            self.wait(ACTIVATION_INTERVAL)
 
     def bootstrap(self):
         require(self.state['phase'] == 'bootstrapping' and not any(
@@ -408,7 +430,7 @@ class Controller:
             "for p in /proc/[0-9]*/cmdline; do case $(tr '\\0' ' ' < \"$p\") in 'nginx: worker process'*) echo \"$p\";; esac; done").splitlines()
 
     def render_proxy(self, active, previous=None):
-        previous = {**previous, 'id': previous['revision'], 'expiresAt': int(previous['expiresAt'] * 1000)} if previous else None
+        previous = {'id': previous['revision'], 'slot': previous['slot']} if previous else None
         mapping = {'active': {'id': active['revision'], 'slot': active['slot']}, 'previous': previous,
                    'publicUrl': self.config['publicUrl']}
         return self.docker('run', '--rm', '-i', '--network', 'none',
@@ -423,7 +445,7 @@ class Controller:
                 directory = Path(temporary)
                 os.chmod(directory, 0o755)
                 config = directory / 'nginx.conf'
-                for active, previous in ((candidate, {**origin, 'expiresAt': self.now() + WINDOW}),
+                for active, previous in ((candidate, origin),
                                          (origin, None)):
                     atomic(config, self.render_proxy(active, previous))
                     os.chmod(config, 0o644)
@@ -466,7 +488,6 @@ class Controller:
         previous = self.state.get('previous')
         if not previous or previous.get('drained'):
             return
-        require(self.now() >= previous['expiresAt'], 'compatibility_window')
         self.save(phase='retiring')
         workers = self.proxy(self.state['active'])
         self.drained_proxy(workers)
@@ -551,24 +572,15 @@ class Controller:
             self.save(phase='draining')
             self.stop_worker(origin)
             self.save(phase='switching')
-            expiry = self.now() + WINDOW
-            observation_end = self.monotonic() + WINDOW
-            previous = {**origin, 'expiresAt': expiry, 'drained': False}
+            previous = {**origin, 'drained': False}
             self.proxy(candidate, previous)
             self.healthy_web(candidate, public=True)
             self.save(phase='starting')
             self.start(candidate, worker=True)
-            self.worker_ready(candidate)
+            prepared_health = self.worker_ready(candidate)
             self.activate_worker(candidate)
             self.save(phase='observing')
-            # One-second public probes, bounded worker checks; preserve old tabs for the full window.
-            ticks = 0
-            while self.now() < expiry or self.monotonic() < observation_end:
-                self.probe(candidate, public=True)
-                if ticks % 15 == 0:
-                    self.worker_ready(candidate, retry=False)
-                ticks += 1
-                self.wait(1)
+            self.validate_activation(candidate, prepared_health)
             self.save(phase='stable', active=candidate, previous=previous, origin=None, candidate=None)
         except (Exception, KeyboardInterrupt):
             try:
@@ -584,7 +596,8 @@ class Controller:
                 self.save(phase='blocked')
                 raise Blocked('recovery_required') from None
             raise Blocked('release_reverted') from None
-        self.retire()
+        # Keep the previous web usable until its slot is needed by a later release.
+        # That release removes its mapping and drains existing requests before reuse.
 
     def recover(self):
         if self.state.get('origin') and self.state.get('candidate'):
@@ -597,7 +610,7 @@ class Controller:
             self.start(active)
         self.healthy_web(active)
         previous = self.state.get('previous')
-        if previous and self.now() < previous['expiresAt']:
+        if previous and not previous.get('drained') and self.state['phase'] != 'retiring':
             if not self.running(self.web_name(previous)):
                 self.start(previous)
             self.healthy_web(previous)
@@ -618,7 +631,7 @@ class Controller:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['bootstrap', 'release', 'rollback', 'recover', 'expire'])
+    parser.add_argument('operation', choices=['bootstrap', 'release', 'rollback', 'recover'])
     parser.add_argument('--revision', default='')
     parser.add_argument('--digest', default='')
     args = parser.parse_args()
@@ -654,11 +667,6 @@ def main():
                 controller.release(args.revision, args.digest)
             elif args.operation == 'rollback':
                 controller.release('', '', rollback=True)
-            elif args.operation == 'expire':
-                require(controller.state['phase'] == 'stable', 'recovery_required')
-                previous = controller.state.get('previous')
-                if previous and controller.now() >= previous['expiresAt']:
-                    controller.retire()
             else:
                 controller.recover()
         print(json.dumps({'ok': True, 'operation': args.operation}))

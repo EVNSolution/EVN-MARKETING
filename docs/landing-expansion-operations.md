@@ -4,7 +4,7 @@
 
 ## 배포 원본과 선행 순서
 
-1. PR #29의 정확한 검사 통과 head와 tree를 확인한다. 검토·병합 후 실제 원격 main의 merge SHA를 배포 원본으로 고정한다. 호환성 테스트의 `d6d7df889f1a1ca52769a1615e352034f09c3bb8`는 선행 앱 소스이고, 운영 도구는 main의 병합 SHA를 요구하므로 실제 배포 SHA 및 tree 대응을 별도로 기록한다. DB 변경 없이 선행 runtime을 배포하고 30분 관찰·이전 연결 종료를 마친다.
+1. PR #29의 정확한 검사 통과 head와 tree를 확인한다. 검토·병합 후 실제 원격 main의 merge SHA를 배포 원본으로 고정한다. 호환성 테스트의 `d6d7df889f1a1ca52769a1615e352034f09c3bb8`는 선행 앱 소스이고, 운영 도구는 main의 병합 SHA를 요구하므로 실제 배포 SHA 및 tree 대응을 별도로 기록한다. DB 변경 없이 선행 runtime을 배포하고 조건 기반 초기 검증을 마친다. 이전 연결은 슬롯 재사용 시 drain한다.
 2. 그 활성 선행 SHA/digest에 대응하는 새 일관 백업과 별도 복원 증거를 준비한다. 기존 버전에서 만든 backup.json을 선행 버전의 증거로 임의 수정하지 않는다. 이 도구는 활성 source와 일치하며 24시간 이내인 기존 검증 증거를 요구한다.
 3. PR #28의 최종 head 전체 CI를 통과시킨 뒤 검토·병합하고 실제 main SHA를 고정한다. 기존 `deploy:publish`와 새 `deploy:publish-ops`로 같은 source의 runtime/operations 이미지를 각각 게시한다. 후자는 `<main-sha>-ops` 태그이며 runtime처럼 배포 명령을 보내지 않는다. operations도 ECR 검사에서 HIGH/CRITICAL/UNDEFINED를 거부하고 source/계정을 다시 확인한 뒤 완료로 보고한다. 두 digest를 기록한다.
 4. 설치할 `controller.py`, `landing-expand.py` 및 기존 의존 파일의 정확한 hash·차이, SSM 검증값의 갱신 범위, 백업/복원 비용·서비스 중지 단계를 정리하여 사용자 승인 조건을 적용한다. SSM은 서버에 설치한 controller를 자동 갱신하지 않는다. 소유자 root, group/world 쓰기 금지, 실제 절대 경로와 부모 권한을 유지한다. `landingIntakeEnabled`는 false여야 한다. 기존 수집/WARP 설정·키는 변경하지 않는다.

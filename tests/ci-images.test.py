@@ -18,7 +18,8 @@ spec.loader.exec_module(gate)
 class Tests(unittest.TestCase):
     def test_missing_suite_or_partial_recovery_evidence_is_rejected(self):
         a = {'sourceSha':'a'*40, 'suite':'transitions', 'ok':True, 'traffic':{'errors':0,'reads':2},
-             'publicErrors':0, 'heldUploadDrains':2, 'controllerPublicProbes':120,
+             'publicErrors':0, 'heldUploadDrains':2, 'controllerPublicProbes':20, 'mode':'real-clock', 'releaseSequence':['a','b','c','b','a'],
+             'activationChecks':[{'revision':c*40,'publicChecks':5,'workerHeartbeatAdvanced':True,'seconds':8.5} for c in ('b','c','b','a')],
              'preflightRejections':['release:'+name for name in ('unreadable_renderer','missing_renderer','invalid_renderer','invalid_nginx')]
                                    + ['rollback:unreadable_renderer']}
         b = {'sourceSha':'a'*40, 'suite':'recovery', 'ok':True, 'traffic':{'errors':0,'reads':2},
@@ -27,10 +28,15 @@ class Tests(unittest.TestCase):
                          + ['host_flock','stopped_containers_and_proxy','killed_worker_natural_lease_expiry']}}
         gate.validate_reports(a,b,'a'*40)
         for field, value in [('sourceSha','b'*40),('suite','full'),('ok',False),('publicErrors',1),
-                             ('heldUploadDrains',1),('controllerPublicProbes',119),('traffic',{'errors':1,'reads':2}),
+                             ('heldUploadDrains',1),('controllerPublicProbes',19),('traffic',{'errors':1,'reads':2}),
+                             ('mode','accelerated'),('releaseSequence',['a','b','a']),('activationChecks',[]),
                              ('preflightRejections',[]),('preflightRejections',a['preflightRejections'][:-1])]:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 gate.validate_reports({**a,field:value},b,'a'*40)
+        for field, value in [('revision','a'*40),('publicChecks',4),('workerHeartbeatAdvanced',False),('seconds',7.9),('seconds',90)]:
+            changed = copy.deepcopy(a); changed['activationChecks'][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                gate.validate_reports(changed,b,'a'*40)
         for field, value in [('recoveryScenarios',7),('recoveryRecordsAdded',7),('finalPhase','blocked'),('scenarios',[])]:
             changed = copy.deepcopy(b); changed['recovery'][field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):

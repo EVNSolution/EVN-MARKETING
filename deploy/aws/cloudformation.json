@@ -171,7 +171,7 @@
                   "        run()",
                   "    except Exception:",
                   "        raise SystemExit(\"Marketing controller refused or failed; administrator review required\")",
-                  "    print(\"Marketing activated; host observation continues for 1800 seconds\")",
+                  "    print(\"Marketing activated; host completes health checks and records the final GitHub deployment result\")",
                   "PY"
                 ]
               }

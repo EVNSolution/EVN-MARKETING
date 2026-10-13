@@ -12,7 +12,7 @@
 | [전용 서버·자료 이전 계획](dedicated-server-plan.md) | 독립 EC2/ECR/IAM/SSM/HTTPS, DB·업로드·receipt 이전, 백업/복원, 사양 측정, 공개 가격 기준 비용 |
 | [WARP 방식 무중단 배포 명세](zero-downtime-deployment-plan.md) | 고정 WARP source 근거, 웹 blue/green, worker 단일 인계, schema/Next 호환성, 상태 전이·rollback, Z01–Z10 검사, 구현 PR 순서 |
 | [배포·복귀 컨트롤러](release-controller.md) | M3 호스트 상태 전이, 복구 경계, 격리 Docker 검사와 남은 운영 인수 항목 |
-| [배포 인수 검사](release-acceptance.md) | 선택형 PR 검사와 필요 시 수동 30분 관측, API 부하, 진행 요청 drain, 중단 복구와 운영 증거 경계 |
+| [배포 인수 검사](release-acceptance.md) | 자동 선택 CI와 조건 기반 초기 검증, API 부하, 진행 요청 drain, 중단 복구와 운영 증거 경계 |
 | [백업·복원과 전송 이력 복구](backup-recovery.md) | M4 일관된 자료 복원, 승인한 문의 재확인, 별도 migration 이미지와 합성 이전·메모리 측정 |
 | [AWS 배포 연결](cloud-release.md) | 전용 서버 생성 구성, 실계정 사전 확인·요금제 제약, ECR/OIDC/SSM 선언과 설치 전제 |
 
@@ -83,7 +83,7 @@ SIGTERM/SIGINT를 받으면 다음 수집 작업·페이지·WARP 전송을 시�
 
 이번 M1 수정은 서버 소유 첨부 경로, 고객별 경로 경계·symlink 차단, 교체/삭제 실패 시 보존 및 변경 충돌 검사, 비공개 캐시, 업로드 크기·형식 검증, 내부 복귀 경로와 수집기 활성화·재로그인 복구를 포함합니다. 합성 파일/DB 기반 보안·수집·전송·계약 검사, 타입 검사와 로컬 빌드를 통과했습니다. lint는 오류 0/기존 경고 4이며, 전체 npm audit의 기존 high 5/critical 0은 남아 있습니다. 이 결과는 실제 원본 로그인이나 운영 배포 검증이 아닙니다.
 
-업로드는 파일당 10 MiB, 고객별 50 MiB로 제한하며 본문 길이가 없는 업로드는 411로 거부합니다. 후속 M2 변경은 공용 SQLite writer 잠금으로 두 웹 프로세스의 용량 확인·파일 쓰기를 직렬화하고, 실제 프록시·두 독립 이미지·브라우저로 업로드와 구버전 화면을 검사합니다. 구현과 한계는 [웹 버전 호환성·동시 업로드](web-compatibility.md)에 정리합니다. 실제 서버의 부하·30분 관측·자동 만료/슬롯 재사용·배포 복귀는 별도입니다.
+업로드는 파일당 10 MiB, 고객별 50 MiB로 제한하며 본문 길이가 없는 업로드는 411로 거부합니다. 후속 M2 변경은 공용 SQLite writer 잠금으로 두 웹 프로세스의 용량 확인·파일 쓰기를 직렬화하고, 실제 프록시·두 독립 이미지·브라우저로 업로드와 구버전 화면을 검사합니다. 구현과 한계는 [웹 버전 호환성·동시 업로드](web-compatibility.md)에 정리합니다. 실제 서버의 부하·초기 검증·슬롯 재사용·배포 복귀 증거는 별도입니다.
 
 [기존 Linux PR CI](https://github.com/EVNSolution/EVN-MARKETING/actions/runs/35194264731)는 a7bf7d0의 합성 수집/DB/전송/계약/타입, 이미지 빌드, 비루트 Chromium 및 컨테이너 기동을 검증했습니다. 실제 서버의 용량·원본 로그인·시간당 실행·재부팅·무중단 배포·백업 복원을 검증한 것은 아닙니다.
 

@@ -40,8 +40,7 @@ CLOUD_HELPERS = {
 }
 CONTROLLER_FILES = {
     'deploy/controller.py', 'deploy/start-release.py', 'deploy/config.example.json',
-    'deploy/marketing-recover.service', 'deploy/marketing-release.service',
-    'deploy/marketing-release.timer', 'deploy/aws/cloudformation.json',
+    'deploy/marketing-recover.service', 'deploy/aws/cloudformation.json',
     'deploy/aws/foundation.json', 'deploy/aws/migration-inbox.json',
 }
 CONTROLLER_LIB = {

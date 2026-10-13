@@ -250,7 +250,6 @@ assert "docker build" not in workflow and "npm ci" not in workflow
 ci = (ROOT / ".github/workflows/ci.yml").read_text()
 assert "npm audit --omit=dev --audit-level=high" in ci
 assert "cache-from: type=gha" in ci and "cache-to: type=gha" in ci
-unit = (ROOT / "deploy/marketing-release.service").read_text()
-assert "controller.py expire" in unit and "recover" not in unit and "SuccessExitStatus=75" in unit
-assert "OnUnitInactiveSec=60s" in (ROOT / "deploy/marketing-release.timer").read_text()
+assert not (ROOT / "deploy/marketing-release.service").exists()
+assert not (ROOT / "deploy/marketing-release.timer").exists()
 print("cloud release boundary checks passed (synthetic only; no AWS operations)")
