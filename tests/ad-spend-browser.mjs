@@ -16,7 +16,7 @@ export async function checkAdSpendUi({ page, context, base, uploads, output }) {
   const storageState = await context.storageState(), evidence = []
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
   try {
-    for (const width of [1440, 390, 320]) {
+    for (const width of [1280, 1440, 390, 320]) {
       const mobile = width < 600 ? await context.browser().newContext({ storageState, viewport: { width, height: 1000 }, hasTouch: true, isMobile: true }) : null
       if (mobile) await mobile.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort())
       const view = mobile ? await mobile.newPage() : page
@@ -40,7 +40,7 @@ export async function checkAdSpendUi({ page, context, base, uploads, output }) {
           const start = mode === 'today' ? today : dates[0], end = mode === 'today' ? today : dates[count - 1]
           if (mode === 'zero') record.rows.forEach(r => { r.amount = '0' })
           if (mode === 'missing') record.rows = record.rows.filter(r => r.provider === 'naver')
-          if (mode === 'partial-month') record.rows = record.rows.filter(r => r.provider === 'naver' || !['2026-09-25', '2026-09-26'].includes(r.date))
+          if (mode === 'partial-month') record.rows = record.rows.filter(r => r.provider === 'naver' || !['2026-09-25', '2026-09-26'].includes(r.date)).map(r => ({ ...r, amount: r.provider === 'naver' ? '100000' : '150000' }))
           if (mode === 'empty') record.rows = []
           if (mode === 'failure') record.rows.filter(r => r.provider === 'naver').forEach(r => { r.issue = 'fetch_failed'; r.attemptedAt = '2026-10-12T00:00:00.000Z' })
           if (mode === 'mixed' || mode === 'unknown') record.rows.filter(r => r.provider === 'daangn').forEach(r => { r.vat = mode === 'mixed' ? 'excluded' : 'unknown' })
@@ -67,7 +67,7 @@ export async function checkAdSpendUi({ page, context, base, uploads, output }) {
           else assert.equal(body.adSpend.total.total, count === 30 ? '9009.00' : count === 2 ? '600.60' : '300.30')
           if (mode === 'failure') assert.match(await total.innerText(), /수집 오류[\s\S]*보관 금액/)
           if (mode === 'mixed' || mode === 'unknown') assert.match(await total.innerText(), /세금 기준 확인 필요/)
-          const expectedSummary = { one: '300.30원', two: '600.60원', month: '9,009.00원', 'partial-month': '8,608.60원', zero: '0원', missing: '100.10원', empty: '—', failure: '300.30원', mixed: '기준별 확인', unknown: '기준별 확인', 'unknown-only': '300.30원', precision: '9,007,199,254,741,193.323456789012원', today: '300.30원' }
+          const expectedSummary = { one: '300.30원', two: '600.60원', month: '9,009.00원', 'partial-month': '7,200,000원', zero: '0원', missing: '100.10원', empty: '—', failure: '300.30원', mixed: '기준별 확인', unknown: '기준별 확인', 'unknown-only': '300.30원', precision: '9,007,199,254,741,193.323456789012원', today: '300.30원' }
           assert.equal(await summarySpend.locator('p').first().innerText(), expectedSummary[mode])
           const summaryText = await summarySpend.innerText()
           if (['missing', 'partial-month'].includes(mode)) assert.match(summaryText, /일부 누락 · 확인된 금액\(전체기간 합계 미확정\)/)
@@ -81,8 +81,9 @@ export async function checkAdSpendUi({ page, context, base, uploads, output }) {
             const r = card.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, overflow: card.scrollWidth > card.clientWidth }
           }))
           assert.ok(boxes.every(box => !box.overflow && box.x >= 0 && box.right <= width), 'all five cards fit the viewport')
-          assert.equal(new Set(boxes.map(box => box.y)).size, width === 1440 ? 1 : 5, 'one desktop row and a mobile column')
+          assert.equal(new Set(boxes.map(box => box.y)).size, width >= 1280 ? 1 : 5, 'one desktop row and a mobile column')
           if (output && ['one', 'partial-month', 'precision', 'unknown-only'].includes(mode)) await summary.screenshot({ path: path.join(output, `ad-spend-summary-${width}-${mode}.png`) })
+          if (mode === 'partial-month') assert.ok(await summarySpend.locator('p').first().evaluate(el => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).lineHeight) + 1), 'normal million-won amount and currency stay on one line')
           const chart = section.getByRole('group', { name: '일별 실제 소진 광고비. 네이버와 당근의 확인된 금액과 수집 상태.', exact: true })
           await chart.scrollIntoViewIfNeeded()
           const target = chart.locator('[data-chart-date]').first()
@@ -108,6 +109,6 @@ export async function checkAdSpendUi({ page, context, base, uploads, output }) {
     }
     assert.equal((await context.request.get(base + '/api/uploads/_reports/ad-spend/current.json')).status(), 404)
     if (output) await writeFile(path.join(output, 'ad-spend-ui.json'), JSON.stringify(evidence, null, 2) + '\n')
-    console.log('Ad spend browser passed: PC1440/mobile390/320, five summary cards, shared 1/2/30-day range, partial month, zero/missing/failure/mixed/unknown VAT, today provisional, exact precision, table, pointer/touch/keyboard and private no-store API')
+    console.log('Ad spend browser passed: PC1280/1440/mobile390/320, five summary cards, shared 1/2/30-day range, million-won partial month, zero/missing/failure/mixed/unknown VAT, today provisional, exact precision, table, pointer/touch/keyboard and private no-store API')
   } finally { if (previous === null) await rm(file, { force: true }); else await writeFile(file, previous) }
 }

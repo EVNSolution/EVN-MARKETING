@@ -154,7 +154,7 @@ export default function ExternalDashboardClient() {
 function Metric({ title, value, detail, small = false }: { title: string; value: ReactNode; detail: string; small?: boolean }) {
   return <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5">
     <h2 className="text-sm font-medium text-slate-600">{title}</h2>
-    <p className={`mt-3 break-words font-bold tabular-nums tracking-tight text-slate-900 ${small ? 'text-base' : 'text-3xl'}`}>{value}</p>
+    <p className={`mt-3 break-words font-bold tabular-nums tracking-tight text-slate-900 ${small ? 'text-base' : 'text-3xl xl:text-2xl 2xl:text-3xl'}`}>{value}</p>
     <p className="mt-2 break-words text-xs leading-5 text-slate-500">{detail}</p>
   </section>
 }
