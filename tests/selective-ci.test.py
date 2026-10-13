@@ -41,6 +41,7 @@ class ClassificationTests(unittest.TestCase):
             (['app/api/customers/[id]/documents/route.ts'], (True, True)),
             (['tests/release-browser.mjs'], (True, False)),
             (['tests/deploy-controller-lab.py'], (False, True)),
+            (['tests/deploy-lab-preflight.py'], (False, True)),
             (['app/globals.css', 'app/fonts/Jost-variable.woff2', 'README.md'], (False, False)),
             (['docs/integrations/WARP_MARKETING_INQUIRIES.json'], (True, True)),
             (['.github/workflows/unknown.css'], (True, True)),

@@ -12,6 +12,7 @@ import shutil
 import signal
 import ssl
 import subprocess
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -406,13 +407,36 @@ class Controller:
         return self.docker('exec', 'evn-marketing-proxy', 'sh', '-c',
             "for p in /proc/[0-9]*/cmdline; do case $(tr '\\0' ' ' < \"$p\") in 'nginx: worker process'*) echo \"$p\";; esac; done").splitlines()
 
-    def proxy(self, active, previous=None):
+    def render_proxy(self, active, previous=None):
         previous = {**previous, 'id': previous['revision'], 'expiresAt': int(previous['expiresAt'] * 1000)} if previous else None
         mapping = {'active': {'id': active['revision'], 'slot': active['slot']}, 'previous': previous,
                    'publicUrl': self.config['publicUrl']}
-        output = self.docker('run', '--rm', '-i', '--network', 'none',
-            '-v', str(self.root / 'deploy' / 'nginx-config.mjs') + ':/renderer.mjs:ro',
+        return self.docker('run', '--rm', '-i', '--network', 'none',
+            '--mount', 'type=bind,source=' + str(self.root / 'deploy' / 'nginx-config.mjs') + ',target=/renderer.mjs,readonly',
             self.image(active), 'node', '/renderer.mjs', '/dev/stdin', stdin=json.dumps(mapping))
+
+    def preflight_proxy(self, candidate, origin):
+        # Use each image's real runtime user, not a root-side mode/readability guess.
+        # Check both activation and rollback before touching any live process/config.
+        try:
+            with tempfile.TemporaryDirectory(prefix='preflight-', dir=self.root / 'nginx') as temporary:
+                directory = Path(temporary)
+                os.chmod(directory, 0o755)
+                config = directory / 'nginx.conf'
+                for active, previous in ((candidate, {**origin, 'expiresAt': self.now() + WINDOW}),
+                                         (origin, None)):
+                    atomic(config, self.render_proxy(active, previous))
+                    os.chmod(config, 0o644)
+                    # Candidate DNS need not exist yet. Syntax validation has no app network/data access.
+                    self.docker('run', '--rm', '--network', 'none',
+                        '--add-host', 'blue:127.0.0.1', '--add-host', 'green:127.0.0.1',
+                        '-v', str(directory) + ':/etc/nginx:ro', '--entrypoint', 'nginx',
+                        self.config['proxyImage'], '-t', '-c', '/etc/nginx/nginx.conf')
+        except (Blocked, OSError):
+            raise Blocked('proxy_preflight_failed') from None
+
+    def proxy(self, active, previous=None):
+        output = self.render_proxy(active, previous)
         directory = self.root / 'nginx'
         proxy = self.inspect('evn-marketing-proxy')
         proxy_image = json.loads(self.docker('image', 'inspect', self.config['proxyImage']))[0]
@@ -508,11 +532,12 @@ class Controller:
             require(SHA.fullmatch(revision) and DIGEST.fullmatch(digest), 'release_identity')
             require(revision != origin['revision'], 'already_active')
             candidate = {'revision': revision, 'digest': digest, 'slot': 'green' if origin['slot'] == 'blue' else 'blue', 'owner': str(uuid.uuid4())}
-        if not rollback:
-            self.retire()
         self.healthy_web(origin, public=True)
         self.worker_ready(origin)
         self.preflight(candidate, origin)
+        self.preflight_proxy(candidate, origin)
+        if not rollback:
+            self.retire()
         self.save(phase='preparing', origin=origin, candidate=candidate)
         try:
             # The previous mapping has drained before its slot may be reused.

@@ -58,6 +58,8 @@ class FakeController:
         self.state = json.loads(self.path.read_text())
 
     def release(self, revision, digest, rollback=False):
+        if self.mode == 'preflight':
+            raise m.controller.Blocked('proxy_preflight_failed')
         FakeController.releases += 1
         target = self.state['previous'] if rollback else {'revision': revision, 'digest': digest}
         self.state = {'phase': 'stable', 'active': target}
@@ -90,6 +92,7 @@ assert m.outcome(record(), {'phase': 'stable', 'active': B})['state'] == 'succes
 assert m.outcome(record(), {'phase': 'stable', 'active': A}, completed=True)['state'] == 'failure'
 
 for mode, action, expected in [('success', 'release', 'success'), ('rollback', 'release', 'failure'),
+                               ('preflight', 'release', 'failure'),
                                ('blocked', 'release', 'error'), ('success', 'rollback', 'success')]:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory); fixture(root); github = GitHub()
@@ -101,7 +104,9 @@ for mode, action, expected in [('success', 'release', 'success'), ('rollback', '
         result = read_result(root)
         assert result['outcome']['state'] == expected and result['delivered'] == result['outcome']
         assert code == (0 if expected == 'success' else 1)
-        assert FakeController.releases == 1
+        assert FakeController.releases == (0 if mode == 'preflight' else 1)
+        if mode == 'preflight':
+            assert result['outcome']['description'] == 'Deployment interrupted or refused; original version restored/retained'
         assert [s['state'] for s in github.statuses[1]] == [expected, 'in_progress']
         assert (root / 'customer-data').read_bytes() == b'latest records and uploads must not change'
 
