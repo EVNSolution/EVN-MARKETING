@@ -236,5 +236,6 @@ assert 'deployment: false' in workflow and 'name: Marketing activate' in workflo
 assert 'sleep 1800' not in workflow and 'schedule:' not in workflow
 assert 'deployment-result.py flush' in (ROOT / 'deploy/marketing-result.service').read_text()
 assert 'OnUnitInactiveSec=60s' in (ROOT / 'deploy/marketing-result.timer').read_text()
-assert m.controller.WINDOW == 1800
+assert not hasattr(m.controller, 'WINDOW')
+assert not (ROOT / 'deploy/marketing-release.timer').exists()
 print('deployment result tests passed: success, rollback, recovery, outages, idempotence, identity and scoped App JWT')

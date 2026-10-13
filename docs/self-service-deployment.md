@@ -18,7 +18,7 @@ npm run deploy -- --source-sha SOURCE_SHA --ci-run-id CI_RUN_ID
 Artifact의 실행 번호·SHA·컨트롤러 bundle hash·image digest를 대조한다.
 ECR의 불변 SHA 태그와 최근 보안 검사도 다시 확인한다. 배포에서 이미지 빌드나 npm 설치는 하지 않는다.
 
-## 전환과 관찰
+## 초기 검증과 이전 화면 보호
 
 SSM은 root 소유의 고정 bundle을 검증하고 `deploy/start-release.py`를 실행한다.
 이 helper는 `marketing-deploy.service`라는 systemd transient unit으로 기존 controller를 실행한다.
@@ -31,7 +31,9 @@ SSM은 root 소유의 고정 bundle을 검증하고 `deploy/start-release.py`를
 기존 웹·worker·프록시 설정·배포 journal은 변경하지 않는다. 작업자가 선택하거나 생략할 수 없다.
 
 새 웹 readiness, 기존 worker 종료·lease 해제, 새 worker 준비·활성화까지 확인하면 `Marketing activate` Actions가 끝난다.
-이 성공은 활성화 확인이다. 서버는 기존 1,800초 검증과 자동 복귀를 계속 수행한다. 러너는 기다리지 않는다.
+이 성공은 활성화 확인이다. 서버는 공개 웹 정상 응답 5회와 활성화 이후 worker heartbeat 갱신을 확인한다.
+응답 확인 간격은 2초다. 조건을 충족하면 즉시 stable로 확정한다. 90초는 실패 판정 상한이며 고정 대기가 아니다.
+공개 응답·worker 상태 실패 또는 heartbeat 미갱신 시 기존 버전으로 자동 복귀한다. 러너는 이 검증을 기다리지 않는다.
 서버는 시작 전에 GitHub production deployment를 만들고 `in_progress`를 기록한다.
 최종 상태는 [GitHub Deployments](https://github.com/EVNSolution/EVN-MARKETING/deployments)에 자동 기록한다.
 
@@ -46,10 +48,10 @@ SSM은 root 소유의 고정 bundle을 검증하고 `deploy/start-release.py`를
 CI 빌드와 활성화 job은 `environment.deployment: false`를 사용한다.
 OIDC와 main 환경 제한은 유지하되, job 종료가 production deployment를 자동 성공 처리하지 않는다.
 서버의 배포 기록에는 대상 SHA/digest, 요청 실행 번호, 원래 Actions 링크를 남긴다.
-기존 Actions 실행의 conclusion을 나중에 바꾸거나 별도 Actions를 30분 실행하지 않는다.
+기존 Actions 실행의 conclusion을 나중에 바꾸지 않는다. 고정 30분 대기와 만료 타이머는 제거했다.
 
 `deploy/deployment-result.py`는 기존 controller를 같은 host lock 안에서 실행한다.
-기존 웹 자산·진행 요청 drain, 1,800초 검증, 데이터 볼륨, worker lease는 유지한다.
+데이터 볼륨, worker lease, 진행 요청 drain을 유지한다.
 GitHub/SSM 연결이 끊겨도 systemd 프로세스는 계속된다. 호스트 재부팅은 기존 recover unit이 복귀한다.
 최종 결과를 `state/deployment-results/<request-key>.json`에 먼저 저장한다.
 GitHub 전송 실패는 배포 결과를 바꾸지 않는다. `marketing-result.timer`가 60초 간격으로 미전송 결과만 재시도한다.
@@ -57,7 +59,11 @@ GitHub 전송 실패는 배포 결과를 바꾸지 않는다. `marketing-result.
 이전 배포 결과는 이후 배포의 journal로 덮어쓰지 않는다. 응답 유실 시 같은 요청의 deployment/status를 재사용한다.
 호스트가 꺼져 있거나 GitHub가 불통이면 결과 전달은 복구 후 이루어진다. 외부 장애 감시는 이 기능에 포함하지 않는다.
 
-새 배포는 기존 검증 완료까지 차단한다. 응답 유실 시 재실행하지 말고 기록된 요청과 SSM command ID를 확인한다.
+초기 검증이 끝나면 다음 배포를 허용한다. 이전 화면 보호 기간 때문에 다음 배포를 차단하지 않는다.
+현재 버전과 직전 버전의 웹을 유지한다. 다음 전진 배포가 직전 버전의 슬롯을 재사용할 때 매핑을 제거한다.
+기존 Nginx worker의 진행 중 요청이 끝난 뒤에만 이전 웹을 정리한다. 180초 안에 drain이 끝나지 않으면 슬롯을 재사용하지 않는다.
+직전보다 오래된 화면은 409 응답과 갱신 안내를 받는다. 입력 내용을 유지하며 쓰기 요청을 다른 버전으로 자동 재전송하지 않는다.
+응답 유실 시 재실행하지 말고 기록된 요청과 SSM command ID를 확인한다.
 
 ### 최초 결과 기록 연결
 
@@ -84,6 +90,11 @@ systemctl daemon-reload
 systemctl enable --now marketing-result.timer
 ```
 
+기존 설치를 업그레이드할 때는 host lock 아래에서 검증된 bundle을 설치하고,
+`marketing-release.timer`를 중지·비활성화한 뒤 기존 expiry service/timer 파일을 제거한다.
+`marketing-result.timer`와 `marketing-recover.service`는 유지한다. 기존 journal의 `expiresAt`는 무시한다.
+이후 설치에는 expiry service/timer가 없다.
+
 초기 설정은 배포 전에 한 번 수행한다. 이후 작업자 입력은 기존 배포 명령과 같다.
 타이머나 GitHub 인증이 준비되지 않으면 서비스 전환 전에 거부한다.
 App 설치 토큰은 실행 시 발급하며 저장소 한 개와 배포 쓰기 권한으로 다시 제한한다.
@@ -102,9 +113,10 @@ npm run deploy:rollback -- --source-sha CURRENT_MAIN_SHA
 
 배포에는 24시간 이내 암호화 EBS snapshot과 별도 볼륨 복원 검증이 필요하다.
 `data-ops.py backup --keep-web`은 웹을 유지하고 worker만 정상 종료한다.
+직전 버전의 웹도 유지하며 보호 시간 때문에 백업을 차단하지 않는다.
 복사 전·복사본·복사 후 DB 행과 업로드 hash가 같아야 백업을 인정한다.
 동시 수정으로 검증이 실패하면 백업을 거부하고 worker를 복구한다.
-기존 완전 정지 백업과 복원 검증 명령도 유지한다. 원본 볼륨은 교체하지 않는다.
+기존 완전 정지 백업은 이전 매핑의 요청을 자동 drain한 뒤 두 웹을 정지한다. 복원 검증 명령도 유지한다. 원본 볼륨은 교체하지 않는다.
 
 GitHub production environment는 main 브랜치만 허용한다.
 OIDC trust는 실제 저장소 immutable subject와 production environment를 정확히 제한한다.
@@ -138,11 +150,6 @@ diff 실패·빈 변경·새 브랜치·이력 재작성·수동 실행은 둘 �
 Actions 요약에는 비교 SHA, 경로별 판단 근거, 최종 검사 선택을 기록한다.
 main 이미지는 실제 merge SHA로 검증한다.
 
-실제 시간 합성 관찰이 필요하면 Linux에서 다음 명령을 실행한다.
-
-```sh
-docker build --target application --build-arg MARKETING_BUILD_REVISION="$GITHUB_SHA" -t evn-marketing:controller-base .
-python3 tests/deploy-controller-lab.py --real-time --report REPORT_PATH
-```
-
+controller transitions·recovery는 CI에서 실제 시계로 실행한다. 가속 시계나 별도 장시간 관측 모드는 없다.
+A→B→C→B→A 연속 전환, 각 초기 검증, 진행 요청 drain 2회와 복구 8개 시나리오가 필수다.
 이 합성 검사는 운영 배포 완료 증거를 대신하지 않는다.

@@ -143,7 +143,7 @@ def _runtime(controller):
 def run_recovery(controller_class, root, releases, fixture_lease_ms):
     """Return/print only scenario counts; leave a fresh, stable known release.
 
-    Lab keeps its accelerated observation clock, but startup/drain/lease waiting
+    Lab uses real clocks for activation, startup, drain and lease waiting. Recovery
     must use real delays. Call outside host_lock: each coordinator takes its own
     lock, and the parent never forks while holding that lock.
     """

@@ -18,8 +18,18 @@ def validate_reports(transitions, recovery, source):
         if traffic.get('errors') != 0 or not traffic.get('reads', 0) > 0:
             raise ValueError('controller traffic evidence missing')
     if (transitions.get('publicErrors') != 0 or transitions.get('heldUploadDrains') != 2
-            or transitions.get('controllerPublicProbes', 0) < 120):
+            or transitions.get('controllerPublicProbes', 0) < 20):
         raise ValueError('transition evidence incomplete')
+    if (transitions.get('mode') != 'real-clock'
+            or transitions.get('releaseSequence') != ['a', 'b', 'c', 'b', 'a']):
+        raise ValueError('consecutive releases must use real clocks without retention waits')
+    validations = transitions.get('activationChecks', [])
+    if (len(validations) != 4
+            or any(check.get('revision') != letter * 40 or check.get('publicChecks', 0) < 5
+                   or check.get('workerHeartbeatAdvanced') is not True
+                   or not 8 <= check.get('seconds', 0) < 90
+                   for check, letter in zip(validations, ('b', 'c', 'b', 'a')))):
+        raise ValueError('every activation must prove web health and a renewed worker heartbeat')
     required_preflight = {'release:' + name for name in (
         'unreadable_renderer', 'missing_renderer', 'invalid_renderer', 'invalid_nginx')}
     required_preflight.add('rollback:unreadable_renderer')

@@ -59,8 +59,11 @@ class DataOps(Controller):
 
     def quiesce(self, backup_id, operation='backup', keep_web=False):
         require(self.state['phase'] == 'stable' and not self.state.get('origin') and not self.state.get('candidate'), 'recovery_required')
+        # Online backup verifies both web writers without retiring either screen.
+        # Offline maintenance drains the previous mapping before stopping its web.
+        if not keep_web:
+            self.retire()
         previous = self.state.get('previous')
-        require(not previous or previous.get('drained'), 'compatibility_window')
         self.save(phase='maintenance', maintenance={'operation': operation, 'id': backup_id})
         self.stop_worker(self.state['active'])
         allowed = []

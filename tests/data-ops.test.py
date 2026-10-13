@@ -38,6 +38,12 @@ class Fake(m.DataOps):
     def running(self,name): return name in self.live
     def identity(self,*args): pass
     def check_schema(self,*args): self.events.append('schema')
+    def retire(self):
+        previous = self.state.get('previous')
+        if previous and not previous.get('drained'):
+            self.events.append('retire')
+            if getattr(self, 'fail_retire', False): raise m.Blocked('proxy_drain_timeout')
+            self.save(previous={**previous, 'drained':True})
     def stop_worker(self,*args): self.events.append('stop_worker'); self.live.discard('evn-marketing-worker')
     def stop_web(self,release): self.events.append('stop_web'); self.live.discard(self.web_name(release))
     def lease_clear(self,*args,**kwargs): m.require(not self.fail_lease,'lease_not_released')
@@ -108,14 +114,41 @@ class Checks(unittest.TestCase):
         with self.assertRaisesRegex(m.Blocked,'volume_writer_running'): self.ops.backup()
         self.assertNotIn('snapshot',self.ops.events)
 
-    def test_encryption_and_compatibility_window_block_before_stop(self):
+    def test_retained_previous_does_not_block_backup_and_offline_mode_drains_first(self):
+        for keep_web in (True, False):
+            with self.subTest(keep_web=keep_web):
+                ops = Fake(self.root)
+                previous = {**active,'revision':'b'*40,'digest':'sha256:'+'b'*64,'slot':'green','drained':False}
+                ops.state['previous'] = previous
+                ops.live.add('evn-marketing-web-green')
+                ops.backup(keep_web=keep_web)
+                self.assertEqual(ops.state['phase'],'stable')
+                if keep_web:
+                    self.assertNotIn('retire',ops.events)
+                    self.assertNotIn('stop_web',ops.events)
+                    self.assertFalse(ops.state['previous']['drained'])
+                    self.assertIn('evn-marketing-web-green',ops.live)
+                    ops.fail_data = True
+                    with self.assertRaisesRegex(m.Blocked,'data_verification'): ops.backup(keep_web=True)
+                    self.assertEqual(ops.state['phase'],'stable')
+                    self.assertIn('evn-marketing-worker',ops.live)
+                    self.assertIn('evn-marketing-web-green',ops.live)
+                else:
+                    self.assertTrue(ops.state['previous']['drained'])
+                    self.assertLess(ops.events.index('retire'),ops.events.index('stop_worker'))
+                    self.assertEqual(ops.events.count('stop_web'),2)
+
+    def test_encryption_or_failed_drain_blocks_before_worker_stop(self):
         self.ops.encrypted = False
         with self.assertRaises(m.Blocked): self.ops.backup()
-        self.assertEqual(self.ops.state['phase'],'stable')
+        self.assertNotIn('stop_worker',self.ops.events)
         self.ops.encrypted = True
-        self.ops.state['previous'] = {**active,'drained':False}
-        with self.assertRaisesRegex(m.Blocked,'compatibility_window'): self.ops.backup()
-        self.assertEqual(self.ops.state['phase'],'stable')
+        self.ops.state['previous'] = {**active,'slot':'green','drained':False}
+        self.ops.fail_retire = True
+        with self.assertRaisesRegex(m.Blocked,'proxy_drain_timeout'): self.ops.backup()
+        self.assertNotIn('stop_worker',self.ops.events)
+        self.assertNotIn('stop_web',self.ops.events)
+        self.assertNotIn('snapshot',self.ops.events)
 
     def test_only_completed_snapshot_separate_restore_publishes_gate(self):
         result = self.ops.backup()

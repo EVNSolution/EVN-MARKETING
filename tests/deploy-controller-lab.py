@@ -1,4 +1,4 @@
-"""Isolated Docker acceptance; real-time observation is explicitly opt-in."""
+"""Isolated Docker acceptance with real clocks and condition-based activation."""
 import argparse
 import importlib.util
 import json
@@ -15,13 +15,10 @@ import urllib.request
 import uuid
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--real-time', action='store_true', help='observe one release for 1800 real seconds; default runs accelerated transitions and crash recovery')
 parser.add_argument('--self-test', action='store_true', help='check lab timing without Docker or CI environment')
 parser.add_argument('--report', type=Path)
 parser.add_argument('--suite', choices=('full', 'transitions', 'recovery'), default='full')
 options = parser.parse_args()
-if options.real_time and options.suite != 'full':
-    parser.error('real-time observation uses the full suite')
 ROOT = Path.cwd()
 TIMINGS = Path(os.environ['RUNNER_TEMP']) / 'marketing-controller-timings.jsonl' if os.environ.get('RUNNER_TEMP') else None
 STARTED = time.monotonic()
@@ -61,42 +58,28 @@ class Lab(m.Controller):
 
     def __init__(self, root):
         super().__init__(root)
-        self.clock = time.time()
         self.probes = 0
-        self.real_time = False
         self.exercise_drain = False
         self.held = None
         self.drains = 0
-        self.observation_start = None
-        self.observation_seconds = None
-
-    def now(self):
-        return time.time() if self.real_time else self.clock
-
-    def monotonic(self):
-        return time.monotonic() if self.real_time else self.clock
+        self.validations = []
 
     def wait(self, seconds):
         started = time.monotonic()
-        if not self.real_time and self.state['phase'] == 'observing':
-            self.clock += seconds * 30
-            time.sleep(0.01)
-        else:
-            self.clock += seconds
-            time.sleep(seconds)
+        time.sleep(seconds)
         record_timing('wait.' + self.state['phase'], started)
 
-    def save(self, **changes):
-        if changes.get('phase') == 'switching':
-            self.observation_start = time.monotonic()
-        if changes.get('phase') == 'stable' and self.state['phase'] == 'observing':
-            self.observation_seconds = time.monotonic() - self.observation_start
-        return super().save(**changes)
+    def validate_activation(self, release, prepared_health):
+        started = time.monotonic()
+        result = super().validate_activation(release, prepared_health)
+        self.validations.append({**result, 'revision': release['revision'],
+                                 'seconds': round(time.monotonic() - started, 3)})
+        return result
 
     def secrets(self, worker):
         secrets = {'AUTH_SECRET': 'synthetic-lab-secret-at-least-32-characters'}
         if worker:
-            secrets['MARKETING_TEST_LEASE_MS'] = str(180000 if self.real_time else 10000)
+            secrets['MARKETING_TEST_LEASE_MS'] = '10000'
         return secrets
 
     def preflight(self, release, other):
@@ -111,14 +94,9 @@ class Lab(m.Controller):
             self.probes += 1
         return result
 
-    def render_proxy(self, active, previous=None):
-        if previous and not self.real_time:
-            previous = {**previous, 'expiresAt': time.time() + max(0, previous['expiresAt'] - self.clock)}
-        return super().render_proxy(active, previous)
-
     def retire(self):
         previous = self.state.get('previous')
-        if self.exercise_drain and previous and not previous.get('drained') and self.now() >= previous['expiresAt']:
+        if self.exercise_drain and previous and not previous.get('drained'):
             for name in ('held', 'finish-held', 'held-result.json'):
                 (self.root/'control'/name).unlink(missing_ok=True)
             self.held = subprocess.Popen(['docker', 'exec', 'marketing-lab-traffic', 'node',
@@ -157,29 +135,18 @@ class Lab(m.Controller):
 def self_test():
     from unittest.mock import patch
 
-    assert m.WINDOW == 1800
+    assert not hasattr(m, 'WINDOW')
     lab = Lab.__new__(Lab)
-    lab.clock, lab.real_time, lab.state = 0, False, {'phase': 'observing'}
+    lab.state = {'phase': 'observing'}
     with patch.object(time, 'sleep') as sleep:
-        lab.wait(1)
-        assert lab.clock == 30 and sleep.call_args.args == (0.01,)
+        lab.wait(m.ACTIVATION_INTERVAL)
+        assert sleep.call_args.args == (m.ACTIVATION_INTERVAL,)
         lab.state['phase'] = 'draining'
         lab.wait(1)
-        assert lab.clock == 31 and sleep.call_args.args == (1,)
-        lab.state['phase'], lab.real_time = 'observing', True
-        lab.wait(1)
-        assert lab.clock == 32 and sleep.call_args.args == (1,)
-        lab.clock, lab.real_time = 0, False
-        for _ in range(2):
-            for _ in range(m.WINDOW // 30):
-                lab.wait(1)
-        assert lab.clock == 2 * m.WINDOW and 2 * (m.WINDOW // 30) == 120
+        assert sleep.call_args.args == (1,)
     assert lab.secrets(True)['MARKETING_TEST_LEASE_MS'] == '10000'
     assert 'MARKETING_TEST_LEASE_MS' not in lab.secrets(False)
-    lab.real_time = True
-    assert lab.secrets(True)['MARKETING_TEST_LEASE_MS'] == '180000'
-    assert 'MARKETING_TEST_LEASE_MS' not in lab.secrets(False)
-    print(json.dumps({'ok': True, 'timingSelfTest': True, 'observationSteps': 120, 'dockerRun': False}))
+    print(json.dumps({'ok': True, 'timingSelfTest': True, 'realClock': True, 'dockerRun': False}))
 
 
 if options.self_test:
@@ -201,12 +168,10 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
     probes = []
     latencies = []
     probe_times = []
-    fixture_lease_ms = 180000 if options.real_time else 10000
+    fixture_lease_ms = 10000
     summary = {'sourceSha': os.environ.get('GITHUB_SHA'), 'suite': options.suite, 'synthetic': True, 'aws': False,
-               'hostReboot': False, 'ssmDisconnect': False, 'observations': [],
-               'mode': 'real-time' if options.real_time else 'accelerated',
-               'fixtureLeaseMs': fixture_lease_ms,
-               'observationAccelerationFactor': 1 if options.real_time else 30}
+               'hostReboot': False, 'ssmDisconnect': False, 'mode': 'real-clock',
+               'fixtureLeaseMs': fixture_lease_ms}
     def observe():
         context = ssl.create_default_context(cafile=str(root/'tls/cert.pem'))
         while not stopped.is_set():
@@ -214,7 +179,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
                 started = time.monotonic()
                 with urllib.request.urlopen('https://localhost:3443/api/readyz', context=context, timeout=5) as response:
                     value = json.load(response)
-                    assert response.status == 200 and value['ok'] and value['revision'] in ('a'*40, 'b'*40)
+                    assert response.status == 200 and value['ok'] and value['revision'] in ('a'*40, 'b'*40, 'c'*40)
                     probes.append(value['revision'])
                     latencies.append(time.monotonic() - started)
                     probe_times.append(started)
@@ -256,7 +221,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         shutil.copy(ROOT / 'tests/deploy-lab-worker.mjs', fixture / 'worker.mjs')
         (fixture / 'Dockerfile').write_text('FROM evn-marketing:controller-base\nUSER root\nARG REVISION\nRUN node -e "const f=require(\'fs\');const p=\'/app/schema-manifest.json\';const m=JSON.parse(f.readFileSync(p));m.revision=process.env.REVISION;f.writeFileSync(p,JSON.stringify(m))"\nCOPY worker.mjs /app/worker.mjs\nUSER node\n')
         releases = []
-        for character, slot in (('a', 'blue'), ('b', 'green')):
+        for character, slot in (('a', 'blue'), ('b', 'green'), *([('c', 'blue')] if options.suite != 'recovery' else [])):
             revision = character * 40
             tag = '127.0.0.1:5000/evn-marketing:' + revision
             docker('build', '--builder', 'default', '--platform', 'linux/amd64', '--build-arg', 'REVISION=' + revision,
@@ -264,7 +229,7 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
             docker('push', tag)
             digest = json.loads(docker('image', 'inspect', tag))[0]['RepoDigests'][0].split('@')[1]
             releases.append({'revision': revision, 'digest': digest, 'slot': slot, 'owner': str(uuid.uuid4())})
-        a, b = releases
+        a, b = releases[:2]
         # Create only a synthetic volume, then use the existing app's actual schema/readiness.
         docker('run', '--rm', '--network', 'none', '-v', str(ROOT) + ':/src:ro', '-v', 'evn-marketing-data:/data', 'evn-marketing:controller-base', 'node', '/src/tests/release-setup.mjs')
         docker('run', '--rm', '--network', 'none', '-v', 'evn-marketing-data:/data', 'evn-marketing:controller-base', 'node', '-e',
@@ -282,13 +247,11 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
         with m.host_lock(root):
             m.bootstrap_journal(root, a['revision'], a['digest'])
             controller = Lab(root)
-            controller.real_time = options.real_time
             controller.bootstrap()
         assert 'evn-marketing-worker' not in docker('ps', '-a', '--format', '{{.Names}}').splitlines()
         config['collectorEnabled'] = True
         (root/'config.json').write_text(json.dumps(config))
         controller = Lab(root)
-        controller.real_time = options.real_time
         a = controller.state['active']
         releases[0] = a
         controller.start(a, worker=True)
@@ -310,31 +273,36 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
             observer.start()
             controller.release(b['revision'], b['digest'])
             assert controller.state['active']['digest'] == b['digest']
-            assert controller.state['previous']['drained']
-            if not options.real_time:
-                summary['preflightRejections'] += preflight.run_preflight(controller, root, a, rollback=True)
-                controller.release('', '', rollback=True)
-                assert controller.state['active']['digest'] == a['digest']
-                # Fast probes exercise two state transitions; they are not 3600 real seconds of observation.
-                assert controller.probes >= 120
-                assert controller.drains == 2
-                controller.exercise_drain = False
-                # Actual worker failure after the public switch must restore the old pair.
-                original = controller.worker_ready
-                def fail_worker(release, retry=True):
-                    result = original(release, retry)
-                    if release['slot'] == 'green':
-                        raise m.Blocked('synthetic_source_login_failure')
-                    return result
-                controller.worker_ready = fail_worker
-                try:
-                    controller.release(b['revision'], b['digest'])
-                    raise AssertionError('injected source failure was not rejected')
-                except m.Blocked as error:
-                    assert str(error) == 'release_reverted', str(error)
-                # restore_origin already runs the full readiness sequence.
-                controller.probe(a, public=True)
-                assert controller.state['active']['digest'] == a['digest']
+            assert not controller.state['previous']['drained'] and 'expiresAt' not in controller.state['previous']
+            c = releases[2]
+            # No retention sleep or clock jump between consecutive releases.
+            controller.release(c['revision'], c['digest'])
+            assert controller.state['active']['digest'] == c['digest']
+            summary['preflightRejections'] += preflight.run_preflight(controller, root, b, rollback=True)
+            controller.release('', '', rollback=True)
+            assert controller.state['active']['digest'] == b['digest']
+            controller.release(a['revision'], a['digest'])
+            assert controller.state['active']['digest'] == a['digest']
+            assert controller.drains == 2
+            summary['releaseSequence'] = ['a', 'b', 'c', 'b', 'a']
+            summary['activationChecks'] = controller.validations
+            controller.exercise_drain = False
+            # Actual worker failure after the public switch must restore the old pair.
+            original = controller.worker_ready
+            def fail_worker(release, retry=True):
+                result = original(release, retry)
+                if release['slot'] == 'green' and controller.state['phase'] == 'observing':
+                    raise m.Blocked('synthetic_source_login_failure')
+                return result
+            controller.worker_ready = fail_worker
+            try:
+                controller.release(b['revision'], b['digest'])
+                raise AssertionError('injected source failure was not rejected')
+            except m.Blocked as error:
+                assert str(error) == 'release_reverted', str(error)
+            controller.worker_ready = original
+            controller.probe(a, public=True)
+            assert controller.state['active']['digest'] == a['digest']
             result = docker('exec', controller.web_name(controller.state['active']), 'node', '-e', "const D=require('better-sqlite3');const d=new D('/data/marketing.db',{readonly:true});if(d.pragma('integrity_check',{simple:true})!=='ok'||d.prepare('SELECT count(*) n FROM User').get().n!==1||d.prepare('SELECT memo FROM Customer WHERE id=?').get('synthetic-parallel').memo!=='synthetic worker committed after activation')process.exit(1);console.log('data_preserved')")
             assert result == 'data_preserved'
             stopped.set()
@@ -344,23 +312,16 @@ with tempfile.TemporaryDirectory(prefix='marketing-controller-lab-') as temporar
             summary['publicProbes'] = len(probes)
             summary['controllerPublicProbes'] = controller.probes
             summary['publicErrors'] = len(errors)
+            summary['publicP95Ms'] = round(sorted(latencies)[int(len(latencies) * 0.95)] * 1000, 2)
+            summary['maxProbeGapSeconds'] = round(max(b-a for a,b in zip(probe_times, probe_times[1:])), 3)
             summary['heldUploadDrains'] = controller.drains
             record_timing('section.transitions', transition_started)
-        if options.real_time:
-            assert controller.observation_seconds >= m.WINDOW, 'real observation was shorter than 1800 seconds'
-            assert controller.drains == 1 and controller.state['previous']['drained']
-            assert len(probes) >= 1800
-            assert max(b-a for a,b in zip(probe_times, probe_times[1:])) < 5, 'public probe gap exceeded 5 seconds'
-            summary['observations'].append({'seconds': controller.observation_seconds, 'publicProbes': len(probes),
-                'publicErrors': len(errors), 'p95Ms': sorted(latencies)[int(len(latencies)*0.95)]*1000,
-                'maxGapSeconds': max(b-a for a,b in zip(probe_times, probe_times[1:])),
-                'heldUploadDrains': controller.drains, 'activeDigest': controller.state['active']['digest']})
-        elif options.suite in ('full', 'recovery'):
+        if options.suite in ('full', 'recovery'):
             recovery_started = time.monotonic()
             recovery_spec = importlib.util.spec_from_file_location('lab_recovery', ROOT/'tests/deploy-lab-recovery.py')
             recovery = importlib.util.module_from_spec(recovery_spec)
             recovery_spec.loader.exec_module(recovery)
-            summary['recovery'] = recovery.run_recovery(Lab, root, releases, fixture_lease_ms)
+            summary['recovery'] = recovery.run_recovery(Lab, root, releases[:2], fixture_lease_ms)
             record_timing('section.recovery', recovery_started)
         summary['ok'] = True
         if TIMINGS and TIMINGS.exists():

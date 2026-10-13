@@ -60,7 +60,7 @@ async function writeRequest(path, method, body, extra) {
   } catch (error) {
     if (!error.releaseExpired) throw error
     const revision = JSON.parse((await request('/api/readyz')).body).revision
-    assert.match(revision, /^[ab]{40}$/)
+    assert.match(revision, /^[abc]{40}$/)
     assert.notEqual(revision, extra['x-deployment-id'])
     counters.expiredReleaseReloads++
     return request(path, method, body, { ...extra, 'x-deployment-id': revision })
@@ -76,7 +76,7 @@ function multipart(payload) {
 try {
   if (process.argv[2] === 'hold') {
     const revision = process.argv[3]
-    assert.match(revision, /^[ab]{40}$/)
+    assert.match(revision, /^[abc]{40}$/)
     const { body, headers: extra } = multipart('%PDF-synthetic-held-across-retirement')
     const result = await request('/api/customers/synthetic-held/documents', 'POST', body,
       { ...extra, 'x-deployment-id': revision }, true)
@@ -89,7 +89,7 @@ try {
     let cycle = 0
     while (!existsSync('/control/stop')) {
       const revision = JSON.parse((await request('/api/readyz')).body).revision
-      assert.match(revision, /^[ab]{40}$/)
+      assert.match(revision, /^[abc]{40}$/)
       await Promise.all([0, 1].map(async index => {
         const id = `synthetic-load-${index}`, memo = `synthetic-cycle-${cycle}`
         await writeRequest(`/api/customers/${id}`, 'PUT', Buffer.from(JSON.stringify({ memo })),

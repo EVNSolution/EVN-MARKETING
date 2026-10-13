@@ -98,7 +98,7 @@ for phase in switch expire; do
 import { writeFileSync, renameSync } from 'node:fs';
 import { renderNginx } from './deploy/nginx-config.mjs';
 const [directory, a, b, phase] = process.argv.slice(2);
-const previous = { id: a, slot: 'blue', expiresAt: phase === 'switch' ? Date.now() + 30 * 60_000 : Date.now() - 1 };
+const previous = phase === 'switch' ? { id: a, slot: 'blue' } : null;
 writeFileSync(`${directory}/nginx/next.conf`, renderNginx({ active: { id: b, slot: 'green' }, previous }).replace('http {', 'http {\n  client_header_timeout 5s;'));
 renameSync(`${directory}/nginx/next.conf`, `${directory}/nginx/nginx.conf`);
 NODE

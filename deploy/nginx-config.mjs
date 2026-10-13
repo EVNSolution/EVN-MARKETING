@@ -2,13 +2,12 @@ import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 // Only these two private upstreams exist. Request values never become hostnames or paths.
-export function renderNginx({ active, previous = null, publicUrl = null }, now = Date.now()) {
+export function renderNginx({ active, previous = null, publicUrl = null }) {
   const valid = item => item && /^[0-9a-f]{40}$/.test(item.id) && ['blue', 'green'].includes(item.slot)
-  if (!valid(active) || (previous && (!valid(previous) || previous.id === active.id || previous.slot === active.slot
-    || !Number.isSafeInteger(previous.expiresAt) || previous.expiresAt > now + 30 * 60_000))) throw new Error('invalid_release_mapping')
+  if (!valid(active) || (previous && (!valid(previous) || previous.id === active.id || previous.slot === active.slot))) throw new Error('invalid_release_mapping')
   if (publicUrl !== null && !/^https:\/\/[a-z0-9.-]+(?::[0-9]+)?$/.test(publicUrl)) throw new Error('invalid_public_url')
   const authority = publicUrl === null ? null : new URL(publicUrl).host
-  const releases = [active, ...(previous && previous.expiresAt > now ? [previous] : [])]
+  const releases = [active, ...(previous ? [previous] : [])]
   const identities = releases.flatMap(({ id }) => [`"${id}:" ${id};`, `":${id}" ${id};`, `"${id}:${id}" ${id};`]).join('\n    ')
   const slots = releases.map(({ id, slot }) => `"1:${id}:0" ${slot};`).join('\n    ')
   return `worker_processes 1;
@@ -46,10 +45,6 @@ http {
     ~^0: ${active.slot};
     ${slots}
   }
-  map "$request_method:$http_accept:$version_required" $release_cookie {
-    default "";
-    "~^GET:.*text/html.*:0$" "marketing_release=${active.id}; Path=/; Max-Age=1800; HttpOnly; SameSite=Lax; Secure";
-  }
   map $http_accept $release_error_type {
     default "application/json; charset=utf-8";
     "~*text/html" "text/html; charset=utf-8";
@@ -76,7 +71,6 @@ http {
     location / {
       if ($marketing_slot = rejected) { return 409; }
       add_header X-Marketing-Slot $marketing_slot always;
-      add_header Set-Cookie $release_cookie;
       proxy_pass http://$marketing_slot;
     }
     location @release_expired {
