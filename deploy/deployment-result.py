@@ -79,6 +79,7 @@ def installation_token():
     grant = api('POST', f'/app/installations/{installation_id}/access_tokens', jwt,
         {'repositories': ['EVN-MARKETING'], 'permissions': {'deployments': 'write'}})
     if (grant.get('permissions', {}).get('deployments') != 'write'
+            or grant.get('permissions', {}).get('metadata', 'read') != 'read'
             or any(k not in ('deployments', 'metadata') for k in grant.get('permissions', {}))
             or [r.get('full_name') for r in grant.get('repositories', [])] != [REPO]):
         raise ValueError('deployment App token scope mismatch')
@@ -174,6 +175,15 @@ def unit_running():
         ('marketing-deploy.service', 'marketing-recover.service'))
 
 
+def seal_interrupted(root, state):
+    """Called under the host lock, before another transaction can replace the journal."""
+    for path in sorted((root / 'state/deployment-results').glob('*.json')):
+        record = json.loads(path.read_text())
+        if not record.get('outcome'):
+            record['outcome'] = outcome(record, state)
+            save(path, record)
+
+
 def flush(root=ROOT):
     directory = root / 'state/deployment-results'
     if not directory.exists():
@@ -213,6 +223,7 @@ def run(action, revision, digest, key, root=ROOT):
     with controller.host_lock(root):
         ctl = controller.Controller(root)
         controller.require(ctl.state['phase'] == 'stable', 'recovery_required')
+        seal_interrupted(root, ctl.state)
         origin = ctl.state['active']
         target = ctl.state.get('previous') if action == 'rollback' else {'revision': revision, 'digest': digest}
         controller.require(target and target['revision'] != origin['revision'], 'no_different_release')

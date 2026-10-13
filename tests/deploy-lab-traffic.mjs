@@ -130,9 +130,11 @@ try {
   }
 } catch (error) {
   const known = new Set(['held_request_timeout', 'synthetic_request_timeout', 'synthetic_http_failure'])
-  console.error(JSON.stringify({ ok: false, httpStatus: failedStatus, errorType: error.name,
+  const failure = { ok: false, mode: process.argv[2] || 'load', httpStatus: failedStatus, errorType: error.name,
     reason: known.has(error.message) ? error.message : 'synthetic_request_failed',
-    code: ['ECONNRESET', 'EPIPE', 'ECONNREFUSED'].includes(error.code) ? error.code : null }))
+    code: ['ECONNRESET', 'EPIPE', 'ECONNREFUSED'].includes(error.code) ? error.code : null }
+  console.error(JSON.stringify(failure))
+  if (process.argv[2] === 'hold') writeFileSync('/control/held-result.json', JSON.stringify(failure))
   writeFileSync('/control/traffic-failed', 'synthetic_traffic_failed\n')
   process.exitCode = 1
 }

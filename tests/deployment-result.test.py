@@ -150,6 +150,19 @@ for active, phase, expected in [(A, 'stable', 'failure'), (B, 'stable', 'success
             m.flush(root)
         assert read_result(root)['delivered']['state'] == expected
 
+# A new deployment seals the interrupted old request before replacing the host journal.
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory); fixture(root); github = GitHub()
+    pending = root / 'state/deployment-results/run-122-1.json'; pending.parent.mkdir()
+    m.save(pending, record('run-122-1'))
+    FakeController.mode = 'success'
+    with patch.object(m, 'api', side_effect=github), patch.object(m, 'installation_token', return_value='synthetic-token'), \
+            patch.object(m.controller, 'Controller', FakeController), \
+            patch.object(m.subprocess, 'run', return_value=SimpleNamespace(returncode=0)):
+        assert m.run('release', B['revision'], B['digest'], 'run-123-1', root) == 0
+    assert read_result(root, 'run-122-1')['outcome']['state'] == 'failure'
+    assert read_result(root, 'run-123-1')['outcome']['state'] == 'success'
+
 # Lost create/status responses and a restarted retry do not create duplicate deployments/statuses.
 for lost in ('fail_create_response', 'fail_status_response'):
     with tempfile.TemporaryDirectory() as directory:

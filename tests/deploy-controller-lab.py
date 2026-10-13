@@ -123,7 +123,7 @@ class Lab(m.Controller):
                 (self.root/'control'/name).unlink(missing_ok=True)
             self.held = subprocess.Popen(['docker', 'exec', 'marketing-lab-traffic', 'node',
                 '/src/tests/deploy-lab-traffic.mjs', 'hold', previous['revision']],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                stdout=subprocess.DEVNULL, stderr=None)
             deadline = time.monotonic() + 10
             while not (self.root/'control/held').exists():
                 assert self.held.poll() is None and time.monotonic() < deadline, 'held upload did not start'
@@ -135,7 +135,10 @@ class Lab(m.Controller):
             try:
                 assert set(workers) & set(self.proxy_workers()), 'long request did not retain the old proxy worker'
                 time.sleep(2)
-                assert self.held.poll() is None and set(workers) & set(self.proxy_workers()), 'request drained before its body completed'
+                current_workers = self.proxy_workers()
+                assert self.held.poll() is None and set(workers) & set(current_workers), (
+                    'request drained before its body completed', self.held.poll(), workers, current_workers,
+                    (self.root/'control/held-result.json').read_text() if (self.root/'control/held-result.json').exists() else 'no held result')
                 (self.root/'control/finish-held').touch()
                 super().drained_proxy(workers)
                 assert self.held.wait(timeout=15) == 0, 'held upload failed'
