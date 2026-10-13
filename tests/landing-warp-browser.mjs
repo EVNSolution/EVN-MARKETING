@@ -16,6 +16,8 @@ export async function checkLandingWarpUi({ page, context, db, base, output }) {
   }
   db.prepare('INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,name,phone,lastSeenAt) VALUES(?,?,?,?,?,?,?,?,?,?)')
     .run('collected-duplicate', 'mleverage-admin', '55f9a8bb-73f9-4316-bcd7-7dcdce0bdcc3', '5c7a6115-a0a9-4e8d-bf65-efce52195fa4', '00000000-0000-4000-8000-000000009003', '2026-10-08', '09:01', '수집 중복 합성', '+82 10 9898 0002', at)
+  db.prepare('INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,name,phone,lastSeenAt) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run('collected-new', 'mleverage-admin', '55f9a8bb-73f9-4316-bcd7-7dcdce0bdcc3', '5c7a6115-a0a9-4e8d-bf65-efce52195fa4', '00000000-0000-4000-8000-000000009004', '2026-10-08', '09:01', '수집 정상 합성', '01098980004', at)
   db.prepare("UPDATE InquirySyncState SET status='ready',workerOwner='synthetic-ui-worker',workerHeartbeatAt=?,workerLeaseExpiresAt=?")
     .run(at, new Date(Date.now() + 300_000).toISOString())
   for (const width of [1440, 390, 320]) {
@@ -52,6 +54,25 @@ export async function checkLandingWarpUi({ page, context, db, base, output }) {
     const reviewed = await (await context.request.get(base + '/api/inquiries?source=landing&review=reviewed')).json()
     assert.deepEqual(reviewed.rows.map(row => row.id), ['landing-duplicate'])
     assert.equal(reviewed.warp.reviewed, 1)
+    for (const [source, id, name] of [['landing', 'landing-new', '홈페이지 정상 합성'], ['collected', 'collected-new', '수집 정상 합성']]) {
+      for (const [state, deliveredAt, label] of [
+        ['warp_customer_lead_complete', at, '고객·리드 등록완료'],
+        ['warp_customer_only', null, '고객 등록 확인 · 리드 미완료'],
+        ['warp_lead_mapping_unavailable', null, '담당자 또는 활성 모델을 확인하지 못해'],
+      ]) {
+        db.prepare('UPDATE Inquiry SET warpError=?,warpDeliveredAt=? WHERE id=?').run(state, deliveredAt, id)
+        await page.goto(base + '/inquiries?source=' + source)
+        const target = page.locator(width >= 768 ? 'tbody tr' : 'article').filter({ hasText: name })
+        await target.getByText(label, { exact: state !== 'warp_lead_mapping_unavailable' }).waitFor()
+        assert.equal(await target.getByRole('button', { name: '등록하기', exact: true }).count(), state === 'warp_lead_mapping_unavailable' ? 1 : 0)
+        if (width < 768) assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+        if (output) {
+          await target.scrollIntoViewIfNeeded()
+          await page.screenshot({ path: path.join(output, `customer-lead-${width}-${source}-${state}.png`) })
+        }
+      }
+      db.prepare('UPDATE Inquiry SET warpError=NULL,warpDeliveredAt=NULL WHERE id=?').run(id)
+    }
   }
   db.prepare("UPDATE Inquiry SET warpError='warp_landing_sending' WHERE id='landing-new'").run()
   await page.goto(base + '/inquiries?source=landing')

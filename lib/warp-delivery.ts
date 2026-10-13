@@ -12,6 +12,9 @@ export const MANUAL_REGISTRATION = 'warp_manual_requested'
 export const MANUAL_CONFIRMATION = 'warp_manual_confirmed'
 export const WARP_EXISTING_CUSTOMER = 'warp_existing_customer'
 export const WARP_RECEIPT_UNVERIFIED = 'warp_receipt_unverified'
+export const CUSTOMER_LEAD_POLICY = 'customer-lead-v1'
+export const CUSTOMER_LEAD_COMPLETE = 'warp_customer_lead_complete'
+export const CUSTOMER_ONLY = 'warp_customer_only'
 export const DUPLICATE_RECHECK = 'warp_duplicate_recheck_requested'
 export const DUPLICATE_RECHECK_FAILED = 'warp_duplicate_recheck_failed'
 export const DUPLICATE_REVIEWED = 'warp_duplicate_reviewed'
@@ -21,12 +24,14 @@ export const scope = { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_I
 export const deliveryScopes = { OR: [scope, landingScope] }
 const connectionErrors = ['warp_auth_required', 'warp_not_configured', 'warp_endpoint_missing', 'warp_unavailable', 'warp_invalid_receipt', 'warp_registration_guard_unavailable', 'warp_duplicate_check_unavailable']
 const duplicateErrors = ['warp_customer_conflict', 'warp_phone_duplicate', 'warp_local_duplicate', WARP_EXISTING_CUSTOMER, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED]
-const duplicateRemedy = 'WARP에서 해당 연락처로 기존 고객을 확인해 주세요. 연락처가 잘못됐다면 원본 문의를 수정해 주세요.'
+const duplicateRemedy = 'WARP에서 해당 연락처로 기존 고객과 리드를 확인해 주세요. 연락처가 잘못됐다면 원본 문의를 수정해 주세요.'
 export type Env = Readonly<Record<string, string | undefined>>
 type InquiryPayload = typeof scope & { sourceId: string; inquiryDate: string; inquiryTime: string; sourceStatus: string; name: string; phone: string;
+  registrationPolicy?: typeof CUSTOMER_LEAD_POLICY;
   landing?: { kind: string | null; region: string | null; consentVersion: string | null; consentedAt: string | null } }
-type Receipt = { customerId: string; activityId: string; created: boolean; duplicate: boolean }
-type Delivery = { receipt?: Receipt; error: string }
+type Receipt = { customerId: string; activityId: string; created: boolean; duplicate: boolean;
+  registration?: { policy: string; state: string; leadId: string | null; registeredAt: string } }
+type Delivery = { receipt?: Receipt; partial?: Receipt; error: string }
 
 export function keyConfigured(env: Env = process.env) {
   const key = env.WARP_MARKETING_API_KEY
@@ -38,6 +43,12 @@ export function warpConfigured(env: Env = process.env) {
 }
 
 export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError: string | null }, localDuplicate = false) {
+  if (row.warpError === CUSTOMER_ONLY) return { status: 'blocked', label: '고객 등록 확인 · 리드 미완료',
+    reason: '기존 고객 등록 기록만 확인됐습니다. 과거 문의의 리드를 자동 생성하지 않으므로 담당자 검토가 필요합니다. 새 고객은 다시 만들지 않습니다.' }
+  if (row.warpError === 'warp_lead_mapping_unavailable') return { status: 'retrying', label: '고객·리드 등록 보류',
+    reason: '담당자 또는 활성 모델을 확인하지 못해 고객·리드 등록을 보류했습니다. WARP 설정을 확인한 뒤 등록하기로 다시 요청해 주세요.' }
+  if (row.warpDeliveredAt && row.warpError === CUSTOMER_LEAD_COMPLETE) return { status: 'delivered', label: '고객·리드 등록완료',
+    reason: '고객 등록과 잠재리드 생성을 확인했습니다.' }
   if (row.warpError === LANDING_WARP_SENDING) return { status: 'sending', label: '등록중', reason: 'WARP 등록 결과를 확인 중입니다. 확인이 끝난 뒤 상담을 종료할 수 있습니다.' }
   if (row.warpError === 'warp_landing_interrupted') return { status: 'retrying', label: '등록 결과 확인 필요', reason: '등록 도중 연결이 중단되었습니다. 등록하기를 누르면 기존 전송 기록부터 확인합니다.' }
   if ([DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED].includes(row.warpError ?? '')) return {
@@ -59,7 +70,7 @@ export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError
   if (row.warpError === DUPLICATE_RECHECK_FAILED) return { status: 'duplicate', label: '중복확인', reason: '중복 재확인에 실패해 전송을 보류했습니다. 연결을 확인한 뒤 다시 재확인해 주세요.' }
   if (localDuplicate || duplicateErrors.includes(row.warpError ?? '')) return {
     status: 'duplicate', label: '중복확인',
-    reason: `${localDuplicate || row.warpError === 'warp_local_duplicate' ? '수집된 문의 또는 홈페이지 문의와 연락처가 중복됩니다.' : 'WARP 고객과 연락처가 중복됩니다.'} ${duplicateRemedy}`,
+    reason: `${localDuplicate || row.warpError === 'warp_local_duplicate' ? '수집된 문의 또는 홈페이지 문의와 연락처가 중복됩니다.' : 'WARP 고객 또는 리드와 연락처가 중복됩니다.'} ${duplicateRemedy}`,
   }
   if (row.warpError === REVIEW_CLEARED) return { status: 'pending', label: '등록 검토', reason: '재확인 결과 중복이 없습니다. 내용을 확인한 뒤 등록하기를 눌러 주세요. 자동으로 전송하지 않습니다.' }
   if (row.warpError === 'warp_duplicate_check_unavailable') return { status: 'retrying', label: '중복 조회 실패', reason: 'WARP 중복 조회에 실패해 전송하지 않았습니다. 연결을 확인한 뒤 다시 요청해 주세요.' }
@@ -67,7 +78,7 @@ export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError
     status: 'blocked', label: '등록 보류', reason: '중복 방지 연동 업데이트가 필요해 등록을 보류했습니다. 담당자에게 WARP 연동 업데이트를 요청해 주세요.',
   }
   if (row.warpError === MANUAL_REGISTRATION) return { status: 'queued', label: '등록 요청됨', reason: null }
-  if (row.warpError) return { status: 'retrying', label: '재시도 대기', reason: '등록에 실패했습니다. 자동 등록이 꺼져 있으면 등록하기로 다시 요청해 주세요.' }
+  if (row.warpError) return { status: 'retrying', label: '재시도 대기', reason: '고객·리드 등록 완료를 확인하지 못했습니다. 등록하기로 다시 요청하면 기존 처리 기록부터 확인합니다.' }
   return { status: 'pending', label: '등록 대기', reason: null }
 }
 
@@ -130,12 +141,25 @@ function validReceipt(body: unknown, sourceId: string, sourceScope = scope): bod
     && ((value.created === true && value.duplicate === false) || (value.created === false && value.duplicate === true))
 }
 
+function registrationResult(receipt: Receipt, policy?: typeof CUSTOMER_LEAD_POLICY): Delivery {
+  if (!policy) return { receipt, error: '' }
+  const registration = receipt.registration
+  // Older receivers and retained customer-only receipts never count as a completed lead.
+  if (!registration) return { partial: receipt, error: CUSTOMER_ONLY }
+  if (registration.policy !== policy || typeof registration.registeredAt !== 'string'
+    || !Number.isFinite(Date.parse(registration.registeredAt))
+    || new Date(registration.registeredAt).toISOString() !== registration.registeredAt) return { error: 'warp_invalid_receipt' }
+  if (registration.state === 'customer_only' && registration.leadId === null) return { partial: receipt, error: CUSTOMER_ONLY }
+  if (registration.state !== 'complete' || registration.leadId !== `lead_${receipt.activityId}`) return { error: 'warp_invalid_receipt' }
+  return { receipt, error: '' }
+}
+
 export async function deliver(payload: InquiryPayload, send: typeof fetch, env: Env, signal?: AbortSignal): Promise<Delivery> {
   try {
     const response = await postWarp({ ...payload, rejectExistingCustomer: true }, send, env, signal)
     if (response.status === 200) {
       const body: unknown = await response.json()
-      return validReceipt(body, payload.sourceId, payload) ? { receipt: body, error: '' } : { error: 'warp_invalid_receipt' }
+      return validReceipt(body, payload.sourceId, payload) ? registrationResult(body, payload.registrationPolicy) : { error: 'warp_invalid_receipt' }
     }
     if (response.status === 401 || response.status === 403) return { error: 'warp_auth_required' }
     if (response.status === 404) return { error: 'warp_endpoint_missing' }
@@ -150,7 +174,7 @@ export async function deliver(payload: InquiryPayload, send: typeof fetch, env: 
       const code = body && typeof body === 'object' && 'error' in body ? body.error : null
       if (response.status === 409) return { error: code === 'phone_exists' ? 'warp_phone_duplicate'
         : code === 'ambiguous_phone' ? 'warp_customer_conflict' : 'warp_invalid_receipt' }
-      return { error: code === 'not_configured' ? 'warp_not_configured' : 'warp_unavailable' }
+      return { error: code === 'not_configured' ? 'warp_not_configured' : code === 'lead_mapping_unavailable' ? 'warp_lead_mapping_unavailable' : 'warp_unavailable' }
     }
     return { error: 'warp_unavailable' }
   } catch {
@@ -201,7 +225,7 @@ async function pendingRows(db: PrismaClient, now: Date, take: number, respectRet
   const retryBefore = new Date(now.getTime() - RETRY_MS)
   return db.inquiry.findMany({
     where: { ...scope, id: { notIn: [...duplicates] }, warpDeliveredAt: null, AND: [
-      { OR: [{ warpError: null }, { warpError: { notIn: [...duplicateErrors, REVIEW_CLEARED, WARP_RECEIPT_UNVERIFIED, 'warp_registration_guard_unavailable', MANUAL_CONFIRMATION] } }] },
+      { OR: [{ warpError: null }, { warpError: { notIn: [...duplicateErrors, REVIEW_CLEARED, WARP_RECEIPT_UNVERIFIED, CUSTOMER_ONLY, 'warp_registration_guard_unavailable', MANUAL_CONFIRMATION] } }] },
       ...(respectRetry ? [{ OR: [{ warpError: MANUAL_REGISTRATION }, { warpAttemptedAt: null }, { warpAttemptedAt: { lte: retryBefore } }] }] : []),
     ] },
     orderBy: [{ inquiryDate: 'asc' }, { inquiryTime: 'asc' }, { sourceId: 'asc' }],
@@ -211,24 +235,25 @@ async function pendingRows(db: PrismaClient, now: Date, take: number, respectRet
 
 export function payloadFor(row: Awaited<ReturnType<typeof pendingRows>>[number] & {
   landingReceipt?: { kind: string | null; region: string | null; consentVersion: string | null; consentedAt: Date | null } | null
-}): InquiryPayload {
+}, registerLead = false): InquiryPayload {
   return { source: row.source, companyScopeId: row.companyScopeId, homepageScopeId: row.homepageScopeId,
     sourceId: row.sourceId.toLowerCase(), inquiryDate: row.inquiryDate,
     inquiryTime: row.inquiryTime, sourceStatus: row.sourceStatus ?? '', name: inquiryCustomerName(row.name, row.phone), phone: row.phone,
+    ...(registerLead ? { registrationPolicy: CUSTOMER_LEAD_POLICY } : {}),
     ...(row.source === landingScope.source && row.landingReceipt ? { landing: { ...row.landingReceipt, consentedAt: row.landingReceipt.consentedAt?.toISOString() ?? null } } : {}) }
 }
 
 type PhoneResult = typeof scope & { sourceId: string; exists: boolean; receipt?: { ok: true } & Receipt }
 
 /** Read-only lookup. Missing, partial and failed results never authorize registration. */
-export async function lookupWarpPhones(rows: (typeof scope & { sourceId: string; phone: string })[], send: typeof fetch, env: Env, signal?: AbortSignal): Promise<PhoneResult[] | null> {
+export async function lookupWarpPhones(rows: (typeof scope & { sourceId: string; phone: string })[], send: typeof fetch, env: Env, signal?: AbortSignal, policy?: typeof CUSTOMER_LEAD_POLICY): Promise<PhoneResult[] | null> {
   if (!rows.length) return []
   if (!keyConfigured(env) || rows.length > 50 || signal?.aborted) return null
   const groups = [scope, landingScope].map(sourceScope => ({ sourceScope,
     rows: rows.filter(row => Object.entries(sourceScope).every(([key, value]) => row[key as keyof typeof scope] === value)) })).filter(group => group.rows.length)
   if (groups.reduce((sum, group) => sum + group.rows.length, 0) !== rows.length) return null
   if (groups.length > 1) {
-    const results = await Promise.all(groups.map(group => lookupWarpPhones(group.rows, send, env, signal)))
+    const results = await Promise.all(groups.map(group => lookupWarpPhones(group.rows, send, env, signal, policy)))
     return results.some(result => result === null) ? null : results.flatMap(result => result!)
   }
   const sourceScope = groups[0].sourceScope
@@ -237,7 +262,7 @@ export async function lookupWarpPhones(rows: (typeof scope & { sourceId: string;
       method: 'POST', redirect: 'error',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
       headers: { 'Content-Type': 'application/json', 'x-api-key': env.WARP_MARKETING_API_KEY! },
-      body: JSON.stringify({ ...sourceScope, items: rows.map(row => ({ sourceId: row.sourceId.toLowerCase(), phone: row.phone })) }),
+      body: JSON.stringify({ ...sourceScope, ...(policy ? { registrationPolicy: policy } : {}), items: rows.map(row => ({ sourceId: row.sourceId.toLowerCase(), phone: row.phone })) }),
     })
     if (!response.ok) return null
     const body = await response.json()
@@ -256,9 +281,9 @@ export async function lookupWarpPhones(rows: (typeof scope & { sourceId: string;
 
 export async function checkedDeliver(payload: InquiryPayload, send: typeof fetch, env: Env, signal?: AbortSignal, allowWrite?: () => Promise<boolean>): Promise<Delivery> {
   if (!normalizeInquiryPhone(payload.phone) || payload.phone.length > 40) return { error: 'warp_invalid_inquiry' }
-  const [match] = await lookupWarpPhones([payload], send, env, signal) ?? []
+  const [match] = await lookupWarpPhones([payload], send, env, signal, payload.registrationPolicy) ?? []
   if (!match) return { error: 'warp_duplicate_check_unavailable' }
-  if (match.receipt) return { receipt: match.receipt, error: '' }
+  if (match.receipt) return registrationResult(match.receipt, payload.registrationPolicy)
   if (match.exists) return { error: 'warp_phone_duplicate' }
   if (signal?.aborted) return { error: 'warp_unavailable' }
   if (allowWrite && !await allowWrite()) return { error: 'warp_local_duplicate' }
@@ -270,24 +295,28 @@ async function recheckDuplicateReviews(db: PrismaClient, workerOwner: string, se
   const rows = await db.inquiry.findMany({ where: { ...deliveryScopes, warpDeliveredAt: null, warpError: DUPLICATE_RECHECK }, take: 50, select: rowSelect })
   if (!rows.length || signal?.aborted) return
   await heartbeatWorker(db, workerOwner, now())
-  const results = await lookupWarpPhones(rows, send, env, signal)
+  const results = await lookupWarpPhones(rows, send, env, signal, CUSTOMER_LEAD_POLICY)
   if (signal?.aborted) return
   await heartbeatWorker(db, workerOwner, now())
   await db.$transaction(async tx => {
     const localDuplicates = await duplicateInquiryIds(tx)
     for (const row of rows) {
       const match = results?.find(item => item.source === row.source && item.sourceId === row.sourceId.toLowerCase())
-      // A receipt is historical evidence, never a reason to claim a fresh registration.
+      const recovered = match?.receipt ? registrationResult(match.receipt, CUSTOMER_LEAD_POLICY) : undefined
+      // Recheck is read-only remotely. Only retained v1 completion proves both stages.
       await tx.inquiry.updateMany({ where: { ...deliveryScopes, id: row.id, phone: row.phone, warpDeliveredAt: null, warpError: DUPLICATE_RECHECK }, data: {
-        warpError: !match ? DUPLICATE_RECHECK_FAILED : match.receipt ? WARP_RECEIPT_UNVERIFIED
+        warpError: !match ? DUPLICATE_RECHECK_FAILED : recovered ? recovered.receipt ? CUSTOMER_LEAD_COMPLETE : recovered.partial ? CUSTOMER_ONLY : DUPLICATE_RECHECK_FAILED
           : match.exists ? 'warp_phone_duplicate' : localDuplicates.has(row.id) ? 'warp_local_duplicate' : REVIEW_CLEARED,
-        ...(match?.receipt ? { warpCustomerId: match.receipt.customerId, warpActivityId: match.receipt.activityId, warpDeliveredAt: now(), warpAttemptedAt: now() } : {}),
+        ...(match?.receipt && (recovered?.receipt || recovered?.partial) ? { warpCustomerId: match.receipt.customerId, warpActivityId: match.receipt.activityId,
+          warpDeliveredAt: recovered.receipt ? now() : null, warpAttemptedAt: now() } : {}),
       } })
     }
   })
 }
 
-export async function acknowledge(db: Pick<PrismaClient, 'inquiry'>, id: string, receipt: Receipt, at: Date, error: string | null = receipt.created ? null : WARP_RECEIPT_UNVERIFIED) {
+export async function acknowledge(db: Pick<PrismaClient, 'inquiry'>, id: string, receipt: Receipt, at: Date,
+  error: string | null = receipt.registration?.policy === CUSTOMER_LEAD_POLICY && receipt.registration.state === 'complete'
+    ? CUSTOMER_LEAD_COMPLETE : receipt.created ? null : WARP_RECEIPT_UNVERIFIED) {
   await db.inquiry.update({ where: { id }, data: {
     warpCustomerId: receipt.customerId, warpActivityId: receipt.activityId,
     warpDeliveredAt: at, warpAttemptedAt: at, warpError: error,
@@ -374,11 +403,12 @@ export async function dispatchPendingWarp(
     }) : await db.inquiry.findFirst({ where: { ...scope, id: row.id }, select: { ...rowSelect, warpDeliveredAt: true, warpError: true } })
     if (!current || (!landing && (!['pending', 'retrying', 'queued'].includes(warpDeliveryState(current, (await duplicateInquiryIds(db)).has(row.id)).status)
       || current.warpError === REVIEW_CLEARED))) continue
-    const delivery = await checkedDeliver(payloadFor(current), send, env, signal, async () => !(await duplicateInquiryIds(db)).has(row.id))
+    const delivery = await checkedDeliver(payloadFor(current, true), send, env, signal, async () => !(await duplicateInquiryIds(db)).has(row.id))
     await heartbeatWorker(db, workerOwner, now())
     const attemptedAt = now()
     if (delivery.receipt) await acknowledge(db, row.id, delivery.receipt, attemptedAt)
-    else await db.inquiry.update({ where: { id: row.id }, data: { warpAttemptedAt: attemptedAt, warpError: delivery.error } })
+    else await db.inquiry.update({ where: { id: row.id }, data: { warpAttemptedAt: attemptedAt, warpError: delivery.error,
+      ...(delivery.partial ? { warpCustomerId: delivery.partial.customerId, warpActivityId: delivery.partial.activityId } : {}) } })
     if (delivery.receipt) result.delivered++
     else result.failed++
     if (!delivery.receipt && connectionErrors.includes(delivery.error)) break

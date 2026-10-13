@@ -76,3 +76,20 @@ JS
 ```
 
 다음 단계에서는 계약의 9개 문자열 필드와 `rejectExistingCustomer: true`에 맞는 실제 원본 문의 한 건을 발신기에서 전송한다. 첫 응답은 200과 `created: true`, 같은 `sourceId`의 재전송은 200과 `duplicate: true`여야 한다. CRM의 고객 및 문의 이력을 확인한 후 미전달 문의 처리를 시작한다. 409 `phone_exists`와 `ambiguous_phone`은 자동 재시도하지 말고 담당자가 중복 연락처를 확인한다. 400 `bad_payload`는 WARP #51 미배포로 보고 등록을 보류한다. 503 `temporarily_unavailable`은 같은 `sourceId`를 유지한 채 지연 재시도한다. 서버 로그에는 `marketing_inquiry_failed`와 허용된 오류 코드·재시도 여부만 남는다.
+
+
+## 고객·잠재리드 통합 등록 — 2026-10-13 확장
+
+앞으로 실행되는 공통 등록 흐름은 기존 POST와 read-only check에 `registrationPolicy: "customer-lead-v1"`을 명시한다. 이전 발신기는 정책을 생략하므로 기존 고객·문의 이력 계약을 유지한다. 구 수신기는 추가 필드를 거부하므로 WARP 수신기를 먼저 배포한다.
+
+- 적용 경로: 홈페이지 문의 및 mleverage 문의의 동일 등록 버튼 → 공통 worker → 기존 marketing-inquiries API. 기존 완료 문의·수동 완료 기록은 변경하지 않는다. 운영 복구/pilot은 기존 고객 이력용이며 새 정책 확인이나 과거 리드 생성에 사용하지 않는다.
+- 운영에서 읽기 전용으로 확인한 매핑은 담당자 이름 최도준, Product.code=STEGO K1, Product.name=PV5 오픈배드냉탑 (구변)이다. 수신기가 정확히 일치하는 활성 제품 ID 한 개와 담당자 이름 한 개를 확인한다. 없는 값·중복 이름·비활성 제품은 `lead_mapping_unavailable`로 쓰기 전에 보류한다. User에는 활성 플래그가 없다.
+- 신규 Customer.source와 SalesDeal.source는 온라인이다. 신규 리드는 실제 Product ID 및 최도준을 연결한다. 메모는 최초 성공 등록 시점의 한국 날짜 + ` SNS 유입`이다. 원본 문의 시각은 기존 collectedAt/문의 이력에 유지한다.
+- Customer, CustomerActivity, SalesDeal, B2C 미성숙리드(1-1) 체크 전체, 최초 생성과 1-2 전환 이력을 같은 customerWrite 트랜잭션에 저장한다. 현재 1-1 항목은 배송업 의향 확인(1-1-0)이며 1-2 체크는 설정하지 않는다. 마지막 이력 저장이 실패해도 고객까지 모두 취소된다.
+- 리드 ID는 `lead_ + activityId`로 고정한다. 신규 활동의 result에 정책 마커를 보관하고 createdAt을 등록 시각으로 보존한다. 재전송/동시 요청/응답 유실은 보관된 동일 고객·리드·등록 시각을 반환하며 영업 담당자나 후속 메모·단계를 덮어쓰지 않는다.
+- v1 응답의 registration은 policy/state/leadId/registeredAt을 포함한다. 정책 마커와 연결 리드가 확인돼야 complete다. 과거 고객 전용 이력이나 삭제/연결 해제된 리드는 customer_only로 돌려주고 소급 생성하지 않는다. Marketing은 고객 ID/활동 ID만 보관하고 완료 시각을 기록하지 않으며 ‘고객 등록 확인 · 리드 미완료’로 검토 보류한다.
+- 신규 실패는 중복 확인부터 안전하게 재시도한다. 홈페이지 문의의 수동 재요청 정책과 기존 자동 등록 설정은 유지한다. 연락처가 이미 존재하면 고객과 리드 모두 생성하지 않는다.
+
+스키마 변경·마이그레이션·과거 데이터 보정은 없다. 배포 담당자는 WARP PR → Marketing PR 순서로 검토/배포하고 정확한 버전과 검사 결과를 남긴다. 전용 키 범위/SSM 권한/배포 경로는 그대로 유지한다. 검토 근거는 Issue #48 및 PR #56의 CRM 위임이며 이번 PR 링크는 계약 JSON에 기록한다.
+
+추가 중복 조건: customer-lead-v1은 Customer가 연결되지 않은 기존 SalesDeal도 정규화 휴대폰으로 확인한다. 읽기 전용 check와 동일 writer 트랜잭션의 저장 직전 검사에서 모두 보류하며, 기존 리드 병합이나 갱신은 하지 않는다.

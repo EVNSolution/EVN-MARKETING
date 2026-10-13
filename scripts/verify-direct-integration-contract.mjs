@@ -30,11 +30,11 @@ function signature(endpoint) {
 
 async function nextRoutes(config) {
   const routeRoot = path.join(root, config.route_root)
-  const routeFiles = (await filesUnder(routeRoot)).filter(file => file.endsWith('/route.ts'))
+  const routeFiles = (await filesUnder(routeRoot)).filter(file => path.basename(file) === 'route.ts')
   const routes = []
   for (const file of routeFiles) {
     const source = await readFile(file, 'utf8')
-    const relativeDirectory = path.dirname(path.relative(routeRoot, file))
+    const relativeDirectory = path.dirname(path.relative(routeRoot, file)).split(path.sep).join('/')
     const suffix = relativeDirectory === '.' ? '' : `/${relativeDirectory}`
     const routePath = `${config.route_root.replace(/^app/, '')}${suffix}`
       .replace(/\[\.\.\.([^\]]+)\]/g, ':$1*')
@@ -80,7 +80,7 @@ async function verifyOutboundLiterals(manifest, config) {
     const files = (await filesUnder(path.join(root, sourceRoot)))
       .filter(file => /\.(?:ts|tsx|js|mjs)$/.test(file))
     for (const file of files) {
-      const relative = path.relative(root, file)
+      const relative = path.relative(root, file).split(path.sep).join('/')
       if (providerFiles.has(relative) || /(?:^|\/)(__tests__)(?:\/|$)|\.(?:test|spec)\./.test(relative)) continue
       const source = await readFile(file, 'utf8')
       for (const match of source.matchAll(/(['"`])([^'"`\n]*\/api\/external\/[^'"`\n]*)\1/g)) {

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
+import { completedLead } from './customer-lead-helper'
 import { randomUUID } from 'node:crypto'
 import { withWorkerDatabase } from './worker-runtime-helper'
 import { claimWorker, INQUIRY_SCOPE_ID, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
 import { closeLandingInquiry, LANDING_WARP_SENDING, landingScope, saveLandingInquiry } from '@/lib/landing-inquiries'
 import { dispatchPendingWarp, duplicateInquiryIds, lookupWarpPhones, pilotPendingWarp, requestWarpRegistration,
-  REVIEW_CLEARED, scope, warpActivityId, warpDeliveryState, warpDeliverySummary, WARP_RECEIPT_UNVERIFIED } from '@/lib/warp-delivery'
+  REVIEW_CLEARED, scope, warpActivityId, warpDeliveryState, warpDeliverySummary, CUSTOMER_ONLY } from '@/lib/warp-delivery'
 import { inquiryReview, reviewInquiry } from '@/lib/inquiry-review'
 
 const at = new Date('2026-10-08T00:01:23.000Z')
@@ -40,7 +41,8 @@ function provider(options: { exists?: boolean; lost?: boolean; invalidScope?: bo
     assert.deepEqual(body.landing, { kind: 'subsidy', region: '경기', consentVersion: '2026-10-07-v1', consentedAt: at.toISOString() })
     if (options.onWrite) await options.onWrite()
     if (options.lost) throw new Error('synthetic response loss')
-    return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(body.sourceId, options.invalidScope ? scope : landingScope), created: true, duplicate: false })
+    return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(body.sourceId, options.invalidScope ? scope : landingScope), created: true, duplicate: false,
+      ...completedLead(body, warpActivityId(body.sourceId, landingScope)) })
   }
   return { send, writes: () => writes, checks: () => checks }
 }
@@ -97,7 +99,7 @@ async function main() {
     const stored = await db.inquiry.findUniqueOrThrow({ where: { id: row.id } })
     assert.notEqual(warpDeliveryState(stored).status, 'delivered')
     assert.equal((await warpDeliverySummary(db, env)).delivered, 0)
-    if (options.receipt) assert.equal(stored.warpError, WARP_RECEIPT_UNVERIFIED)
+    if (options.receipt) { assert.equal(stored.warpError, CUSTOMER_ONLY); assert.equal(stored.warpDeliveredAt, null) }
     const attempted = remote.writes()
     const retryAt = new Date(at.getTime() + 3_600_001)
     await db.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { workerHeartbeatAt: retryAt, workerLeaseExpiresAt: new Date(retryAt.getTime() + WORKER_LEASE_MS) } })
@@ -108,7 +110,7 @@ async function main() {
       const recovery = provider({ receipt: true })
       await dispatchPendingWarp(db, owner, recovery.send, env, () => retryAt)
       assert.equal(recovery.writes(), 0)
-      assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: row.id } })).warpError, WARP_RECEIPT_UNVERIFIED)
+      assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: row.id } })).warpError, CUSTOMER_ONLY)
     }
   })
 
