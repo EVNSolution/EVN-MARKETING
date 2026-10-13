@@ -7,8 +7,9 @@ import { FIELD_CLS } from '@/lib/ui'
 import { apiFetch } from '@/lib/release-client'
 import { dashboardErrorText, dashboardPercentages, dashboardTotals, mediaLabel, type DashboardRecord, type ExternalDashboard } from '@/lib/external-dashboard'
 import { dashboardKoreaDate, type DashboardDay, type DashboardHistoryView } from '@/lib/external-dashboard-history'
+import type { RegisteredInflow } from '@/lib/registered-inflow'
 
-type Payload = { record: DashboardRecord | null; history?: DashboardHistoryView; workerOnline: boolean; sourceReady: boolean; nextRunAt: string | null }
+type Payload = { record: DashboardRecord | null; history?: DashboardHistoryView; registeredInflow?: RegisteredInflow; workerOnline: boolean; sourceReady: boolean; nextRunAt: string | null }
 const number = (value: number | null) => value === null ? '—' : value.toLocaleString('ko-KR')
 const time = (value: string | null | undefined) => value
   ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }) : '아직 없음'
@@ -47,12 +48,13 @@ export default function ExternalDashboardClient() {
   }, [refresh])
   const record = payload?.record
   const history = payload?.history
+  const inflow = payload?.registeredInflow
   const data = history?.data ?? record?.data
   const rankingRecord = history?.snapshot ?? record
   const rankingData = rankingRecord?.data
   const rankingDates = rankingData?.aggregationDates ?? []
   const today = history?.today ?? dashboardKoreaDate()
-  const start = draftStart ?? history?.start ?? today, end = draftEnd ?? history?.end ?? today
+  const start = draftStart ?? history?.start ?? inflow?.start ?? today, end = draftEnd ?? history?.end ?? inflow?.end ?? today
   const applyRange = (from: string, to: string) => {
     const params = new URLSearchParams(filter)
     params.set('start', from); params.set('end', to)
@@ -82,7 +84,7 @@ export default function ExternalDashboardClient() {
       {payload && !payload.workerOnline && <p className="rounded-lg bg-amber-50 p-3 text-amber-900">자동 수집 연결을 확인하지 못했습니다. 마지막 성공 시각을 확인해 주세요.</p>}
       {payload?.workerOnline && !payload.sourceReady && <p className="rounded-lg bg-amber-50 p-3 text-amber-900">수집기는 실행 중이며 원본 서비스 연결을 기다리고 있습니다. 자세한 연결 상태는 문의 내역에서 확인할 수 있습니다.</p>}
       {stale && <p className="rounded-lg bg-amber-50 p-3 text-amber-900">마지막 수집 성공 후 2시간이 지났습니다. 현재 표시된 수치는 최신이 아닐 수 있습니다.</p>}
-      {!record?.data && !history?.availableStart && !loading && !error && <p className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-slate-600">아직 성공적으로 수집된 대시보드가 없습니다. 데이터가 확인되기 전에는 수치를 표시하지 않습니다.</p>}
+      {!record?.data && !history?.availableStart && !loading && !error && <p className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-slate-600">아직 성공적으로 수집된 대시보드가 없습니다. 외부 방문·광고 수치는 수집 후 표시하며, 등록완료 DB 유입은 현재 보관 문의로 집계합니다.</p>}
     </div>
     {history && <section aria-label="날짜별 성과 조회" className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
       <div><h2 className="font-semibold text-slate-900">성과 날짜로 조회</h2><p className="mt-1 text-xs leading-5 text-slate-500">한국 시간 기준 · 최대 366일. 보관 범위: {history.availableStart ?? '아직 없음'}{history.availableEnd ? ` ~ ${history.availableEnd}` : ''}</p></div>
@@ -102,12 +104,18 @@ export default function ExternalDashboardClient() {
       </p>}
       {history.missingMediaDays.length > 0 && <p className="text-xs text-slate-600">매체별 원본 값이 없는 날짜 {history.missingMediaDays.length}일은 수집 대기입니다. 제공된 매체 값만 표시하며 누락을 0으로 바꾸지 않습니다.</p>}
     </section>}
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Metric title={history?.filtered ? '선택한 성과 기간' : '원본 집계 기간'} value={history?.start ? `${history.start} ~ ${history.end}` : dates.length ? `${dates[0]} ~ ${dates.at(-1)}` : '—'} detail={history ? `${dates.length}/${history.days.length}일 수집됨` : dates.length ? `${dates.length}일 집계` : '집계 없음'} small />
       <Metric title="전체 방문자" value={number(totals.visitors)} detail={history?.missingDays.length ? `수집된 ${dates.length}일의 방문자 합계 · 미수집일 제외` : '일별 방문자 합계'} />
       <Metric title="전체 페이지뷰" value={number(totals.pageviews)} detail={history?.missingDays.length ? `수집된 ${dates.length}일의 페이지뷰 합계 · 미수집일 제외` : '집계 기간 페이지 조회 수'} />
+      <Metric title="등록완료 DB 유입" value={inflow ? `${number(inflow.total)}건` : '—'} detail="기존 수집 문의 · 새 홈페이지 문의 모두 포함" />
     </div>
     <p className="text-xs leading-5 text-slate-500">방문자는 일별 합계이며, 같은 방문자는 날짜마다 포함될 수 있습니다.</p>
+    {inflow && <SectionCard color="slate" title="일별 DB 유입">
+      <p className="mb-2 text-xs leading-5 text-slate-600">현재 보관된 등록완료 문의 기준, 휴대폰 중복 제외, 유입일 기준 · 기존 수집 문의와 새 홈페이지 문의 모두 포함</p>
+      <p className="mb-3 text-xs leading-5 text-slate-500">{inflow.start} ~ {inflow.end} · 해당 날짜에 보관된 완료 문의가 없으면 0건입니다. 개인정보 삭제 시 집계에서도 제외됩니다.{!history?.start && ' 외부 집계 기간이 없으면 보관 문의의 첫 유입일부터 오늘까지 최대 366일을 표시합니다.'}</p>
+      <RegisteredInflowChart key={filter} data={inflow} />
+    </SectionCard>}
     {data && <>
       <SectionCard color="slate" title="일별 방문자 · 페이지뷰"><VisitorChart key={filter} data={data} days={history?.days} today={today} /></SectionCard>
       <SectionCard color="slate" title="매체별 일별 광고 유입"><MediaChart key={filter} data={data} days={history?.days} /></SectionCard>
@@ -268,6 +276,29 @@ function ChartGrid({ maximum, dates, width }: { maximum: number; dates: string[]
       <text x="55" y={yAt(maximum * fraction, maximum) + 4} textAnchor="end" fontSize="11" fill="#64748b">{number(Math.round(maximum * fraction))}</text>
     </g>)}
     {dates.map((date, i) => (i === 0 || i === dates.length - 1 || (i % Math.max(1, Math.ceil(dates.length / 5)) === 0 && (dates.length - 1 - i) * xSpacing(dates.length, width) >= 36)) && <text key={date} x={xAt(i, dates.length, width)} y="218" textAnchor="middle" fontSize="11" fill="#64748b">{date.slice(5)}</text>)}
+  </>
+}
+function RegisteredInflowChart({ data }: { data: RegisteredInflow }) {
+  const maximum = Math.max(2, Math.ceil(Math.max(...data.days.map(day => day.count)) / 2) * 2)
+  return <>
+    {data.total === 0 && <p className="mb-2 text-sm text-slate-500">선택 기간의 등록완료 DB 유입이 없습니다. (0건)</p>}
+    <ChartFrame key={data.days.map(day => day.date).join(',')} days={data.days.map(day => ({ date: day.date, values: [
+      { label: '등록완료 DB 유입', color: '#7c3aed', value: day.count },
+    ] }))} label="일별 DB 유입. 휴대폰 중복을 제외한 등록완료 문의 수.">{width => {
+      const barWidth = Math.min(width < 560 ? 28 : 32, 500 / data.days.length, xSpacing(data.days.length, width) * 0.75)
+      return <>
+        <ChartGrid maximum={maximum} dates={data.days.map(day => day.date)} width={width} />
+        {data.days.map((day, i) => <rect key={day.date} x={xAt(i, data.days.length, width) - barWidth / 2}
+          y={yAt(day.count, maximum)} width={barWidth} height={day.count / maximum * 160} fill="#7c3aed">
+          <title>{day.date} 등록완료 DB 유입 {number(day.count)}건</title>
+        </rect>)}
+      </>
+    }}</ChartFrame>
+    <details className="mt-3 text-sm"><summary className="cursor-pointer py-2 font-medium">DB 유입 상세 펼치기 ({data.days.length}일)</summary>
+      <div className="max-h-80 overflow-auto"><table className="w-full min-w-[240px] text-left text-xs"><thead><tr><th className="py-2">유입일</th><th className="py-2 text-right">등록완료 DB 유입 (건)</th></tr></thead>
+        <tbody>{data.days.map(day => <tr key={day.date} className="border-t border-slate-100"><td className="py-2">{day.date}</td><td className="text-right">{number(day.count)}</td></tr>)}</tbody>
+      </table></div>
+    </details>
   </>
 }
 function VisitorChart({ data, days, today }: { data: ExternalDashboard; days?: DashboardDay[]; today: string }) {
