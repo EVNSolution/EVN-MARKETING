@@ -10,18 +10,19 @@ export const vatLabels = { included: '부가세 포함', excluded: '부가세 �
 type Identity = { provider: AdProvider; accountId: string; campaignId: string }
 export type AdCampaign = Identity & { start: string; end: string | null; lifecycle: 'active' | 'paused' | 'deleted' }
 type Account = { provider: AdProvider; accountId: string; connected: boolean }
-export type AdSpendRow = Identity & { date: string; amount: string | null; vat: VatBasis | null; observedAt: string | null; attemptedAt: string; issue: 'missing' | 'fetch_failed' | 'authentication_required' | null }
+export type AdSpendProvenance = { kind: 'daangn_csv' | 'daangn_mcp'; hash: string; capturedAt: string; vatEvidence?: { observedAt: string; hash: string | null } }
+export type AdSpendRow = Identity & { date: string; amount: string | null; vat: VatBasis | null; observedAt: string | null; attemptedAt: string; issue: 'missing' | 'fetch_failed' | 'authentication_required' | null; provenance?: AdSpendProvenance }
 export type ImportReceipt = { at: string; hash: string; rows: number; start: string; end: string }
-export type AdSpendRecord = { format: 1; campaigns: AdCampaign[]; accounts: Account[]; rows: AdSpendRow[]; lastDaangnImport: ImportReceipt | null }
-export type AdSpendAction = { type: 'import_receipt'; receipt: ImportReceipt } | { type: 'configure'; campaigns: AdCampaign[] } | { type: 'connection'; provider: AdProvider; accountId: string; connected: boolean } | {
+export type AdSpendRecord = { format: 1; campaigns: AdCampaign[]; accounts: Account[]; rows: AdSpendRow[]; lastDaangnImport: ImportReceipt | null; lastDaangnMcpImport?: ImportReceipt | null }
+export type AdSpendAction = { type: 'import_receipt' | 'mcp_receipt'; receipt: ImportReceipt } | { type: 'configure'; campaigns: AdCampaign[] } | { type: 'connection'; provider: AdProvider; accountId: string; connected: boolean } | {
   type: 'collect'; provider: AdProvider; accountId: string; start: string; end: string
-  result: { rows: { date: string; campaignId: string; amount: string; vat: VatBasis }[]; error?: never }
+  result: { rows: { date: string; campaignId: string; amount: string; vat: VatBasis; provenance?: AdSpendProvenance }[]; error?: never }
     | { error: 'fetch_failed' | 'authentication_required'; rows?: never }
 }
 export type SpendStatus = 'complete' | 'provisional' | 'disconnected' | 'scope_missing' | 'missing' | 'partial' | 'error' | 'tax_unconfirmed' | 'out_of_scope'
 export const spendStatusLabels: Record<SpendStatus, string> = { complete: '수집 완료', provisional: '오늘 포함 · 진행 중인 부분 집계', disconnected: '미연결', scope_missing: 'EVN 캠페인 지정 대기', missing: '미수집', partial: '일부 누락 · 보관 값', error: '수집 오류', tax_unconfirmed: '세금 기준 확인 필요', out_of_scope: '집계 대상 기간 아님' }
 export type SpendSummary = { total: string | null; vat: VatBasis | null; groups: { vat: VatBasis; amount: string }[]; status: SpendStatus; expected: number; observed: number; lastSuccessfulAt: string | null; lastAttemptAt: string | null }
-export type AdSpendView = { start: string; end: string; availableFrom: string; currency: 'KRW'; lastDaangnImport: Omit<ImportReceipt, 'hash'> | null; total: SpendSummary; providers: Record<AdProvider, SpendSummary>; days: { date: string; total: SpendSummary; providers: Record<AdProvider, SpendSummary> }[] }
+export type AdSpendView = { start: string; end: string; availableFrom: string; currency: 'KRW'; lastDaangnImport: Omit<ImportReceipt, 'hash'> | null; lastDaangnMcpImport?: Omit<ImportReceipt, 'hash'> | null; total: SpendSummary; providers: Record<AdProvider, SpendSummary>; days: { date: string; total: SpendSummary; providers: Record<AdProvider, SpendSummary> }[] }
 const invalid = (): never => { throw new Error('ad_spend_invalid_data') }
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : invalid()
 const id = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : invalid()
@@ -34,11 +35,25 @@ const accountKey = (item: Account | Identity) => JSON.stringify([item.provider, 
 const applies = (campaign: AdCampaign, day: string) => campaign.start <= day && (!campaign.end || campaign.end >= day)
 const identity = (value: Record<string, unknown>): Identity => ({ provider: provider(value.provider), accountId: id(value.accountId), campaignId: id(value.campaignId) })
 export const emptyAdSpend = (): AdSpendRecord => ({ format: 1, campaigns: [], accounts: [], rows: [], lastDaangnImport: null })
-function receipt(value: unknown): ImportReceipt {
+function receipt(value: unknown, mcp = false): ImportReceipt {
   const v = object(value), start = date(v.start), end = date(v.end)
   dashboardDates(start, end)
-  if (!dashboardTimestamp(v.at) || typeof v.hash !== 'string' || !/^[a-f0-9]{64}$/.test(v.hash) || !Number.isInteger(v.rows) || Number(v.rows) < 1 || Number(v.rows) > 366) return invalid()
+  if (!dashboardTimestamp(v.at) || typeof v.hash !== 'string' || !/^[a-f0-9]{64}$/.test(v.hash) || !Number.isInteger(v.rows) || Number(v.rows) < (mcp ? 0 : 1) || Number(v.rows) > (mcp ? 31 : 366)) return invalid()
   return { at: v.at, hash: v.hash, rows: Number(v.rows), start, end }
+}
+function provenance(value: unknown, source: AdProvider, observedAt: string | null): AdSpendProvenance {
+  const v = object(value)
+  if (source !== 'daangn' || !['daangn_csv', 'daangn_mcp'].includes(v.kind as string)
+    || typeof v.hash !== 'string' || !/^[a-f0-9]{64}$/.test(v.hash)
+    || !dashboardTimestamp(v.capturedAt) || !observedAt || v.capturedAt > observedAt) return invalid()
+  let vatEvidence: AdSpendProvenance['vatEvidence']
+  if (v.vatEvidence !== undefined) {
+    const evidence = object(v.vatEvidence)
+    if (v.kind !== 'daangn_mcp' || !dashboardTimestamp(evidence.observedAt) || evidence.observedAt > v.capturedAt
+      || (evidence.hash !== null && (typeof evidence.hash !== 'string' || !/^[a-f0-9]{64}$/.test(evidence.hash)))) return invalid()
+    vatEvidence = { observedAt: evidence.observedAt, hash: evidence.hash as string | null }
+  }
+  return { kind: v.kind as AdSpendProvenance['kind'], hash: v.hash, capturedAt: v.capturedAt, ...(vatEvidence ? { vatEvidence } : {}) }
 }
 
 // Never coerce provider amounts through Number. Preserve original decimal scale in storage.
@@ -78,10 +93,12 @@ export function parseAdSpendRecord(value: unknown): AdSpendRecord {
       || (r.amount === null) !== (r.observedAt === null) || (r.amount === null) !== (r.vat === null)
       || (r.amount === null && r.issue === null)) return invalid()
     return { ...row, amount: r.amount === null ? null : krwAmount(r.amount), vat: r.vat === null ? null : vat(r.vat),
-      observedAt: r.observedAt as string | null, attemptedAt: r.attemptedAt, issue: r.issue as AdSpendRow['issue'] }
+      observedAt: r.observedAt as string | null, attemptedAt: r.attemptedAt, issue: r.issue as AdSpendRow['issue'],
+      ...(r.provenance === undefined ? {} : { provenance: provenance(r.provenance, row.provider, r.observedAt as string | null) }) }
   })
   if (new Set(rows.map(rowKey)).size !== rows.length) return invalid()
-  return { format: 1, campaigns, accounts, rows, lastDaangnImport: v.lastDaangnImport == null ? null : receipt(v.lastDaangnImport) }
+  return { format: 1, campaigns, accounts, rows, lastDaangnImport: v.lastDaangnImport == null ? null : receipt(v.lastDaangnImport),
+    ...(v.lastDaangnMcpImport == null ? {} : { lastDaangnMcpImport: receipt(v.lastDaangnMcpImport, true) }) }
 }
 
 // Internal normalized connector boundary, not an HTTP intake endpoint. No raw responses or credentials.
@@ -89,6 +106,8 @@ export function applyAdSpendAction(previous: AdSpendRecord, action: AdSpendActio
   const record = parseAdSpendRecord(previous), stamp = now.toISOString()
   if (action.type === 'import_receipt') {
     record.lastDaangnImport = receipt(action.receipt)
+  } else if (action.type === 'mcp_receipt') {
+    record.lastDaangnMcpImport = receipt(action.receipt, true)
   } else if (action.type === 'configure') {
     const incoming = action.campaigns.map(campaign)
     if (!incoming.length || new Set(incoming.map(key)).size !== incoming.length) return invalid()
@@ -110,7 +129,7 @@ export function applyAdSpendAction(previous: AdSpendRecord, action: AdSpendActio
     const expected = dates.flatMap(day => scopes.filter(c => applies(c, day)).map(c => ({ ...c, date: day })))
     if (!expected.length) return invalid()
     const expectedKeys = new Set(expected.map(rowKey)), seen = new Set<string>()
-    const incoming = new Map<string, { amount: string; vat: VatBasis }>()
+    const incoming = new Map<string, { amount: string; vat: VatBasis; provenance?: AdSpendProvenance }>()
     if (action.result.error !== undefined) {
       if (!['fetch_failed', 'authentication_required'].includes(action.result.error) || action.result.rows !== undefined) return invalid()
     } else {
@@ -118,7 +137,8 @@ export function applyAdSpendAction(previous: AdSpendRecord, action: AdSpendActio
       for (const item of action.result.rows) {
         const k = rowKey({ provider: source, accountId, campaignId: id(item.campaignId), date: date(item.date) })
         if (!expectedKeys.has(k) || seen.has(k)) return invalid()
-        seen.add(k); incoming.set(k, { amount: krwAmount(item.amount), vat: vat(item.vat) })
+        seen.add(k); incoming.set(k, { amount: krwAmount(item.amount), vat: vat(item.vat),
+          ...(item.provenance === undefined ? {} : { provenance: provenance(item.provenance, source, stamp) }) })
       }
     }
     const rows = new Map(record.rows.map(r => [rowKey(r), r]))
@@ -127,7 +147,15 @@ export function applyAdSpendAction(previous: AdSpendRecord, action: AdSpendActio
       if (old && old.attemptedAt > stamp) throw new Error('ad_spend_stale_attempt')
       const next: AdSpendRow = { provider: source, accountId, campaignId: item.campaignId, date: item.date,
         amount: fresh?.amount ?? old?.amount ?? null, vat: fresh?.vat ?? old?.vat ?? null,
-        observedAt: fresh ? stamp : old?.observedAt ?? null, attemptedAt: stamp, issue: fresh ? null : action.result.error ?? 'missing' }
+        observedAt: fresh ? stamp : old?.observedAt ?? null, attemptedAt: stamp, issue: fresh ? null : action.result.error ?? 'missing',
+        ...((fresh ? fresh.provenance : old?.provenance) ? { provenance: fresh ? fresh.provenance : old?.provenance } : {}) }
+      // MCP does not state VAT. Only retain an existing verified basis for the exact same stored amount.
+      const comparable = (value: string) => value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value
+      if (fresh?.provenance?.kind === 'daangn_mcp' && fresh.vat === 'unknown' && old?.amount !== null && old?.amount !== undefined
+        && old.vat && old.vat !== 'unknown' && comparable(old.amount) === comparable(fresh.amount)) {
+        next.vat = old.vat
+        next.provenance = { ...fresh.provenance, vatEvidence: old.provenance?.vatEvidence ?? { observedAt: old.observedAt!, hash: old.provenance?.hash ?? null } }
+      }
       if (old?.attemptedAt === stamp && JSON.stringify(old) !== JSON.stringify(next)) throw new Error('ad_spend_conflicting_attempt')
       rows.set(k, next)
     }
@@ -158,6 +186,6 @@ export function selectAdSpend(record: AdSpendRecord, start: string, end: string)
       lastAttemptAt: latest(units.flatMap(r => r ? [r.attemptedAt] : [])) }
   }
   const summary = (days: string[]) => ({ total: summarize(days, adProviders), providers: { naver: summarize(days, ['naver']), daangn: summarize(days, ['daangn']) } })
-  const imported = record.lastDaangnImport
-  return { start, end, availableFrom: AD_SPEND_START, currency: 'KRW', lastDaangnImport: imported ? { at: imported.at, start: imported.start, end: imported.end, rows: imported.rows } : null, ...summary(dates), days: dates.map(day => ({ date: day, ...summary([day]) })) }
+  const publicReceipt = (item: ImportReceipt | null | undefined) => item ? { at: item.at, start: item.start, end: item.end, rows: item.rows } : null
+  return { start, end, availableFrom: AD_SPEND_START, currency: 'KRW', lastDaangnImport: publicReceipt(record.lastDaangnImport), lastDaangnMcpImport: publicReceipt(record.lastDaangnMcpImport), ...summary(dates), days: dates.map(day => ({ date: day, ...summary([day]) })) }
 }

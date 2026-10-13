@@ -4,7 +4,8 @@ import { apiFetch } from '@/lib/release-client'
 import { AD_SPEND_START, formatKrw } from '@/lib/ad-spend'
 import type { previewDaangnCsv } from '@/lib/daangn-ad-spend'
 import { FIELD_CLS } from '@/lib/ui'
-export default function DaangnAdSpendImport({ today, refresh }: { today: string; refresh: () => Promise<void> }) {
+import DaangnMcpImport from './DaangnMcpImport'
+export default function DaangnAdSpendImport({ today, lastImportedAt, lastMcpImportedAt, refresh }: { today: string; lastImportedAt: string | null; lastMcpImportedAt: string | null; refresh: () => Promise<void> }) {
   const [file, setFile] = useState<File | null>(null), [start, setStart] = useState(AD_SPEND_START), [end, setEnd] = useState(today)
   const [preview, setPreview] = useState<ReturnType<typeof previewDaangnCsv> | null>(null), [busy, setBusy] = useState(false), [message, setMessage] = useState('')
   const send = async (mode: 'preview' | 'import') => {
@@ -21,7 +22,9 @@ export default function DaangnAdSpendImport({ today, refresh }: { today: string;
     } catch (error) { setMessage(error instanceof Error ? error.message : '보고서를 처리하지 못했습니다.') }
     finally { setBusy(false) }
   }
-  return <details className="mt-5 rounded-lg border border-slate-200 p-3 text-sm"><summary className="cursor-pointer py-2 font-semibold">당근 보고서 가져오기 (관리자)</summary>
+  return <details className="min-w-0 border-t border-slate-200 pt-2 text-sm"><summary className="cursor-pointer py-3 text-xs font-medium text-slate-500">관리자 복구 도구 · 당근 보고서</summary>
+    <DaangnMcpImport lastImportedAt={lastMcpImportedAt} refresh={refresh} />
+    <p className="mt-2 text-xs leading-5 text-slate-600">누락된 날짜를 원본 보고서로 보완할 때만 사용하세요. 마지막 파일 가져오기: {lastImportedAt ? new Date(lastImportedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '없음'}</p>
     <p className="mt-3 break-all text-xs leading-5">대상: 당근 광고계정 4541556 · EVN 디스플레이 캠페인 1786077964797444000</p>
     <p className="my-3 text-xs leading-5 text-slate-600">당근 전문가모드에서 EVN 캠페인의 일별 성과를 ‘엑셀로 다운로드’한 원본 CSV를 선택하세요. 다운로드한 기간을 지정하면 파일에 없는 날짜를 구분합니다. 원본 CSV는 보관하지 않습니다.</p>
     <div className="grid min-w-0 gap-3 sm:grid-cols-2">

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "source": "daangn_mcp",
+  "fetchedAt": "2026-10-13T00:00:00.000Z",
+  "reports": [
+    {
+      "request": {
+        "advertiser_id": "4541556",
+        "advertiser_request": "Synthetic example only; replace with the exact executed MCP request",
+        "start_date": "2026-10-12",
+        "end_date": "2026-10-12",
+        "metrics": ["COST"],
+        "structure": [{ "type": "campaign", "filter": ["1786077964797444000"], "grouping": true }],
+        "page": 1,
+        "page_size": 1
+      },
+      "response": {
+        "totals": { "COST": "1234" },
+        "rows": [{ "analysis_items": { "CAMPAIGN": { "id": "1786077964797444000", "name": "Synthetic example; not live data" } }, "metrics": { "COST": "1234" } }],
+        "has_more": false,
+        "applied": { "start_date": "2026-10-12", "end_date": "2026-10-12", "duration": "ALL", "page": 1, "page_size": 1, "sort": null }
+      }
+    }
+  ]
+}

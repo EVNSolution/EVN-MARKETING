@@ -21,7 +21,12 @@ export async function checkDaangnImportUi({ page, context, db, base, uploads, ou
     for (const width of [1440, 390, 320]) {
       await rm(file, { force: true }); await page.setViewportSize({ width, height: 1000 }); await page.goto(base + '/external-dashboard')
       await page.getByRole('button', { name: '화면 새로고침', exact: true }).waitFor()
-      const upload = page.locator('details').filter({ hasText: '당근 보고서 가져오기 (관리자)' })
+      const upload = page.locator('details').filter({ hasText: '관리자 복구 도구 · 당근 보고서' })
+      assert.equal(await upload.getAttribute('open'), null, 'recovery tool is collapsed by default')
+      assert.equal(await page.getByRole('region', { name: '실제 소진 광고비', exact: true }).locator('input[type=file]').count(), 0)
+      assert.ok(await upload.evaluate(el => Boolean(el.previousElementSibling?.textContent)), 'recovery tool follows dashboard content')
+      const bounds = await upload.boundingBox(), spendBounds = await page.getByRole('region', { name: '실제 소진 광고비', exact: true }).boundingBox()
+      assert.ok(bounds.y >= spendBounds.y + spendBounds.height, 'recovery is below spend cards and charts')
       await upload.locator('summary').click()
       assert.match(await upload.innerText(), /4541556[\s\S]*1786077964797444000/)
       await page.getByLabel('보고서 시작일', { exact: true }).fill('2026-09-11')
@@ -59,8 +64,9 @@ export async function checkDaangnImportUi({ page, context, db, base, uploads, ou
       await view.locator('input[name=email]').fill('ad-viewer@example.invalid'); await view.locator('input[name=password]').fill('synthetic-viewer-password')
       await view.getByRole('button', { name: '로그인', exact: true }).click(); await view.waitForURL('**/inquiries')
       assert.equal((await viewer.request.post(base + endpoint, { data: csv, headers: { Origin: base, 'Content-Type': 'text/csv' } })).status(), 403)
+      assert.equal((await viewer.request.post(base + '/api/external-dashboard/ad-spend/mcp-import?mode=preview', { data: '{}', headers: { Origin: base, 'Content-Type': 'application/json' } })).status(), 403)
       await view.goto(base + '/external-dashboard'); await view.getByRole('button', { name: '화면 새로고침', exact: true }).waitFor()
-      assert.equal(await view.getByText('당근 보고서 가져오기 (관리자)', { exact: true }).count(), 0)
+      assert.equal(await view.getByText('관리자 복구 도구 · 당근 보고서', { exact: true }).count(), 0)
     } finally { await viewer.close(); db.prepare('DELETE FROM User WHERE id=?').run(viewerId) }
     console.log('Daangn import browser passed: admin-only + Origin, exact target, read-only preview, sparse CSV commit/receipt, today provisional, PC1440/mobile390/320')
   } finally { if (prior === null) await rm(file, { force: true }); else await writeFile(file, prior) }
