@@ -11,7 +11,7 @@ export async function checkRegisteredInflowUi({ page, context, db, base, file, s
   const insert = (date, phone, source = collected, error = null, delivered = at) => {
     const id = `registered-inflow-ui-${ids.length}`
     ids.push(id)
-    db.prepare('INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,name,phone,lastSeenAt,warpDeliveredAt,warpError) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    db.prepare('INSERT INTO Inquiry(id,source,companyScopeId,homepageScopeId,sourceId,inquiryDate,inquiryTime,name,phone,lastSeenAt,warpDeliveredAt,warpError) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(id, ...source, id, date, '09:00', 'private-inflow-ui-name', phone, at, delivered, error)
   }
   const days = Array.from({ length: 30 }, (_, i) => `2026-08-${String(i + 1).padStart(2, '0')}`)
