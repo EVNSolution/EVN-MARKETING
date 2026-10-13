@@ -9,8 +9,9 @@ import { dashboardErrorText, dashboardPercentages, dashboardTotals, mediaLabel, 
 import { dashboardKoreaDate, type DashboardDay, type DashboardHistoryView } from '@/lib/external-dashboard-history'
 import type { RegisteredInflow } from '@/lib/registered-inflow'
 import { adProviders, adProviderLabels, formatKrw, spendStatusLabels, vatLabels, type AdSpendView, type SpendSummary } from '@/lib/ad-spend'
+import DaangnAdSpendImport from './DaangnAdSpendImport'
 
-type Payload = { record: DashboardRecord | null; history?: DashboardHistoryView; registeredInflow?: RegisteredInflow; adSpend?: AdSpendView; workerOnline: boolean; sourceReady: boolean; nextRunAt: string | null }
+type Payload = { record: DashboardRecord | null; history?: DashboardHistoryView; registeredInflow?: RegisteredInflow; adSpend?: AdSpendView; canImportAdSpend?: boolean; workerOnline: boolean; sourceReady: boolean; nextRunAt: string | null }
 const number = (value: number | null) => value === null ? '—' : value.toLocaleString('ko-KR')
 const time = (value: string | null | undefined) => value
   ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }) : '아직 없음'
@@ -117,7 +118,7 @@ export default function ExternalDashboardClient() {
       <p className="mb-3 text-xs leading-5 text-slate-500">{inflow.start} ~ {inflow.end} · 해당 날짜에 보관된 완료 문의가 없으면 0건입니다. 개인정보 삭제 시 집계에서도 제외됩니다.{!history?.start && ' 외부 집계 기간이 없으면 보관 문의의 첫 유입일부터 오늘까지 최대 366일을 표시합니다.'}</p>
       <RegisteredInflowChart key={filter} data={inflow} />
     </SectionCard>}
-    {payload?.adSpend && <AdSpendSection key={filter} data={payload.adSpend} />}
+    {payload?.adSpend && <AdSpendSection key={filter} data={payload.adSpend} canImport={Boolean(payload.canImportAdSpend)} today={today} refresh={refresh} />}
     {data && <>
       <SectionCard color="slate" title="일별 방문자 · 페이지뷰"><VisitorChart key={filter} data={data} days={history?.days} today={today} /></SectionCard>
       <SectionCard color="slate" title="매체별 일별 광고 유입"><MediaChart key={filter} data={data} days={history?.days} /></SectionCard>
@@ -264,7 +265,7 @@ function ChartFrame({ days, label, children }: { days: ChartDay[]; label: string
     style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? 'visible' : 'hidden' }}
     onPointerEnter={keepOpen} onPointerLeave={leave}>
     <p className="mb-3 font-semibold text-slate-950">{Number(selected.date.slice(5, 7))}/{Number(selected.date.slice(8, 10))}</p>
-    <dl className="space-y-2">{selected.values.map(value => <div key={value.label} className="flex items-center justify-between gap-5">
+    <dl className="space-y-2">{selected.values.map(value => <div key={value.label} className={value.formatted ? 'space-y-1' : 'flex items-center justify-between gap-5'}>
       <dt className="flex min-w-0 items-center gap-2"><span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: value.color }} />{value.label}</dt>
       <dd className={`font-semibold tabular-nums ${value.formatted ? 'min-w-0 break-all text-right' : 'shrink-0'}`}>{value.formatted ?? (value.value === null ? '미수집' : number(value.value))}</dd>
     </div>)}</dl>
@@ -286,7 +287,7 @@ function SpendValue({ value }: { value: SpendSummary }) {
     {value.total === null && value.groups.map(group => <p key={group.vat} className="mt-1 break-all text-xs leading-5 text-amber-900">보관 금액 {formatKrw(group.amount)} · {vatLabels[group.vat]} (확정 합계 아님)</p>)}
     <p className="mt-2 text-xs leading-5 text-slate-500">값이 있는 캠페인·일 {value.observed}/{value.expected}<br />마지막 값 수집 성공: {time(value.lastSuccessfulAt)}<br />마지막 시도: {time(value.lastAttemptAt)}</p></>
 }
-function AdSpendSection({ data }: { data: AdSpendView }) {
+function AdSpendSection({ data, canImport, today, refresh }: { data: AdSpendView; canImport: boolean; today: string; refresh: () => Promise<void> }) {
   const colors = { naver: '#16a34a', daangn: '#ea580c' }
   // Only plot fully observed, same-basis amounts. Exact decimal strings remain in cards/table/tooltips.
   const maximum = Math.max(1, ...data.days.flatMap(day => adProviders.map(p => Number(day.providers[p].total ?? 0))))
@@ -297,6 +298,9 @@ function AdSpendSection({ data }: { data: AdSpendView }) {
       <p className="text-xs leading-5 text-slate-600">EVN 지정 캠페인만 · 기존 evnsolution.kr 및 새 홈페이지 · KRW · {data.availableFrom}부터 보관</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">조회 {data.start} ~ {data.end} · 위 성과 날짜 필터를 사용합니다. 외부 집계 기간이 없으면 광고비는 보관 시작일부터 오늘까지 조회합니다.</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">일별 보고서 합계이며 매체 화면의 기간 합계와 반올림 차이가 있을 수 있습니다.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">오늘 광고비는 진행 중인 부분 집계입니다. 이후 재수집이나 보고서 가져오기로 금액이 달라질 수 있습니다.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">네이버: 연결 설정 후 약 1시간마다 갱신 · 당근: 관리자 보고서 가져오기<br />당근 마지막 파일 가져오기: {time(data.lastDaangnImport?.at)}</p>
+      {canImport && <DaangnAdSpendImport today={today} refresh={refresh} />}
       <p className="my-3 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">미연결·미수집·오류는 0원이 아닙니다. 누락 또는 세금 기준 차이·미확인이 있으면 전체 확정 합계를 표시하지 않습니다. 보관 금액은 마지막 성공 값입니다.</p>
       <div className="grid min-w-0 gap-3 lg:grid-cols-3">{(['total', ...adProviders] as const).map(source => {
         const value = source === 'total' ? data.total : data.providers[source]

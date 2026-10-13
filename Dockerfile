@@ -23,6 +23,7 @@ COPY lib lib
 COPY workers workers
 COPY scripts/warp-delivery.ts scripts/warp-delivery.ts
 COPY scripts/warp-recovery.ts scripts/warp-recovery.ts
+COPY scripts/ad-spend.ts scripts/ad-spend.ts
 COPY scripts/schema-check.mjs scripts/schema-check.mjs
 COPY scripts/schema-compatibility.mjs scripts/schema-compatibility.mjs
 COPY scripts/landing-schema-policy.json scripts/landing-schema-policy.json
@@ -41,6 +42,7 @@ RUN test -n "$MARKETING_BUILD_REVISION" \
     && ./node_modules/.bin/esbuild workers/inquiry-sync.ts --bundle --platform=node --format=esm --packages=external --outfile=worker.mjs \
     && ./node_modules/.bin/esbuild scripts/warp-delivery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-delivery.mjs \
     && ./node_modules/.bin/esbuild scripts/warp-recovery.ts --bundle --platform=node --format=esm --packages=external --outfile=warp-recovery.mjs \
+    && ./node_modules/.bin/esbuild scripts/ad-spend.ts --bundle --platform=node --format=esm --packages=external --outfile=ad-spend.mjs \
     && ./node_modules/.bin/esbuild workers/health.ts --bundle --platform=node --format=esm --packages=external --outfile=worker-health.mjs
 
 FROM dependencies AS migration-dependencies
@@ -91,6 +93,7 @@ COPY --from=build /app/worker.mjs ./worker.mjs
 COPY --from=build /app/worker-health.mjs ./worker-health.mjs
 COPY --from=build /app/warp-delivery.mjs ./warp-delivery.mjs
 COPY --from=build /app/warp-recovery.mjs ./warp-recovery.mjs
+COPY --from=build /app/ad-spend.mjs ./ad-spend.mjs
 COPY --from=build /app/scripts/data-backup.mjs ./data-backup.mjs
 COPY --from=build /app/scripts/schema-check.mjs ./schema-check.mjs
 COPY --from=build /app/scripts/schema-compatibility.mjs ./schema-compatibility.mjs

@@ -45,7 +45,7 @@ export function parseNaverDailyStats(text: string, scope: RequestScope, now = ne
     return { provider: 'naver', accountId: scope.customerId, campaignId: scope.campaignId, start: scope.start, end: scope.end, rows }
   } catch { return invalid() }
 }
-export async function fetchNaverDailyStats(scope: RequestScope, credentials: Credentials, request: typeof fetch = fetch, now = new Date()) {
+export async function fetchNaverDailyStats(scope: RequestScope, credentials: Credentials, request: typeof fetch = fetch, now = new Date(), signal?: AbortSignal) {
   scopeDates(scope, now)
   if (!credentials.apiKey || !credentials.secretKey) throw new Error('naver_ads_not_connected')
   const timestamp = String(now.getTime()), uri = '/stats', url = new URL(uri, 'https://api.searchad.naver.com')
@@ -54,7 +54,7 @@ export async function fetchNaverDailyStats(scope: RequestScope, credentials: Cre
   const signature = createHmac('sha256', credentials.secretKey).update(`${timestamp}.GET.${uri}`).digest('base64')
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 10_000)
   try {
-    const response = await request(url, { method: 'GET', redirect: 'error', cache: 'no-store', signal: controller.signal, headers: {
+    const response = await request(url, { method: 'GET', redirect: 'error', cache: 'no-store', signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal, headers: {
       'X-Timestamp': timestamp, 'X-API-KEY': credentials.apiKey, 'X-Customer': scope.customerId, 'X-Signature': signature,
     } })
     if (response.status === 401 || response.status === 403) throw new Error('naver_ads_authentication_required')

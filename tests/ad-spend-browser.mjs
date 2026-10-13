@@ -70,7 +70,7 @@ export async function checkAdSpendUi({ page, context, base, uploads, output }) {
           await target.focus(); await view.keyboard.press('Enter')
           assert.equal(await target.getAttribute('aria-pressed'), 'true')
           await view.keyboard.press('Escape'); await tooltip.waitFor({ state: 'hidden' })
-          const detail = section.locator('details')
+          const detail = section.locator('details').filter({ hasText: '광고비 일별 상세 펼치기' })
           await detail.locator('summary').click()
           assert.equal(await detail.locator('tbody tr').count(), count)
           await detail.locator('summary').click()

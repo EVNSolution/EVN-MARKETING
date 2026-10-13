@@ -49,16 +49,22 @@ export async function readAdSpendView(start: string, end: string, env: Environme
   return selectAdSpend(await readAdSpend(env), start, end)
 }
 export async function saveAdSpend(action: AdSpendAction, env: Environment = process.env, now = new Date()) {
+  return saveAdSpendActions([action], env, now)
+}
+export async function saveAdSpendActions(actions: AdSpendAction[], env: Environment = process.env, now = new Date(), fence: () => Promise<void> = async () => {}) {
   const folder = await directory(env, true), file = path.join(folder, 'current.json'), lockPath = path.join(folder, 'writer.lock')
   // Cross-process exclusion: never steal a lock. After a crash an operator must stop all writers before removing it.
   const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error('ad_spend_writer_busy') })
   const temporary = path.join(folder, `${randomUUID()}.tmp`)
   try {
-    const next = applyAdSpendAction(await read(file), action, now), bytes = JSON.stringify(next)
+    let next = await read(file)
+    for (const action of actions) next = applyAdSpendAction(next, action, now)
+    const bytes = JSON.stringify(next)
     if (Buffer.byteLength(bytes) > maximum) return invalid()
     const fd = await open(temporary, 'wx', 0o600)
     try { await fd.writeFile(bytes); await fd.sync() } finally { await fd.close() }
     if (await directory(env, false) !== folder) return invalid()
+    await fence()
     await rename(temporary, file); await sync(folder)
     return next
   } finally {
