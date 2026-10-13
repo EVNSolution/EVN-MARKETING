@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { INQUIRY_SCOPE_ID, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
 import { readDashboardHistory } from '@/lib/external-dashboard-store'
 import { parseDashboardQuery } from '@/lib/external-dashboard-history'
+import { readRegisteredInflow } from '@/lib/registered-inflow'
 
 export const dynamic = 'force-dynamic'
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' }
@@ -26,7 +27,8 @@ export async function GET(request: Request) {
       && state.workerHeartbeatAt.getTime() > now - WORKER_LEASE_MS && state.workerHeartbeatAt.getTime() <= now + 5_000
       && state.workerLeaseExpiresAt.getTime() > now)
     const sourceReady = workerOnline && ['ready', 'running', 'success'].includes(state?.status ?? '')
-    return NextResponse.json({ ...dashboard, workerOnline, sourceReady, nextRunAt: state?.nextRunAt?.toISOString() ?? null }, { headers })
+    const registeredInflow = await readRegisteredInflow(prisma, dashboard.history)
+    return NextResponse.json({ ...dashboard, registeredInflow, workerOnline, sourceReady, nextRunAt: state?.nextRunAt?.toISOString() ?? null }, { headers })
   } catch (error) {
     if (error instanceof Error && error.message === 'dashboard_snapshot_missing') return NextResponse.json({ error: '선택한 수집일의 보관본이 없습니다.' }, { status: 404, headers })
     return NextResponse.json({ error: '저장된 대시보드를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' }, { status: 503, headers })
