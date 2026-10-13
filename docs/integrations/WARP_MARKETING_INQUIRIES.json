@@ -248,6 +248,10 @@
       "Validate with synthetic databases; production mappings are read-only checks. Retain legacy receipts and do not backfill."
     ],
     "review_issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
-    "delegation": "https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448"
+    "delegation": "https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448",
+    "review_pull_requests": {
+      "EVN-WARP": "https://github.com/EVNSolution/EVN-WARP/pull/101",
+      "EVN-MARKETING": "https://github.com/EVNSolution/EVN-MARKETING/pull/44"
+    }
   }
 }
