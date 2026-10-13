@@ -1,4 +1,4 @@
-name: Marketing deploy
+name: Marketing activate
 on:
   workflow_dispatch:
     inputs:
@@ -23,7 +23,9 @@ concurrency:
 jobs:
   deploy:
     if: github.repository == 'EVNSolution/EVN-MARKETING' && github.ref == 'refs/heads/main'
-    environment: production
+    environment:
+      name: production
+      deployment: false
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -72,4 +74,4 @@ jobs:
         run: |
           if [ "$RELEASE_ACTION" = rollback ]; then IMAGE_DIGEST=previous; fi
           python3 deploy/aws/release.py dispatch "$IMAGE_DIGEST"
-          echo 'Traffic and worker activated. The host continues 30-minute observation and automatic rollback. Stable completion is recorded in state/release.json.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Activation is complete. The server automatically records the final result in GitHub production deployments. No runner waits for the 30-minute host validation.' >> "$GITHUB_STEP_SUMMARY"

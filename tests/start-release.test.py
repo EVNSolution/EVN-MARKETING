@@ -17,9 +17,10 @@ for args in [('release','main',b['digest']),('recover','',''),('release',b['revi
     try:m.command(*args)
     except ValueError:pass
     else:raise AssertionError('unsafe command accepted')
-cmd=m.command('release',b['revision'],b['digest'])
+cmd=m.command('release',b['revision'],b['digest'],'run-123-1')
 assert '--property=RuntimeMaxSec=3600' in cmd and '--unit=marketing-deploy.service' in cmd
-assert '--property=TimeoutStopSec=900' in cmd and cmd[-5:] == ['release','--revision',b['revision'],'--digest',b['digest']]
+assert '--property=TimeoutStopSec=900' in cmd and cmd[-4:] == ['--revision',b['revision'],'--digest',b['digest']]
+assert str(m.ROOT/'deploy/deployment-result.py') in cmd and '--key' in cmd
 with tempfile.TemporaryDirectory() as directory:
     root=Path(directory);(root/'state').mkdir();state=root/'state/release.json'
     def save(value):state.write_text(json.dumps(value))
