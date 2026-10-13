@@ -304,6 +304,29 @@ class Tests(unittest.TestCase):
             controller.start(A)
             self.assertEqual(docker.call_args_list[-1].kwargs['env']['WARP_DELIVERY_ENABLED'], 'false')
 
+    def test_naver_ad_spend_is_optional_and_worker_only(self):
+        controller = module.Controller(self.root)
+        controller.config['parameters'] = {key: '/evn-marketing/production/' + name for key, name in (
+            ('AUTH_SECRET', 'auth-secret'), ('MLEVERAGE_USERNAME', 'source-username'),
+            ('MLEVERAGE_PASSWORD', 'source-password'), ('WARP_MARKETING_API_KEY', 'warp-api-key'),
+            ('NAVER_AD_API_KEY', 'naver-api-license'), ('NAVER_AD_SECRET_KEY', 'naver-secret-key'))}
+        def ssm(args):
+            names = args[args.index('--names') + 1:args.index('--with-decryption')]
+            return json.dumps({'Parameters': [{'Name': name, 'Value': 'synthetic-' + name.rsplit('/', 1)[1], 'Type': 'SecureString'} for name in names]})
+        for enabled in (False, True):
+            controller.config['naverAdSpendEnabled'] = enabled
+            for worker in (False, True):
+                with self.subTest(enabled=enabled, worker=worker), patch.object(controller, 'command', side_effect=ssm):
+                    secrets = controller.secrets(worker)
+                    self.assertEqual('NAVER_AD_API_KEY' in secrets, enabled and worker)
+                    self.assertEqual('NAVER_AD_SECRET_KEY' in secrets, enabled and worker)
+                with patch.object(controller, 'docker', return_value='') as docker, patch.object(controller, 'identity'), patch.object(controller, 'secrets', return_value=secrets):
+                    controller.start(A, worker=worker)
+                    call = docker.call_args_list[-1]
+                    self.assertEqual('NAVER_AD_API_KEY' in call.args, enabled and worker)
+                    self.assertNotIn('synthetic-naver-secret-key', ' '.join(call.args))
+                    self.assertEqual(call.kwargs['env'].get('NAVER_AD_SPEND_ENABLED'), ('true' if enabled else 'false') if worker else None)
+
     def test_success_keeps_previous_and_rollback_needs_no_retention_wait(self):
         started = self.c.clock
         self.c.release(B['revision'], B['digest'])

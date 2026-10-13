@@ -96,6 +96,10 @@ class Controller:
         require(re.fullmatch(r'vol-[0-9a-f]+', c['ebsVolumeId']), 'configuration')
         require(type(c['collectorEnabled']) is bool and type(c['warpDeliveryEnabled']) is bool, 'configuration')
         require(type(c.get('landingIntakeEnabled', False)) is bool, 'configuration')
+        require(type(c.get('naverAdSpendEnabled', False)) is bool, 'configuration')
+        if c.get('naverAdSpendEnabled'):
+            require(c['collectorEnabled'], 'configuration')
+            require(all(key in c['parameters'] for key in ('NAVER_AD_API_KEY', 'NAVER_AD_SECRET_KEY')), 'configuration')
         require(type(c['minFreeMemoryMiB']) is int and c['minFreeMemoryMiB'] >= 256, 'configuration')
         require(type(c['minFreeDiskMiB']) is int and c['minFreeDiskMiB'] >= 1024, 'configuration')
         require(self.state.get('format') == 1, 'journal')
@@ -242,6 +246,8 @@ class Controller:
 
     def secrets(self, worker):
         keys = ['AUTH_SECRET'] + (['MLEVERAGE_USERNAME', 'MLEVERAGE_PASSWORD', 'WARP_MARKETING_API_KEY'] if worker else [])
+        if worker and self.config.get('naverAdSpendEnabled'):
+            keys += ['NAVER_AD_API_KEY', 'NAVER_AD_SECRET_KEY']
         names = [self.config['parameters'][key] for key in keys]
         require(all(re.fullmatch(r'/evn-marketing/production/[a-z-]+', name) for name in names), 'secret_path')
         values = json.loads(self.command(['aws', 'ssm', 'get-parameters', '--region', 'ap-northeast-2',
@@ -270,6 +276,8 @@ class Controller:
             LANDING_INTAKE_ENABLED='true' if self.config.get('landingIntakeEnabled') is True and not worker else 'false',
             WARP_DELIVERY_ENABLED='true' if self.config['warpDeliveryEnabled'] else 'false',
             INQUIRY_COLLECTOR_ENABLED='true' if worker else 'false')
+        if worker:
+            environment['NAVER_AD_SPEND_ENABLED'] = 'true' if self.config.get('naverAdSpendEnabled') else 'false'
         args = ['run', '-d', '--name', name, '--init', '--restart=no', '--network', self.config['network'],
                 '--label', 'evn.marketing.managed=true', '--label', 'evn.marketing.revision=' + release['revision'], '--memory', '768m' if worker else '384m',
                 '--cpus', '1', '--pids-limit', '256', '--log-driver', 'local',

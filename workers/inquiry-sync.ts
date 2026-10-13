@@ -4,6 +4,7 @@ import { configuredWorkerOwner } from '@/lib/worker-health'
 import { workerActivationAllowed } from './worker-activation'
 import { collectExternalDashboard } from './external-dashboard-sync'
 import { readDashboardRecord } from '@/lib/external-dashboard-store'
+import { collectNaverAdSpend } from './ad-spend-sync'
 
 async function main() {
   const enabled = collectorEnabled()
@@ -38,6 +39,7 @@ async function main() {
       reconcile: sync.reconcile,
       finishRun: sync.finishRun,
       dispatchPendingWarp: (db, owner, signal) => warp.dispatchPendingWarp(db, owner, undefined, undefined, undefined, signal),
+      collectAdSpend: collectNaverAdSpend,
       launchSourceBrowser: source.launchSourceBrowser,
       openLogin: source.openLogin,
       prepareProtectedPage: source.prepareProtectedPage,

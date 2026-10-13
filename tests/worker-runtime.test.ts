@@ -36,6 +36,7 @@ type Controls = {
 }
 
 async function main() {
+  await testAdSpendIsolation()
   await testDashboardHook()
   await testInitialDashboard()
   await testDeploymentActivation()
@@ -58,6 +59,19 @@ async function main() {
   await testHealthTransitionsAndLeaseLoss()
   await testLoginRedirectIsNotReadiness()
   console.log('worker runtime tests passed')
+}
+async function testAdSpendIsolation() {
+  await withWorkerDatabase(async (worker, inspect) => {
+    const controller = new AbortController(), logs: string[] = []
+    let calls = 0
+    const deps = dependencies(worker, { prepare: async () => true })
+    deps.collectAdSpend = async () => { calls++; throw new Error('private-ad-error') }
+    const result = await runInquiryWorker({ enabled: true, signal: controller.signal, dependencies: deps, owner: 'ads-isolated',
+      log: code => logs.push(code), wait: async () => { controller.abort() } })
+    assert.equal(result, 0); assert.ok(calls > 0)
+    assert.ok(logs.every(code => code === 'ad_spend_collection_failed'))
+    assert.equal((await inspect.inquirySyncRun.findFirstOrThrow()).status, 'success')
+  })
 }
 
 async function testDashboardHook() {

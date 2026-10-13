@@ -8,8 +8,10 @@ import { apiFetch } from '@/lib/release-client'
 import { dashboardErrorText, dashboardPercentages, dashboardTotals, mediaLabel, type DashboardRecord, type ExternalDashboard } from '@/lib/external-dashboard'
 import { dashboardKoreaDate, type DashboardDay, type DashboardHistoryView } from '@/lib/external-dashboard-history'
 import type { RegisteredInflow } from '@/lib/registered-inflow'
+import { adProviders, adProviderLabels, formatKrw, spendStatusLabels, vatLabels, type AdSpendView, type SpendSummary } from '@/lib/ad-spend'
+import DaangnAdSpendImport from './DaangnAdSpendImport'
 
-type Payload = { record: DashboardRecord | null; history?: DashboardHistoryView; registeredInflow?: RegisteredInflow; workerOnline: boolean; sourceReady: boolean; nextRunAt: string | null }
+type Payload = { record: DashboardRecord | null; history?: DashboardHistoryView; registeredInflow?: RegisteredInflow; adSpend?: AdSpendView; canImportAdSpend?: boolean; workerOnline: boolean; sourceReady: boolean; nextRunAt: string | null }
 const number = (value: number | null) => value === null ? '—' : value.toLocaleString('ko-KR')
 const time = (value: string | null | undefined) => value
   ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }) : '아직 없음'
@@ -116,6 +118,7 @@ export default function ExternalDashboardClient() {
       <p className="mb-3 text-xs leading-5 text-slate-500">{inflow.start} ~ {inflow.end} · 해당 날짜에 보관된 완료 문의가 없으면 0건입니다. 개인정보 삭제 시 집계에서도 제외됩니다.{!history?.start && ' 외부 집계 기간이 없으면 보관 문의의 첫 유입일부터 오늘까지 최대 366일을 표시합니다.'}</p>
       <RegisteredInflowChart key={filter} data={inflow} />
     </SectionCard>}
+    {payload?.adSpend && <AdSpendSection key={filter} data={payload.adSpend} canImport={Boolean(payload.canImportAdSpend)} today={today} refresh={refresh} />}
     {data && <>
       <SectionCard color="slate" title="일별 방문자 · 페이지뷰"><VisitorChart key={filter} data={data} days={history?.days} today={today} /></SectionCard>
       <SectionCard color="slate" title="매체별 일별 광고 유입"><MediaChart key={filter} data={data} days={history?.days} /></SectionCard>
@@ -157,7 +160,7 @@ const xSpacing = (size: number, width: number) => {
 const xAt = (index: number, size: number, width: number) =>
   (65 + chartRight(width)) / 2 + (index - (size - 1) / 2) * xSpacing(size, width)
 const yAt = (value: number, maximum: number) => 190 - value / Math.max(1, maximum) * 160
-type ChartDay = { date: string; values: { label: string; color: string; value: number | null }[] }
+type ChartDay = { date: string; values: { label: string; color: string; value: number | null; formatted?: string }[] }
 function ChartFrame({ days, label, children }: { days: ChartDay[]; label: string; children: (width: number) => ReactNode }) {
   const size = days.length
   const container = useRef<HTMLDivElement>(null)
@@ -262,21 +265,64 @@ function ChartFrame({ days, label, children }: { days: ChartDay[]; label: string
     style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? 'visible' : 'hidden' }}
     onPointerEnter={keepOpen} onPointerLeave={leave}>
     <p className="mb-3 font-semibold text-slate-950">{Number(selected.date.slice(5, 7))}/{Number(selected.date.slice(8, 10))}</p>
-    <dl className="space-y-2">{selected.values.map(value => <div key={value.label} className="flex items-center justify-between gap-5">
+    <dl className="space-y-2">{selected.values.map(value => <div key={value.label} className={value.formatted ? 'space-y-1' : 'flex items-center justify-between gap-5'}>
       <dt className="flex min-w-0 items-center gap-2"><span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: value.color }} />{value.label}</dt>
-      <dd className="shrink-0 font-semibold tabular-nums">{value.value === null ? '미수집' : number(value.value)}</dd>
+      <dd className={`font-semibold tabular-nums ${value.formatted ? 'min-w-0 break-all text-right' : 'shrink-0'}`}>{value.formatted ?? (value.value === null ? '미수집' : number(value.value))}</dd>
     </div>)}</dl>
     <p className="mt-3 text-xs text-slate-500">다시 누르거나 바깥을 누르면 닫힙니다.</p>
   </div>, document.body)}</>
 }
-function ChartGrid({ maximum, dates, width }: { maximum: number; dates: string[]; width: number }) {
+function ChartGrid({ maximum, dates, width, formatTick }: { maximum: number; dates: string[]; width: number; formatTick?: (value: number) => string }) {
   return <>
     {[0, 0.5, 1].map(fraction => <g key={fraction}>
       <line x1="65" x2={chartRight(width)} y1={yAt(maximum * fraction, maximum)} y2={yAt(maximum * fraction, maximum)} stroke="#e2e8f0" />
-      <text x="55" y={yAt(maximum * fraction, maximum) + 4} textAnchor="end" fontSize="11" fill="#64748b">{number(Math.round(maximum * fraction))}</text>
+      <text x="55" y={yAt(maximum * fraction, maximum) + 4} textAnchor="end" fontSize="11" fill="#64748b">{formatTick ? formatTick(maximum * fraction) : number(Math.round(maximum * fraction))}</text>
     </g>)}
     {dates.map((date, i) => (i === 0 || i === dates.length - 1 || (i % Math.max(1, Math.ceil(dates.length / 5)) === 0 && (dates.length - 1 - i) * xSpacing(dates.length, width) >= 36)) && <text key={date} x={xAt(i, dates.length, width)} y="218" textAnchor="middle" fontSize="11" fill="#64748b">{date.slice(5)}</text>)}
   </>
+}
+function SpendValue({ value }: { value: SpendSummary }) {
+  return <><p className="break-all text-xl font-bold tabular-nums text-slate-900">{formatKrw(value.total)}</p>
+    <p className="mt-1 text-xs leading-5 text-slate-600">{spendStatusLabels[value.status]}{value.vat ? ` · ${vatLabels[value.vat]}` : ''}</p>
+    {value.total === null && value.groups.map(group => <p key={group.vat} className="mt-1 break-all text-xs leading-5 text-amber-900">보관 금액 {formatKrw(group.amount)} · {vatLabels[group.vat]} (확정 합계 아님)</p>)}
+    <p className="mt-2 text-xs leading-5 text-slate-500">값이 있는 캠페인·일 {value.observed}/{value.expected}<br />마지막 값 수집 성공: {time(value.lastSuccessfulAt)}<br />마지막 시도: {time(value.lastAttemptAt)}</p></>
+}
+function AdSpendSection({ data, canImport, today, refresh }: { data: AdSpendView; canImport: boolean; today: string; refresh: () => Promise<void> }) {
+  const colors = { naver: '#16a34a', daangn: '#ea580c' }
+  // Only plot fully observed, same-basis amounts. Exact decimal strings remain in cards/table/tooltips.
+  const maximum = Math.max(1, ...data.days.flatMap(day => adProviders.map(p => Number(day.providers[p].total ?? 0))))
+  const details = (value: SpendSummary) => value.total !== null ? `${formatKrw(value.total)} · ${vatLabels[value.vat!]}`
+    : `${spendStatusLabels[value.status]}${value.groups.length ? ' / ' + value.groups.map(g => `${formatKrw(g.amount)} (${vatLabels[g.vat]}, 보관 금액)`).join(' / ') : ''}`
+  return <section aria-label="실제 소진 광고비" className="min-w-0">
+    <SectionCard color="slate" title="실제 소진 광고비">
+      <p className="text-xs leading-5 text-slate-600">EVN 지정 캠페인만 · 기존 evnsolution.kr 및 새 홈페이지 · KRW · {data.availableFrom}부터 보관</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">조회 {data.start} ~ {data.end} · 위 성과 날짜 필터를 사용합니다. 외부 집계 기간이 없으면 광고비는 보관 시작일부터 오늘까지 조회합니다.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">일별 보고서 합계이며 매체 화면의 기간 합계와 반올림 차이가 있을 수 있습니다.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">오늘 광고비는 진행 중인 부분 집계입니다. 이후 재수집이나 보고서 가져오기로 금액이 달라질 수 있습니다.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">네이버: 연결 설정 후 약 1시간마다 갱신 · 당근: 관리자 보고서 가져오기<br />당근 마지막 파일 가져오기: {time(data.lastDaangnImport?.at)}</p>
+      {canImport && <DaangnAdSpendImport today={today} refresh={refresh} />}
+      <p className="my-3 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">미연결·미수집·오류는 0원이 아닙니다. 누락 또는 세금 기준 차이·미확인이 있으면 전체 확정 합계를 표시하지 않습니다. 보관 금액은 마지막 성공 값입니다.</p>
+      <div className="grid min-w-0 gap-3 lg:grid-cols-3">{(['total', ...adProviders] as const).map(source => {
+        const value = source === 'total' ? data.total : data.providers[source]
+        return <article key={source} aria-label={source === 'total' ? '전체 광고비' : adProviderLabels[source]} className="min-w-0 rounded-lg border border-slate-200 p-3">
+          <h3 className="mb-2 text-sm font-semibold">{source === 'total' ? '전체 광고비' : adProviderLabels[source]}</h3><SpendValue value={value} />
+        </article>
+      })}</div>
+      <div className="mt-5 flex flex-wrap gap-4 text-xs">{adProviders.map(p => <span key={p} style={{ color: colors[p] }}>● {adProviderLabels[p]}</span>)}</div>
+      <p className="mt-2 text-xs leading-5 text-slate-500">그래프는 매체별 확인된 일별 금액입니다. 서로 다른 세금 기준을 쌓거나 합산하지 않습니다. 정확한 금액과 상태는 상세 수치에 표시합니다.</p>
+      <ChartFrame days={data.days.map(day => ({ date: day.date, values: adProviders.map(p => ({ label: adProviderLabels[p], color: colors[p], value: day.providers[p].total === null ? null : Number(day.providers[p].total), formatted: details(day.providers[p]) })) }))} label="일별 실제 소진 광고비. 네이버와 당근의 확인된 금액과 수집 상태.">{width => {
+        const barWidth = Math.min(13, 230 / data.days.length, xSpacing(data.days.length, width) * 0.3)
+        return <><ChartGrid maximum={maximum} dates={data.days.map(day => day.date)} width={width} formatTick={value => value.toLocaleString('ko-KR', { notation: 'compact', maximumSignificantDigits: 3 })} />
+          {data.days.flatMap((day, i) => adProviders.map((p, n) => day.providers[p].total !== null && <rect key={`${day.date}-${p}`} data-spend-bar={p} x={xAt(i, data.days.length, width) + (n - 1) * barWidth} y={yAt(Number(day.providers[p].total), maximum)} width={barWidth} height={Number(day.providers[p].total) / maximum * 160} fill={colors[p]}><title>{day.date} {adProviderLabels[p]} {details(day.providers[p])}</title></rect>))}
+        </>
+      }}</ChartFrame>
+      <details className="mt-3 text-sm"><summary className="cursor-pointer py-2 font-medium">광고비 일별 상세 펼치기 ({data.days.length}일)</summary>
+        <div className="max-h-96 overflow-auto"><table className="w-full min-w-[680px] text-left text-xs"><thead><tr><th className="p-2">날짜</th><th className="p-2">전체</th><th className="p-2">네이버 파워링크</th><th className="p-2">당근 비즈니스</th></tr></thead>
+          <tbody>{data.days.map(day => <tr key={day.date} className="border-t border-slate-100"><td className="whitespace-nowrap p-2">{day.date}</td>{[day.total, day.providers.naver, day.providers.daangn].map((value, i) => <td key={i} className="p-2 align-top"><p>{details(value)}</p><p className="mt-1 text-slate-500">마지막 값 수집 성공: {time(value.lastSuccessfulAt)}</p></td>)}</tr>)}</tbody>
+        </table></div>
+      </details>
+    </SectionCard>
+  </section>
 }
 function RegisteredInflowChart({ data }: { data: RegisteredInflow }) {
   const maximum = Math.max(2, Math.ceil(Math.max(...data.days.map(day => day.count)) / 2) * 2)

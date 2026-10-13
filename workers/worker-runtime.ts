@@ -44,6 +44,7 @@ export type WorkerDependencies = {
   ) => Promise<ReconcileResult>
   finishRun: (db: PrismaClient, runId: string, owner: string, result: ReconcileResult) => Promise<unknown>
   dispatchPendingWarp: (db: PrismaClient, owner: string, signal?: AbortSignal) => Promise<unknown>
+  collectAdSpend?: (db: PrismaClient, owner: string, signal: AbortSignal) => Promise<void>
   launchSourceBrowser: () => Promise<{ browser: Browser, page: Page }>
   openLogin: (page: Page) => Promise<unknown>
   prepareProtectedPage: (page: Page, startDate: string, endDate: string) => Promise<boolean>
@@ -80,6 +81,12 @@ export async function runInquiryWorker({
   workAllowed = async () => true,
 }: WorkerOptions) {
   const deps = { ...provided, dispatchPendingWarp: async (...args: Parameters<WorkerDependencies['dispatchPendingWarp']>) => {
+    if (provided.collectAdSpend && !signal.aborted && await workAllowed()) {
+      try { await provided.collectAdSpend(args[0], args[1], signal) } catch (error) {
+        if (isLeaseError(error)) throw error
+        if (!signal.aborted) log('ad_spend_collection_failed')
+      }
+    }
     if (await workAllowed()) return provided.dispatchPendingWarp(...args)
   } }
   if (!enabled) {
