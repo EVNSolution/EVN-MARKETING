@@ -69,10 +69,13 @@ WORKDIR /app
 COPY --from=dependencies /app/node_modules/playwright-core ./node_modules/playwright-core
 RUN node node_modules/playwright-core/cli.js install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
-# CVE-2026-46675: refresh libpng after any cached Chromium dependencies.
+# Refresh fixed browser libraries after any cached Chromium dependencies.
+# Ubuntu USN-8913-1 fixes CVE-2026-88806 in libx11.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade libpng16-16t64 \
+    && apt-get install -y --no-install-recommends --only-upgrade libpng16-16t64 libx11-6 libx11-data libx11-xcb1 \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libpng16-16t64)" ge 1.6.43-5ubuntu0.7 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libx11-6)" ge 2:1.8.7-1ubuntu0.1 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libx11-data)" ge 2:1.8.7-1ubuntu0.1 \
     && rm -rf /var/lib/apt/lists/*
 
 # The controller lab replaces the collector with a synthetic worker. Its image
