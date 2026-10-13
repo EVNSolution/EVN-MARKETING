@@ -51,6 +51,7 @@ export default function ExternalDashboardClient() {
   const record = payload?.record
   const history = payload?.history
   const inflow = payload?.registeredInflow
+  const spend = payload?.adSpend?.total
   const data = history?.data ?? record?.data
   const rankingRecord = history?.snapshot ?? record
   const rankingData = rankingRecord?.data
@@ -106,11 +107,17 @@ export default function ExternalDashboardClient() {
       </p>}
       {history.missingMediaDays.length > 0 && <p className="text-xs text-slate-600">매체별 원본 값이 없는 날짜 {history.missingMediaDays.length}일은 수집 대기입니다. 제공된 매체 값만 표시하며 누락을 0으로 바꾸지 않습니다.</p>}
     </section>}
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric title="조회 기간" value={inflow ? `${inflow.start} ~ ${inflow.end}` : '—'} detail="상단 날짜로 DB 유입과 매체별 광고비를 함께 조회" small />
+    <div role="group" aria-label="조회 기간 요약" className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <Metric title="조회 기간" value={inflow ? <><span className="whitespace-nowrap">{inflow.start}</span>{' ~ '}<span className="whitespace-nowrap">{inflow.end}</span></> : '—'} detail="상단 날짜로 DB 유입과 매체별 광고비를 함께 조회" small />
       <Metric title="전체 방문자" value={number(totals.visitors)} detail={history?.missingDays.length ? `수집된 ${dates.length}일의 방문자 합계 · 미수집일 제외` : '일별 방문자 합계'} />
       <Metric title="전체 페이지뷰" value={number(totals.pageviews)} detail={history?.missingDays.length ? `수집된 ${dates.length}일의 페이지뷰 합계 · 미수집일 제외` : '집계 기간 페이지 조회 수'} />
       <Metric title="등록완료 DB 유입" value={inflow ? `${number(inflow.total)}건` : '—'} detail="기존 수집 문의 · 새 홈페이지 문의 모두 포함" />
+      <Metric title="전체 광고비" value={spend && spend.groups.length > 1 ? '기준별 확인' : formatKrw(spend ? providerAmount(spend) : null)}
+        detail={!spend ? '네이버 + 당근 · 광고비 확인 전'
+          : !spend.groups.length ? `${spendStatusLabels[spend.status]} · 미수집 (0원 아님)`
+          : spend.groups.length > 1 ? `합산 기준이 달라 확정 합계 미표시 · ${spend.groups.map(group => `${vatLabels[group.vat]} ${formatKrw(group.amount)}`).join(' / ')}`
+          : spend.total !== null ? `네이버 + 당근 · ${spendStatusLabels[spend.status]} · ${vatLabels[spend.groups[0].vat]}`
+          : `${spend.status === 'partial' ? '일부 누락' : spendStatusLabels[spend.status]} · ${spend.status === 'error' ? '보관' : '확인된'} 금액(전체기간 합계 미확정) · ${spend.groups[0].vat === 'unknown' ? '합산 기준 미확인 · ' : ''}${vatLabels[spend.groups[0].vat]}`} />
     </div>
     <p className="text-xs leading-5 text-slate-500">방문자는 일별 합계이며, 같은 방문자는 날짜마다 포함될 수 있습니다.</p>
     {inflow && <SectionCard color="slate" title="일별 DB 유입">
@@ -144,11 +151,11 @@ export default function ExternalDashboardClient() {
   </div>
 }
 
-function Metric({ title, value, detail, small = false }: { title: string; value: string; detail: string; small?: boolean }) {
-  return <section className="rounded-xl border border-slate-200 bg-white p-5">
+function Metric({ title, value, detail, small = false }: { title: string; value: ReactNode; detail: string; small?: boolean }) {
+  return <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5">
     <h2 className="text-sm font-medium text-slate-600">{title}</h2>
-    <p className={`mt-3 font-bold tracking-tight text-slate-900 ${small ? 'text-base' : 'text-3xl'}`}>{value}</p>
-    <p className="mt-2 text-xs text-slate-500">{detail}</p>
+    <p className={`mt-3 break-words font-bold tabular-nums tracking-tight text-slate-900 ${small ? 'text-base' : 'text-3xl xl:text-2xl 2xl:text-3xl'}`}>{value}</p>
+    <p className="mt-2 break-words text-xs leading-5 text-slate-500">{detail}</p>
   </section>
 }
 
