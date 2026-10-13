@@ -76,7 +76,7 @@ function multipart(payload) {
 try {
   if (process.argv[2] === 'hold') {
     const revision = process.argv[3]
-    assert.match(revision, /^[ab]{40}$/)
+    assert.match(revision, /^[abc]{40}$/)
     const { body, headers: extra } = multipart('%PDF-synthetic-held-across-retirement')
     const result = await request('/api/customers/synthetic-held/documents', 'POST', body,
       { ...extra, 'x-deployment-id': revision }, true)
