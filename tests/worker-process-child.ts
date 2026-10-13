@@ -4,6 +4,7 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimNextRun, claimWorker, finishRun, heartbeatWorker, reconcile, releaseWorker, SyncError } from '@/lib/inquiry-sync'
 import { warpActivityId } from '@/lib/warp-delivery'
+import { completedLead } from './customer-lead-helper'
 
 export type Command = {
   action: 'claim' | 'collect' | 'dispatch' | 'heartbeat' | 'release' | 'continue' | 'close'
@@ -76,8 +77,11 @@ async function execute(command: Command) {
         const result = await dispatchPendingWarp(db, owner, async (url, init) => {
           assert.equal(url, 'https://warp.cleversystem.ai/api/external/marketing-inquiries')
           calls++
-          const { sourceId } = JSON.parse(String(init?.body))
-          const receipt = { ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(sourceId), created: !command.duplicate, duplicate: Boolean(command.duplicate) }
+          const input = JSON.parse(String(init?.body))
+          assert.equal(input.registrationPolicy, 'customer-lead-v1')
+          const activityId = warpActivityId(input.sourceId)
+          const receipt = { ok: true, customerId: 'synthetic-customer', activityId, created: !command.duplicate,
+            duplicate: Boolean(command.duplicate), ...completedLead(input, activityId) }
           // Model a remote commit whose response has not reached the sender yet.
           if (command.pause) await barrier({ calls, activityId: receipt.activityId })
           return Response.json(receipt)

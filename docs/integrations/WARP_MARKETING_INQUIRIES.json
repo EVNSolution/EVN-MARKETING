@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract_id": "warp-marketing-inquiries",
-  "status": "landing-extension-review-pending",
+  "status": "customer-lead-extension-review-pending",
   "owner": "OziinG",
   "review": {
     "issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
@@ -115,16 +115,26 @@
     "created is true only when this request creates a Customer; duplicate is true only when replaying a retained source inquiry activity. A new activity on an existing Customer returns created:false and duplicate:false.",
     "Resolve receipt customer aliases to the current canonical Customer, preserving the deterministic activityId; missing or invalid canonical receipts fail closed.",
     "Checks use a read-only transaction snapshot, expose only sourceId and existence unless that exact scoped sourceId has a retained deterministic activity, and never return customer names or contacts.",
-    "Check receipts contain ok:true, customerId, activityId, created:false, duplicate:true and are not evidence of fresh Customer creation; Marketing preserves historical WARP_RECEIPT_UNVERIFIED markers.",
+    "For legacy customer-only registration: Check receipts contain ok:true, customerId, activityId, created:false, duplicate:true and are not evidence of fresh Customer creation; Marketing preserves historical WARP_RECEIPT_UNVERIFIED markers.",
     "Landing append requires its bounded landing object and rejectExistingCustomer:true; the collected source never accepts landing metadata.",
     "Keep legacy mleverage_ deterministic activity IDs byte-compatible. Check and replay must use the true source tuple, including when both sources have the same sourceId.",
-    "Landing customer source, original seconds, consultation kind, region and consent version/time are preserved in Customer/CustomerActivity; the receipt response shape and dedicated key remain unchanged.",
+    "For legacy customer-only registration: Landing customer source, original seconds, consultation kind, region and consent version/time are preserved in Customer/CustomerActivity; the receipt response shape and dedicated key remain unchanged.",
     "Marketing holds every unsent same-phone inquiry across both supported sources for review. Previously delivered or explicitly confirmed evidence is retained.",
-    "A landing retry after error or interruption requires a fresh manual registration request. Recovered receipts remain registration-unverified unless fresh Customer creation was confirmed.",
-    "Marketing serializes landing dispatch claim and closure using its SQLite writer lock. Closure cancels unsent queued work, rejects in-flight work, and deletes only local landing PII. WARP records require a separate WARP process."
+    "For legacy customer-only registration: A landing retry after error or interruption requires a fresh manual registration request. Recovered receipts remain registration-unverified unless fresh Customer creation was confirmed.",
+    "Marketing serializes landing dispatch claim and closure using its SQLite writer lock. Closure cancels unsent queued work, rejects in-flight work, and deletes only local landing PII. WARP records require a separate WARP process.",
+    "An explicit registrationPolicy:customer-lead-v1 requires rejectExistingCustomer:true and extends only new guarded registration with a mapped lead. Omitted policy preserves the legacy receiver contract.",
+    "For the opt-in policy, one shared customerWrite transaction creates the online Customer, deterministic CustomerActivity, deterministic SalesDeal, completed B2C 1-1 checklist, and null→1-1→1-2 StageHistory. Any failure rolls back every write.",
+    "The new lead source is 온라인, assignee is 최도준, and productId resolves exactly one active Product with code STEGO K1 and name PV5 오픈배드냉탑 (구변). A missing or ambiguous Product or User returns 503 lead_mapping_unavailable before writes.",
+    "The new lead memo is YYYY-MM-DD SNS 유입 using the successful registration transaction time in Asia/Seoul, retained as CustomerActivity.createdAt. Retries read existing evidence and never reset dates, memo, assignee, product, source, stage or checklist.",
+    "Only an activity marked marketing:customer-lead-v1 and its retained linked deterministic lead return registration.state:complete. Legacy receipts or deleted/unlinked leads return customer_only and never create a historical lead.",
+    "A v1 check includes optional registrationPolicy:customer-lead-v1 and returns the same bounded registration evidence in own receipts; absence or invalid completion evidence must not be acknowledged as customer-plus-lead completion.",
+    "All Marketing worker registrations from the shared Register action opt into v1. Existing delivered rows, manual confirmations and legacy operator recovery/pilot semantics are unchanged; no backfill is authorized.",
+    "Marketing saves warp_customer_lead_complete only for validated full completion, including receipt recovery after response loss. Customer-only evidence retains customer/activity IDs with no delivered timestamp, holds for review and never enables automatic replay creation.",
+    "For customer-lead-v1, an existing normalized primary phone on any SalesDeal also blocks lookup and registration, including a lead without a Customer link. This check runs under the same writer reservation; never merge or update the existing lead."
   ],
   "optional_request_fields": {
-    "rejectExistingCustomer": true
+    "rejectExistingCustomer": true,
+    "registrationPolicy": "customer-lead-v1"
   },
   "phone_check": {
     "request": {
@@ -199,5 +209,49 @@
     ],
     "review_issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
     "delegation": "https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448"
+  },
+  "customer_lead_registration": {
+    "request_policy": "customer-lead-v1",
+    "required_guard": {
+      "rejectExistingCustomer": true
+    },
+    "check_optional_request_fields": {
+      "registrationPolicy": "customer-lead-v1"
+    },
+    "response_registration": {
+      "policy": "customer-lead-v1",
+      "state": "complete | customer_only",
+      "leadId": "lead_ + deterministic activityId for complete; null for customer_only",
+      "registeredAt": "canonical ISO UTC timestamp of retained registration activity creation"
+    },
+    "receipt_marker": "CustomerActivity.result = marketing:customer-lead-v1",
+    "mappings": {
+      "customerSource": "온라인",
+      "leadSource": "온라인",
+      "assigneeName": "최도준",
+      "product": {
+        "code": "STEGO K1",
+        "name": "PV5 오픈배드냉탑 (구변)",
+        "active": true,
+        "requireUnique": true
+      },
+      "checklist": "all B2C 1-1 keys from bundled data/pipeline-checklists.json; leave 1-2 checks unset",
+      "initialStage": "1-1",
+      "finalStage": "1-2",
+      "memo": "first successful registration KST date + SNS 유입"
+    },
+    "error": "503 lead_mapping_unavailable: no new customer, activity, lead or history committed; retry after mapping is resolved",
+    "rollout": [
+      "Review linked WARP and Marketing PRs under the delegated CRM authority.",
+      "Deploy WARP receiver first, then Marketing web and worker.",
+      "Do not modify existing delivered rows, send a historical backlog for validation, or reset automatic-delivery settings.",
+      "Validate with synthetic databases; production mappings are read-only checks. Retain legacy receipts and do not backfill."
+    ],
+    "review_issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
+    "delegation": "https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448",
+    "review_pull_requests": {
+      "EVN-WARP": "https://github.com/EVNSolution/EVN-WARP/pull/101",
+      "EVN-MARKETING": "https://github.com/EVNSolution/EVN-MARKETING/pull/44"
+    }
   }
 }

@@ -1,4 +1,5 @@
 import { dispatchPendingWarp, pilotPendingWarp } from './warp-phone-check-helper'
+import { completedLead } from './customer-lead-helper'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -41,7 +42,7 @@ async function main() {
     assert.equal(init?.redirect, 'error')
     assert.equal(new Headers(init?.headers).get('x-api-key'), env.WARP_MARKETING_API_KEY)
     const body = JSON.parse(String(init?.body))
-    assert.deepEqual(Object.keys(body).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'sourceId', 'inquiryDate', 'inquiryTime', 'sourceStatus', 'name', 'phone', 'rejectExistingCustomer'].sort())
+    assert.deepEqual(Object.keys(body).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'sourceId', 'inquiryDate', 'inquiryTime', 'sourceStatus', 'name', 'phone', 'rejectExistingCustomer', ...(body.registrationPolicy ? ['registrationPolicy'] : [])].sort())
     assert.equal(body.rejectExistingCustomer, true)
     assert(Object.entries(body).filter(([key]) => key !== 'rejectExistingCustomer').every(([, field]) => typeof field === 'string'), 'all nine inquiry fields are strings')
     assert.equal(body.name, `미상(📞 ${body.phone.slice(-4)})`)
@@ -50,7 +51,7 @@ async function main() {
     assert.equal(body.sourceId, body.sourceId.toLowerCase())
     const duplicate = receipts.has(body.sourceId)
     receipts.add(body.sourceId)
-    return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(body.sourceId), created: !duplicate, duplicate })
+    return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(body.sourceId), created: !duplicate, duplicate, ...completedLead(body, warpActivityId(body.sourceId)) })
   }
   try {
     assert.equal(warpConfigured(keyOnly), false)
@@ -255,7 +256,7 @@ async function testStopDuringHeartbeat() {
     const sending = dispatchPendingWarp(delayed as PrismaClient, owner, async (_url, init) => {
       calls++
       const body = JSON.parse(String(init?.body))
-      return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(body.sourceId), created: true, duplicate: false })
+      return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(body.sourceId), created: true, duplicate: false, ...completedLead(body, warpActivityId(body.sourceId)) })
     }, env, undefined, controller.signal)
     await reached
     controller.abort()

@@ -4,6 +4,7 @@ import { claimNextRun, claimWorker, enqueueSync, finishRun, INQUIRY_SCOPE_ID, re
 import { MANUAL_CONFIRMATION, MANUAL_REGISTRATION, requestWarpRegistration, scope, WARP_EXISTING_CUSTOMER, WARP_RECEIPT_UNVERIFIED, warpActivityId, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { markSourceManaging, sourceUrl } from '@/workers/mleverage-source'
 import { withWorkerDatabase } from './worker-runtime-helper'
+import { completedLead } from './customer-lead-helper'
 
 const key = { WARP_MARKETING_API_KEY: 'synthetic-key-never-used-in-production', WARP_DELIVERY_ENABLED: 'false' }
 const owner = 'synthetic-action-worker'
@@ -38,7 +39,8 @@ async function main() {
       calls++
       const payload = JSON.parse(String(init?.body))
       sent.push(payload.sourceId)
-      return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(payload.sourceId), created: calls % 2 === 1, duplicate: calls % 2 === 0 })
+      return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(payload.sourceId), created: calls % 2 === 1, duplicate: calls % 2 === 0,
+        ...completedLead(payload, warpActivityId(payload.sourceId)) })
     }
     assert.equal(await pilotPendingWarp(db, owner, send, key, () => now), 'warp_no_pending_inquiry')
     assert.equal(calls, 0, 'manual confirmation is not sent by the pilot')
@@ -78,7 +80,8 @@ async function main() {
       const payload = JSON.parse(String(init?.body))
       assert.equal(payload.sourceId, calls === 1 ? named.sourceId : unnamed.sourceId, 'only the requested row is sent')
       assert.equal(payload.name, calls === 1 ? row.name : '미상(📞 0002)', 'legacy blank names use the WARP naming rule before transmission')
-      return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(payload.sourceId), created: true, duplicate: false })
+      return Response.json({ ok: true, customerId: 'synthetic-customer', activityId: warpActivityId(payload.sourceId), created: true, duplicate: false,
+        ...completedLead(payload, warpActivityId(payload.sourceId)) })
     }
     assert.deepEqual(await dispatchPendingWarp(db, owner, send, key), { configured: false, delivered: 1, failed: 0 })
     assert.equal(await requestWarpRegistration(db, named.id), 'delivered')

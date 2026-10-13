@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
+import { completedLead } from './customer-lead-helper'
 import { claimWorker, INQUIRY_SCOPE_ID } from '@/lib/inquiry-sync'
 import { inquiryReview, reviewInquiry } from '@/lib/inquiry-review'
 import { planWarpRecovery } from '@/lib/warp-recovery'
 import { normalizeInquiryPhone } from '@/lib/format'
 import { checkedDeliver, dispatchPendingWarp, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, DUPLICATE_REVIEWED, MANUAL_CONFIRMATION, REVIEW_CLEARED,
-  requestWarpRegistration, scope, WARP_EXISTING_CUSTOMER, WARP_RECEIPT_UNVERIFIED, warpActivityId, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
+  requestWarpRegistration, scope, WARP_EXISTING_CUSTOMER, CUSTOMER_ONLY, warpActivityId, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
 const env = { WARP_MARKETING_API_KEY: 'synthetic-review-key-never-used-in-production', WARP_DELIVERY_ENABLED: 'true' }
@@ -35,7 +36,7 @@ async function main() {
       const input = JSON.parse(String(init?.body))
       if (String(url).endsWith('/check')) return Response.json({ ok: true, results: input.items.map((item: { sourceId: string }) => ({ sourceId: item.sourceId, exists: false })) })
       writes++
-      return Response.json({ ok: true, customerId: 'synthetic-valid-customer', activityId: warpActivityId(input.sourceId), created: true, duplicate: false })
+      return Response.json({ ok: true, customerId: 'synthetic-valid-customer', activityId: warpActivityId(input.sourceId), created: true, duplicate: false, ...completedLead(input, warpActivityId(input.sourceId)) })
     }
     assert.equal((await dispatchPendingWarp(db, owner, provider, env, () => at)).delivered, 1)
     assert.equal(writes, 1)
@@ -50,7 +51,7 @@ async function main() {
       if (String(url).endsWith('/check')) {
         lookups++
         const input = JSON.parse(String(init?.body))
-        assert.deepEqual(Object.keys(input).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'items'].sort())
+        assert.deepEqual(Object.keys(input).sort(), ['source', 'companyScopeId', 'homepageScopeId', 'items', ...(input.registrationPolicy ? ['registrationPolicy'] : [])].sort())
         assert.equal(new Headers(init?.headers).get('x-api-key'), env.WARP_MARKETING_API_KEY)
         return Response.json({ ok: true, results: input.items.map((item: { sourceId: string }) => ({ sourceId: item.sourceId, exists: true })) })
       }
@@ -85,7 +86,7 @@ async function main() {
       const input = JSON.parse(String(init?.body))
       if (String(url).endsWith('/check')) return Response.json({ ok: true, results: input.items.map((item: { sourceId: string }) => ({ sourceId: item.sourceId, exists: false })) })
       writes++
-      return Response.json({ ok: true, customerId: 'new-synthetic-customer', activityId: warpActivityId(input.sourceId), created: true, duplicate: false })
+      return Response.json({ ok: true, customerId: 'new-synthetic-customer', activityId: warpActivityId(input.sourceId), created: true, duplicate: false, ...completedLead(input, warpActivityId(input.sourceId)) })
     }
     await dispatchPendingWarp(db, owner, clear, env, () => at)
     assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: row.id } })).warpError, REVIEW_CLEARED)
@@ -158,8 +159,8 @@ async function main() {
     }
     await dispatchPendingWarp(db, owner, receipt, env, () => at)
     assert.equal(writes, 0)
-    assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: receiptRow.id } })).warpError, WARP_RECEIPT_UNVERIFIED)
-    assert.equal(warpDeliveryState(await db.inquiry.findUniqueOrThrow({ where: { id: receiptRow.id } })).label, '등록 확인 필요')
+    assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: receiptRow.id } })).warpError, CUSTOMER_ONLY)
+    assert.equal(warpDeliveryState(await db.inquiry.findUniqueOrThrow({ where: { id: receiptRow.id } })).label, '고객 등록 확인 · 리드 미완료')
     const historical = await db.inquiry.create({ data: { ...base, sourceId: sourceId(7), phone: '010-1111-0007', warpDeliveredAt: at,
       warpCustomerId: 'existing-synthetic-customer', warpActivityId: warpActivityId(sourceId(7)), warpError: WARP_EXISTING_CUSTOMER } })
     const history = await inquiryReview(db, historical.id); assert.ok(history)

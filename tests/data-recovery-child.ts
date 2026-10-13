@@ -5,6 +5,7 @@ import { PrismaClient } from '@/app/generated/prisma/client'
 import { claimWorker, releaseWorker, SyncError } from '@/lib/inquiry-sync'
 import { dispatchPendingWarp } from './warp-phone-check-helper'
 import { warpActivityId } from '@/lib/warp-delivery'
+import { completedLead } from './customer-lead-helper'
 
 type Command = { action: 'claim' | 'dispatch' | 'release' | 'close'; at: number; pause?: boolean }
 
@@ -21,7 +22,8 @@ globalThis.fetch = async () => { throw new Error('real network access is forbidd
 function reply(value: object) { process.send!(value) }
 
 async function send(_url: string | URL | Request, init?: RequestInit) {
-  const payload = JSON.parse(String(init?.body)) as { sourceId: string }
+  const payload = JSON.parse(String(init?.body)) as { sourceId: string; registrationPolicy?: string }
+  assert.equal(payload.registrationPolicy, 'customer-lead-v1')
   const activityId = warpActivityId(payload.sourceId)
   const warp = createClient({ url: warpUrl })
   try {
@@ -41,6 +43,7 @@ async function send(_url: string | URL | Request, init?: RequestInit) {
       activityId: String(row.rows[0].activity_id),
       created: inserted.rowsAffected === 1,
       duplicate: inserted.rowsAffected === 0,
+      ...completedLead(payload, String(row.rows[0].activity_id)),
     })
   } finally {
     warp.close()
