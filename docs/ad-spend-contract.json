@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "status": "Common storage/read/UI and Naver mock-tested client. Automatic collection is not enabled.",
+  "storage": "UPLOADS_DIR/_reports/ad-spend/current.json; private, atomic replacement, cross-process writer.lock, no Prisma migration",
+  "cli": "node node_modules/tsx/dist/cli.mjs scripts/ad-spend.ts --stdin",
+  "input": "One UTF-8 JSON object on stdin. Never include API keys, tokens, passwords, raw response headers or errors.",
+  "configureExample": { "action": { "type": "configure", "campaigns": [{ "provider": "naver", "accountId": "1234567", "campaignId": "cmp-synthetic-evn", "start": "2026-09-11", "end": null, "lifecycle": "active" }] } },
+  "connectionExample": { "action": { "type": "connection", "provider": "naver", "accountId": "1234567", "connected": true } },
+  "collectExample": { "attemptedAt": "2026-09-14T00:00:00.000Z", "action": { "type": "collect", "provider": "naver", "accountId": "1234567", "start": "2026-09-11", "end": "2026-09-11", "result": { "rows": [{ "date": "2026-09-11", "campaignId": "cmp-synthetic-evn", "amount": "1234", "vat": "included" }] } } },
+  "failureExample": { "action": { "type": "collect", "provider": "naver", "accountId": "1234567", "start": "2026-09-11", "end": "2026-09-11", "result": { "error": "fetch_failed" } } },
+  "rules": [
+    "All identifiers are strings, including Daangn campaign IDs larger than Number.MAX_SAFE_INTEGER. Naver accountId is API CUSTOMER_ID, not the account number shown elsewhere in the UI.",
+    "Configure only explicitly approved EVN campaigns, then mark the verified account connection. No production identifiers or credentials are supplied by this code.",
+    "Collect is a snapshot of all allowed campaigns for one provider/account/date range. Combine per-campaign Naver responses before ONE collect action. Never save separate campaign responses as full-account snapshots.",
+    "Each row is an explicit observation, including a provider-confirmed zero. Omitted rows are missing, never zero; previous amounts remain but totals become incomplete.",
+    "Unique key: provider, accountId, campaignId, date. Later attempts replace individual rows; same-timestamp identical retry is idempotent, conflicting/older attempts are rejected.",
+    "amount must be a nonnegative decimal string, up to 30 integer and 12 fraction digits. Do not convert monetary values through floating point. VAT is included, excluded or unknown; unknown/mixed bases never form a confirmed total.",
+    "Date range is inclusive KST, from 2026-09-11, no future date, at most 366 days per store action; Naver requests at most 92 days.",
+    "Configure merges scopes and never deletes omitted campaigns. Keep paused/deleted campaigns; explicit end dates must not hide observations already stored. start is immutable once configured.",
+    "After a writer crash, stop all writers and verify no active writer before manually removing writer.lock. Never automatically steal the lock.",
+    "The existing authenticated GET /api/external-dashboard returns aggregates only in adSpend, using the selected range. _reports files are not served through uploads.",
+    "Daily report sums may differ from provider period sums due to rounding; never adjust individual observed values to force agreement. No CPA/ROAS or inquiry attribution changes."
+  ],
+  "naver": {
+    "client": "lib/naver-ad-spend.ts; fixed GET https://api.searchad.naver.com/stats, single campaign id, timeIncrement=1, query excluded from HMAC signature, redirect rejected, 10s timeout, 1 MiB body limit",
+    "response": "Control tower verified root {summary,data,compTm,cycleBaseTm}; data dateStart/dateEnd for one KST day; salesAmt integer KRW including VAT. Node 24 JSON source reviver preserves int64; older runtimes reject unsafe numeric values.",
+    "next": "Control tower to confirm credential injection and producer schedule separately. No IAM/infra changes or auto collector included.",
+    "sources": ["https://raw.githubusercontent.com/naver/searchad-apidoc/gh-pages/assets/json/ncc-report.json", "https://raw.githubusercontent.com/naver/searchad-apidoc/master/python-sample/examples/signaturehelper.py", "https://github.com/naver/searchad-apidoc/wiki/FAQ-stat"]
+  },
+  "daangn": {
+    "next": "Control tower to normalize the downloaded daily report and verify exact account/campaign/date/cost fields and VAT before import. Server API contract and auth remain unconfirmed; no invented endpoint or scraper.",
+    "identifier": "Keep the confirmed campaign ID as its original string; never parse as Number."
+  }
+}

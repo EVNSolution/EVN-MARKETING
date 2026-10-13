@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, writeFile, rm, rmdir } from 'node:fs/promises'
 import path from 'node:path'
 import { checkRegisteredInflowUi } from './registered-inflow-browser.mjs'
+import { checkAdSpendUi } from './ad-spend-browser.mjs'
 
 // Uses only the caller's disposable synthetic database and upload directory.
 export async function checkExternalDashboardUi({ page, context, db, base, uploads, output }) {
@@ -70,6 +71,7 @@ export async function checkExternalDashboardUi({ page, context, db, base, upload
   await checkChartSpacing({ page, base, record, save, output })
   await checkChartTooltips({ page, context, base, record, save, output })
   await checkRegisteredInflowUi({ page, context, db, base, file, save, output })
+  await checkAdSpendUi({ page, context, base, uploads, output })
   const historical = { date: '2026-08-31', view: { date: '2026-08-31', visitorCount: 77, pageViewCount: 88, collectedAt: '2026-09-28T00:00:00.000Z' },
     media: [{ date: '2026-08-31', media: '구글', count: 55, collectedAt: '2026-09-28T00:00:00.000Z' }] }
   const history = { format: 1, latest: record, days: [historical, ...dates.map(date => ({ date,

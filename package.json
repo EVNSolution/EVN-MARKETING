@@ -10,7 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "seed": "tsx prisma/seed.ts",
     "test:db": "tsx tests/db.test.ts",
-    "test:external-dashboard": "tsx tests/external-dashboard.test.ts && tsx tests/registered-inflow.test.ts",
+    "test:external-dashboard": "tsx tests/external-dashboard.test.ts && tsx tests/registered-inflow.test.ts && tsx tests/ad-spend.test.ts && tsx tests/naver-ad-spend.test.ts",
     "check:external-dashboard": "tsx scripts/check-external-dashboard.ts",
     "test:landing": "tsx tests/landing-inquiries.test.ts && node tests/landing-expansion-audit.test.mjs",
     "test:schema": "node tests/schema-check.test.mjs && node tests/landing-schema-bridge.test.mjs",
