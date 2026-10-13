@@ -5,7 +5,6 @@ import { INQUIRY_SCOPE_ID, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
 import { readDashboardHistory } from '@/lib/external-dashboard-store'
 import { parseDashboardQuery } from '@/lib/external-dashboard-history'
 import { readRegisteredInflow } from '@/lib/registered-inflow'
-import { AD_SPEND_START } from '@/lib/ad-spend'
 import { readAdSpendView } from '@/lib/ad-spend-store'
 
 export const dynamic = 'force-dynamic'
@@ -31,7 +30,7 @@ export async function GET(request: Request) {
       && state.workerLeaseExpiresAt.getTime() > now)
     const sourceReady = workerOnline && ['ready', 'running', 'success'].includes(state?.status ?? '')
     const registeredInflow = await readRegisteredInflow(prisma, dashboard.history)
-    const adSpend = await readAdSpendView(dashboard.history.start ?? AD_SPEND_START, dashboard.history.end ?? dashboard.history.today)
+    const adSpend = await readAdSpendView(registeredInflow.start, registeredInflow.end)
     return NextResponse.json({ ...dashboard, registeredInflow, adSpend, canImportAdSpend: session.user.role === 'admin', workerOnline, sourceReady, nextRunAt: state?.nextRunAt?.toISOString() ?? null }, { headers })
   } catch (error) {
     if (error instanceof Error && error.message === 'dashboard_snapshot_missing') return NextResponse.json({ error: '선택한 수집일의 보관본이 없습니다.' }, { status: 404, headers })

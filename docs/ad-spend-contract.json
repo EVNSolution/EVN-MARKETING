@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "Naver hourly worker collection (off by default) and admin Daangn CSV preview/import. Deployment/activation is performed by the control tower.",
+  "status": "Naver hourly worker collection (off by default), admin Daangn CSV recovery and original MCP transcript preview/import. The Mac control tower owns MCP authentication, scheduling and deployment; this bridge alone does not enable automatic collection.",
   "storage": "UPLOADS_DIR/_reports/ad-spend/current.json; private, atomic replacement, cross-process writer.lock, no Prisma migration",
   "cli": "node node_modules/tsx/dist/cli.mjs scripts/ad-spend.ts --stdin",
   "containerCli": "node /app/ad-spend.mjs --stdin (built into the reviewed image)",
@@ -19,8 +19,9 @@
     "Date range is inclusive KST, from 2026-09-11, no future date, at most 366 days per store action; Naver requests at most 92 days.",
     "Configure merges scopes and never deletes omitted campaigns. Keep paused/deleted campaigns; explicit end dates must not hide observations already stored. start is immutable once configured.",
     "After a writer crash, stop all writers and verify no active writer before manually removing writer.lock. Never automatically steal the lock.",
-    "The existing authenticated GET /api/external-dashboard returns aggregates and last-import time/range/row count in adSpend, using the selected range. _reports files are not served through uploads.",
-    "Today is provisional/partial even when all campaigns returned values. Original CSV is not retained, only normalized observations and an import receipt. Preview does not write.",
+    "The existing authenticated GET /api/external-dashboard returns aggregates and last-import time/range/row count in adSpend, using the same range as the top date inputs and registeredInflow, including when external visitor history is unavailable. _reports files are not served through uploads.",
+    "Today is provisional/partial even when all campaigns returned values. Raw CSV/MCP transcripts are not retained; normalized observations carry a source kind, original-file SHA-256 and acquisition time. CSV and MCP have distinct import receipts. Existing legacy rows without provenance remain readable. Preview does not write.",
+    "A provider card/graph shows a single-basis observed amount even when its VAT is unknown or its coverage is partial, with an explicit status. Multiple VAT groups stay separate. Unknown/mixed/partial amounts never become the overall confirmed total.",
     "Daily report sums may differ from provider period sums due to rounding; never adjust individual observed values to force agreement. No CPA/ROAS or inquiry attribution changes."
   ],
   "naver": {
@@ -30,9 +31,20 @@
     "sources": ["https://raw.githubusercontent.com/naver/searchad-apidoc/gh-pages/assets/json/ncc-report.json", "https://raw.githubusercontent.com/naver/searchad-apidoc/master/python-sample/examples/signaturehelper.py", "https://github.com/naver/searchad-apidoc/wiki/FAQ-stat"]
   },
   "daangn": {
-    "upload": "Admin external dashboard -> Daangn report import. Fixed account/campaign are shown. CSV UTF-8 with optional BOM, exact 10 daily-report columns, <=2MiB/366 rows, strict date/money/ID/duplicate/formula validation. Explicit report range is required; absent dates stay missing, not zero. Names may change; exact string campaign ID controls scope.",
+    "upload": "Admin external dashboard -> collapsed recovery tool at the bottom, after normal cards/charts/rankings. Fixed account/campaign and last file import time appear only when expanded. CSV UTF-8 with optional BOM, exact 10 daily-report columns, <=2MiB/366 rows, strict date/money/ID/duplicate/formula validation. Explicit report range is required; absent dates stay missing, not zero. Names may change; exact string campaign ID controls scope.",
     "endpoint": "POST /api/external-dashboard/ad-spend/import?mode=preview|import&start=YYYY-MM-DD&end=YYYY-MM-DD[&hash=previewHash], text/csv body. Admin session + same Origin (AUTH_URL when configured), bounded streamed body. Commit reparses input and verifies preview hash. No Daangn server API implemented.",
     "identifier": "Keep the confirmed campaign ID as its original string; never parse as Number."
+  },
+  "daangnMcp": {
+    "example": "docs/daangn-mcp-import.example.json is synthetic. Replace fetchedAt with the actual acquisition UTC timestamp and each reports entry with the exact executed get_ad_performance request and parsed original response. Do not convert IDs or COST to Number, copy OAuth tokens, fabricate CSV, or add user-supplied VAT assertions.",
+    "envelope": "Exact keys: version=1, source=daangn_mcp, fetchedAt=canonical UTC ISO timestamp, reports=[{request,response}]. Request/response field names and types must match the example. Only single-day ALL with grouping=true, COST only, page=1/page_size=1 and has_more=false is accepted. DAY batches are intentionally unsupported; use up to 31 single-day entries spanning at most 31 calendar days.",
+    "range": "Each date must be >=2026-09-11, within the preceding 13 calendar months, and strictly before both today's KST date and acquisition KST date. No future acquisition timestamps, duplicate dates or incomplete pagination. Empty rows plus total COST=0 means missing, not an explicit zero. A nonempty row must match the exact campaign and integer-string total. Missing days outside the supplied entries are left untouched.",
+    "endpoint": "Admin + same Origin: POST /api/external-dashboard/ad-spend/mcp-import?mode=preview|import[&hash=previewHash], application/json body, <=2MiB. The commit reparses the identical original bytes, checks SHA-256 and writes the batch atomically using the existing cross-process writer lock. No new public API key or service permission.",
+    "labels": ["관리자 복구 도구 · 당근 보고서", "당근 MCP 원문 JSON", "MCP 결과 미리보기", "확인한 MCP 결과 저장"],
+    "storage": "Same provider/account/campaign/date upsert. Acquisition time fences out older transcripts. Identical replay is idempotent; conflicting same-time results reject. Failed validation/stale/lock conflicts do not mutate storage. Empty-day responses preserve any successful amount/provenance and mark it missing. Naver and other dates are retained.",
+    "vat": "MCP COST does not state VAT. Store unknown without conversion. If and only if the same date already has the exact same decimal amount with a known VAT basis, retain that basis and record vatEvidence pointing to the earlier observation/hash. A changed amount loses that inherited basis. The control tower's three-day CSV comparison suggests included VAT but is not treated as an authoritative provider-wide declaration.",
+    "trust": "An administrator submits the transcript. The hash detects file changes and distinguishes sources; it is not cryptographic proof of Daangn origin. No automatic completion indicator or schedule is created by this PR. Mac must be running and the administrator session usable for the parent-owned daily automation.",
+    "verification": "After saving, GET the exact selected day and inspect adSpend.days[].providers.daangn.groups, status and lastSuccessfulAt plus adSpend.lastDaangnMcpImport. A zero rows receipt is not evidence of a zero-spend day. Aggregate responses omit campaign/account IDs, hashes and row provenance."
   },
   "hostActivation": {
     "configFile": "/opt/evn-marketing-runtime/config.json",

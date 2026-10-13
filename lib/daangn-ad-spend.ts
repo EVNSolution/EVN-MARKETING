@@ -53,7 +53,7 @@ export async function importDaangnCsv(preview: ReturnType<typeof previewDaangnCs
     { type: 'configure', campaigns: [daangnCampaign] },
     { type: 'connection', provider: 'daangn', accountId: daangnCampaign.accountId, connected: true },
     { type: 'collect', provider: 'daangn', accountId: daangnCampaign.accountId, start: preview.start, end: preview.end,
-      result: { rows: preview.rows.map(r => ({ ...r, campaignId: daangnCampaign.campaignId, vat: 'included' })) } },
+      result: { rows: preview.rows.map(r => ({ ...r, campaignId: daangnCampaign.campaignId, vat: 'included', provenance: { kind: 'daangn_csv', hash: preview.hash, capturedAt: now.toISOString() } })) } },
     { type: 'import_receipt', receipt: { at: now.toISOString(), hash: preview.hash, rows: preview.rowCount, start: preview.start, end: preview.end } },
   ]
   await saveAdSpendActions(actions, env, now)
