@@ -7,13 +7,16 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[2]
-BUNDLE = ("deploy/controller.py", "deploy/nginx-config.mjs", "deploy/start-release.py")
+BUNDLE = ("deploy/controller.py", "deploy/nginx-config.mjs", "deploy/start-release.py",
+          "deploy/deployment-result.py", "deploy/marketing-result.service", "deploy/marketing-result.timer")
 REGION = "ap-northeast-2"
 REPOSITORY = "EVNSolution/EVN-MARKETING"
 DOCUMENT = "EVN-Marketing-Release"
+MANUAL_REQUEST_KEY = "manual-" + str(uuid.uuid4())
 
 
 def checked(value, pattern, name):
@@ -72,6 +75,15 @@ def scan_clean(report, digest, now):
     return True
 
 
+def request_key(env):
+    if env.get("GITHUB_RUN_ID"):
+        run = checked(env.get("GITHUB_RUN_ID"), r"[1-9][0-9]*", "run ID")
+        attempt = checked(env.get("GITHUB_RUN_ATTEMPT"), r"[1-9][0-9]*", "run attempt")
+        return f"run-{run}-{attempt}"
+    # Stable for validation/dispatch within one manual invocation.
+    return MANUAL_REQUEST_KEY
+
+
 def command_request(env, bundle, digest):
     cfg = config(env)
     action = checked(env.get("RELEASE_ACTION"), r"release|rollback", "action")
@@ -87,7 +99,8 @@ def command_request(env, bundle, digest):
         "InstanceIds": [cfg["instance"]], "TimeoutSeconds": 120,
         "MaxConcurrency": "1", "MaxErrors": "0",
         "Parameters": {"Action": [action], "Revision": [revision],
-                       "Digest": [digest], "BundleSha256": [bundle]},
+                       "Digest": [digest], "BundleSha256": [bundle],
+                       "RequestKey": [request_key(env)]},
         "CloudWatchOutputConfig": {"CloudWatchOutputEnabled": False},
     }
 
@@ -184,7 +197,9 @@ def dispatch(digest, *, manual=False):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
             summary.write(f"Action: {os.environ['RELEASE_ACTION']}\n\nSource: {os.environ['SOURCE_SHA']}\n\n"
                           f"Image: {digest}\n\nController bundle: {request['Parameters']['BundleSha256'][0]}\n\n"
-                          f"SSM command: {command}\n")
+                          f"SSM command: {command}\n\n"
+                          f"Final result: https://github.com/{REPOSITORY}/deployments\n\n"
+                          "This Actions run confirms activation only. The host records success, rollback or error automatically.\n")
     # Only status/code are requested. Remote stdout/stderr never enter CI logs/artifacts.
     for _ in range(100):
         result = subprocess.run([
@@ -198,7 +213,7 @@ def dispatch(digest, *, manual=False):
         else:
             invocation = json.loads(result.stdout)
             if invocation.get("Status") == "Success" and invocation.get("ResponseCode") == 0:
-                print("SSM activation succeeded; host observation continues; operational acceptance remains separate")
+                print("SSM activation succeeded; the host will publish the final GitHub deployment result")
                 return
             if invocation.get("Status") not in ("Pending", "InProgress", "Delayed"):
                 raise RuntimeError("SSM command did not succeed; inspect command ID before retry")

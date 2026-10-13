@@ -24,12 +24,60 @@ SSM은 root 소유의 고정 bundle을 검증하고 `deploy/start-release.py`를
 이 helper는 `marketing-deploy.service`라는 systemd transient unit으로 기존 controller를 실행한다.
 동일 이름의 활성 unit은 두 번째 요청을 거부한다. Controller의 host lock도 유지한다.
 
-새 웹 readiness, 기존 worker 종료·lease 해제, 새 worker 준비·활성화까지 확인하면 Actions가 끝난다.
-이 성공은 `observing` 상태를 의미한다. 서버는 기존 1,800초 관찰과 자동 복귀를 계속 수행한다.
-`state/release.json`의 `phase=stable`과 예상 active SHA/digest를 확인해야 관찰 완료다.
-기존 웹 자산·진행 요청 drain과 데이터 볼륨은 유지한다. 새 배포는 관찰 완료까지 차단한다.
+새 웹 readiness, 기존 worker 종료·lease 해제, 새 worker 준비·활성화까지 확인하면 `Marketing activate` Actions가 끝난다.
+이 성공은 활성화 확인이다. 서버는 기존 1,800초 검증과 자동 복귀를 계속 수행한다. 러너는 기다리지 않는다.
+서버는 시작 전에 GitHub production deployment를 만들고 `in_progress`를 기록한다.
+최종 상태는 [GitHub Deployments](https://github.com/EVNSolution/EVN-MARKETING/deployments)에 자동 기록한다.
+
+| 서버 결과 | GitHub deployment 상태 |
+|---|---|
+| 검증 종료, 대상 SHA/digest가 stable | success |
+| 배포 실패, 이전 버전 복귀 확인 | failure — rollback succeeded |
+| 복귀 또는 복구 확인 불가 | error — recovery unconfirmed |
+| 명시적 rollback 정상 완료 | success — rollback completed |
+
+CI 빌드와 활성화 job은 `environment.deployment: false`를 사용한다.
+OIDC와 main 환경 제한은 유지하되, job 종료가 production deployment를 자동 성공 처리하지 않는다.
+서버의 배포 기록에는 대상 SHA/digest, 요청 실행 번호, 원래 Actions 링크를 남긴다.
+기존 Actions 실행의 conclusion을 나중에 바꾸거나 별도 Actions를 30분 실행하지 않는다.
+
+`deploy/deployment-result.py`는 기존 controller를 같은 host lock 안에서 실행한다.
+기존 웹 자산·진행 요청 drain, 1,800초 검증, 데이터 볼륨, worker lease는 유지한다.
 GitHub/SSM 연결이 끊겨도 systemd 프로세스는 계속된다. 호스트 재부팅은 기존 recover unit이 복귀한다.
-응답 유실 시 재실행하지 말고 SSM command ID, systemd unit, release journal을 먼저 확인한다.
+최종 결과를 `state/deployment-results/<request-key>.json`에 먼저 저장한다.
+GitHub 전송 실패는 배포 결과를 바꾸지 않는다. `marketing-result.timer`가 60초 간격으로 미전송 결과만 재시도한다.
+재부팅 시 미완료 요청은 controller/recover가 끝나고 host lock을 얻은 뒤 journal과 대상 SHA/digest로 판정한다.
+이전 배포 결과는 이후 배포의 journal로 덮어쓰지 않는다. 응답 유실 시 같은 요청의 deployment/status를 재사용한다.
+호스트가 꺼져 있거나 GitHub가 불통이면 결과 전달은 복구 후 이루어진다. 외부 장애 감시는 이 기능에 포함하지 않는다.
+
+새 배포는 기존 검증 완료까지 차단한다. 응답 유실 시 재실행하지 말고 기록된 요청과 SSM command ID를 확인한다.
+
+### 최초 결과 기록 연결
+
+마케팅에 설치된 GitHub App을 사용한다. 설치 범위는 `EVNSolution/EVN-MARKETING` 한 개,
+권한은 `Deployments: read/write`와 필수 `Metadata: read`다. Contents/Actions 권한은 필요 없다.
+개인 토큰이나 Actions의 `GITHUB_TOKEN`을 호스트에 복사하지 않는다.
+
+마케팅 전용 KMS 키로 다음 JSON을 SecureString `/evn-marketing/production/github-deployment-app`에 저장한다.
+실제 값은 로그·PR·채팅에 넣지 않는다.
+
+```json
+{"appId": 123, "installationId": 456, "privateKey": "PEM private key"}
+```
+
+`deploy/aws/cloudformation.json`의 host 역할만 이 파라미터와 해당 KMS encryption context를 읽는다.
+컨트롤러 bundle에 reporter와 timer/service도 포함된다. 검증한 bundle과 SSM 문서를 설치한 뒤 다음을 실행한다.
+
+```sh
+install -o root -g root -m 0644 deploy/marketing-result.service deploy/marketing-result.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now marketing-result.timer
+```
+
+초기 설정은 배포 전에 한 번 수행한다. 이후 작업자 입력은 기존 배포 명령과 같다.
+타이머나 GitHub 인증이 준비되지 않으면 서비스 전환 전에 거부한다.
+App 설치 토큰은 실행 시 발급하며 저장소 한 개와 배포 쓰기 권한으로 다시 제한한다.
+토큰·개인 키·GitHub 오류 응답 본문은 결과 파일과 SSM 출력에 남기지 않는다.
 
 ## 롤백
 

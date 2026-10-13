@@ -25,7 +25,7 @@ SHA = "a" * 40
 DIGEST = "sha256:" + "b" * 64
 ENV = {
     "GITHUB_REPOSITORY": "EVNSolution/EVN-MARKETING", "GITHUB_EVENT_NAME": "workflow_dispatch",
-    "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": SHA, "SOURCE_SHA": SHA, "RELEASE_ACTION": "release",
+    "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": SHA, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1", "SOURCE_SHA": SHA, "RELEASE_ACTION": "release",
     "MARKETING_AWS_ACCOUNT_ID": "000000000000", "MARKETING_INSTANCE_ID": "i-" + "0" * 17,
     "MARKETING_SSM_DOCUMENT_VERSION": "1", "MARKETING_SSM_DOCUMENT_SHA256": "c" * 64,
 }
@@ -102,7 +102,7 @@ request = cloud.command_request(ENV, "d" * 64, DIGEST)
 assert request["InstanceIds"] == [ENV["MARKETING_INSTANCE_ID"]]
 assert request["DocumentName"].endswith(":document/EVN-Marketing-Release")
 assert request["DocumentVersion"] == "1" and request["DocumentHashType"] == "Sha256"
-assert set(request["Parameters"]) == {"Action", "Revision", "Digest", "BundleSha256"}
+assert set(request["Parameters"]) == {"Action", "Revision", "Digest", "BundleSha256", "RequestKey"}
 rollback = cloud.command_request({**ENV, "RELEASE_ACTION": "rollback"}, "d" * 64, "previous")
 assert rollback["Parameters"]["Digest"] == ["previous"]
 refuses(lambda: cloud.command_request(ENV, "d" * 64, "previous"))
@@ -116,7 +116,7 @@ with tempfile.TemporaryDirectory() as directory:
         (root / name).write_text("reviewed synthetic file: " + name)
     (root / "config.json").write_text("{}")
     expected = cloud.bundle_hash(root)
-    env = {"SSM_Action": "release", "SSM_Revision": SHA, "SSM_Digest": DIGEST, "SSM_BundleSha256": expected}
+    env = {"SSM_Action": "release", "SSM_Revision": SHA, "SSM_Digest": DIGEST, "SSM_BundleSha256": expected, "SSM_RequestKey": "run-123-1"}
     original_lstat = Path.lstat
 
     def root_owned(path):
@@ -130,7 +130,7 @@ with tempfile.TemporaryDirectory() as directory:
             patch.object(host.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run:
         host.run()
         assert run.call_args.args[0] == ["/usr/bin/python3", "-I", str(root / "deploy/start-release.py"),
-                                         "release", "--revision", SHA, "--digest", DIGEST]
+                                         "release", "--revision", SHA, "--key", "run-123-1", "--digest", DIGEST]
         assert run.call_args.kwargs["stdout"] == subprocess.DEVNULL
         assert run.call_args.kwargs["stderr"] == subprocess.DEVNULL
         assert run.call_args.kwargs["env"]["DOCKER_CONFIG"] == "/root/.docker"
@@ -138,8 +138,8 @@ with tempfile.TemporaryDirectory() as directory:
         assert not any(key.startswith("SSM_") for key in run.call_args.kwargs["env"])
         os.environ.update(SSM_Action="rollback", SSM_Digest="previous")
         host.run()
-        assert run.call_args.args[0][-1] == "rollback" and len(run.call_args.args[0]) == 4
-        for key, value in [("SSM_Action", "expire"), ("SSM_Action", "recover"), ("SSM_Digest", DIGEST),
+        assert run.call_args.args[0][3:] == ["rollback", "--revision", SHA, "--key", "run-123-1"]
+        for key, value in [("SSM_RequestKey", "run-0-1"), ("SSM_RequestKey", "../bad"), ("SSM_Action", "expire"), ("SSM_Action", "recover"), ("SSM_Digest", DIGEST),
                            ("SSM_BundleSha256", "e" * 64), ("SSM_Revision", SHA + ";id"),
                            ("SSM_BundleSha256", ""), ("SSM_Revision", "")]:
             saved = os.environ[key]
@@ -190,7 +190,8 @@ with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {**ENV, 
         refuses(lambda: cloud.dispatch(DIGEST))
     assert events == [("ecr", "describe-images")]
 
-assert host.BUNDLE == cloud.BUNDLE == ("deploy/controller.py", "deploy/nginx-config.mjs", "deploy/start-release.py")
+assert host.BUNDLE == cloud.BUNDLE == ("deploy/controller.py", "deploy/nginx-config.mjs", "deploy/start-release.py",
+    "deploy/deployment-result.py", "deploy/marketing-result.service", "deploy/marketing-result.timer")
 assert document["schemaVersion"] == "2.2"
 assert set(document["parameters"]) == set(request["Parameters"])
 assert all(p["interpolationType"] == "ENV_VAR" for p in document["parameters"].values())
@@ -227,7 +228,7 @@ for role in ("ReleaseRole", "HostRole"):
 host_policy = resources["HostRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
 secrets = next(s for s in host_policy if "ssm:GetParameters" in s["Action"])["Resource"]
 assert [item["Fn::Sub"].split("production/")[1] for item in secrets] == [
-    "auth-secret", "source-username", "source-password", "warp-api-key"]
+    "auth-secret", "source-username", "source-password", "warp-api-key", "github-deployment-app"]
 decrypt = next(s for s in host_policy if "kms:Decrypt" in s["Action"])
 assert decrypt["Condition"]["StringEquals"]["kms:EncryptionContext:PARAMETER_ARN"] == secrets
 assert any("ec2:DescribeSnapshots" in s["Action"] for s in host_policy)
@@ -242,7 +243,7 @@ assert not any(action in ('ec2:DeleteSnapshot','ec2:CreateVolume','ec2:AttachVol
 
 workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
 assert "workflow_dispatch:" in workflow and "pull_request" not in workflow and "\n  push:" not in workflow
-assert "environment: production" in workflow and "cancel-in-progress: false" in workflow
+assert "name: production" in workflow and "deployment: false" in workflow and "cancel-in-progress: false" in workflow
 assert "persist-credentials: false" in workflow and "github.ref == 'refs/heads/main'" in workflow
 assert "download-artifact" in workflow and "release_artifact.py verify" in workflow
 assert "docker build" not in workflow and "npm ci" not in workflow

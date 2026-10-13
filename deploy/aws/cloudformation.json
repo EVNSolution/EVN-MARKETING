@@ -92,6 +92,11 @@
               "type": "String",
               "allowedPattern": "^[0-9a-f]{64}$",
               "interpolationType": "ENV_VAR"
+            },
+            "RequestKey": {
+              "type": "String",
+              "allowedPattern": "^(run-[1-9][0-9]*-[1-9][0-9]*|manual-[0-9a-f-]{36})$",
+              "interpolationType": "ENV_VAR"
             }
           },
           "mainSteps": [
@@ -116,15 +121,17 @@
                   "import stat",
                   "import subprocess",
                   "",
-                  "BUNDLE = (\"deploy/controller.py\", \"deploy/nginx-config.mjs\", \"deploy/start-release.py\")",
+                  "BUNDLE = (\"deploy/controller.py\", \"deploy/nginx-config.mjs\", \"deploy/start-release.py\", \"deploy/deployment-result.py\", \"deploy/marketing-result.service\", \"deploy/marketing-result.timer\")",
                   "",
                   "def run():",
                   "    action = os.environ.get(\"SSM_Action\", \"\")",
                   "    revision = os.environ.get(\"SSM_Revision\", \"\")",
                   "    digest = os.environ.get(\"SSM_Digest\", \"\")",
                   "    expected = os.environ.get(\"SSM_BundleSha256\", \"\")",
+                  "    request_key = os.environ.get(\"SSM_RequestKey\", \"\")",
                   "    if (action not in (\"release\", \"rollback\")",
                   "            or not re.fullmatch(r\"[0-9a-f]{40}\", revision)",
+                  "            or not re.fullmatch(r\"(?:run-[1-9][0-9]*-[1-9][0-9]*|manual-[0-9a-f-]{36})\", request_key)",
                   "            or not re.fullmatch(r\"[0-9a-f]{64}\", expected)",
                   "            or (action == \"release\" and not re.fullmatch(r\"sha256:[0-9a-f]{64}\", digest))",
                   "            or (action == \"rollback\" and digest != \"previous\")):",
@@ -145,9 +152,9 @@
                   "                       + \"  \" + name + \"\\n\" for name in BUNDLE)",
                   "    if hashlib.sha256(manifest.encode()).hexdigest() != expected:",
                   "        raise ValueError(\"installed controller bundle mismatch\")",
-                  "    command = [\"/usr/bin/python3\", \"-I\", str(root / \"deploy/start-release.py\"), action]",
+                  "    command = [\"/usr/bin/python3\", \"-I\", str(root / \"deploy/start-release.py\"), action, \"--revision\", revision, \"--key\", request_key]",
                   "    if action == \"release\":",
-                  "        command += [\"--revision\", revision, \"--digest\", digest]",
+                  "        command += [\"--digest\", digest]",
                   "    # Fixed config is the controller default. No path/command is supplied by CI.",
                   "    result = subprocess.run(command, cwd=root, check=False,",
                   "                            env={\"PATH\": \"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\",",
@@ -368,6 +375,9 @@
                     },
                     {
                       "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/warp-api-key"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/github-deployment-app"
                     }
                   ],
                   "Condition": {
@@ -400,6 +410,9 @@
                         },
                         {
                           "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/warp-api-key"
+                        },
+                        {
+                          "Fn::Sub": "arn:${AWS::Partition}:ssm:ap-northeast-2:${AWS::AccountId}:parameter/evn-marketing/production/github-deployment-app"
                         }
                       ]
                     }

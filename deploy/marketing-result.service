@@ -1,0 +1,17 @@
+[Unit]
+Description=Deliver Marketing deployment results to GitHub
+After=network-online.target marketing-recover.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/evn-marketing-runtime
+ExecStart=/usr/bin/python3 -I /opt/evn-marketing-runtime/deploy/deployment-result.py flush
+Environment=AWS_REGION=ap-northeast-2 AWS_DEFAULT_REGION=ap-northeast-2
+Environment=AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_CONFIG_FILE=/dev/null AWS_MAX_ATTEMPTS=1
+TimeoutStartSec=120
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+

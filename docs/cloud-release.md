@@ -134,7 +134,7 @@ The implementation uses `/usr/bin/python3 -I` for isolated Python execution. Rol
 
 SSM pins both numeric document version and the AWS-issued document hash. Its execution timeout is 3,600 seconds, with a 120-second delivery-start bound. CI allows 80 minutes for scan/dispatch/confirmation and 135 minutes for the job, covering the controller's 1,800-second observation plus drain. Release-role credentials last two hours after acquisition. No workflow-wide automatic retry or cancellation of an uncertain SSM command is implemented. [SSM version/hash/timeout semantics](https://docs.aws.amazon.com/cli/latest/reference/ssm/send-command.html)
 
-The run summary records only source SHA, digest/`previous`, controller bundle hash and SSM command ID. Controller stdout/stderr are suppressed at this boundary; CI retrieves only SSM status/response code. Success requires terminal SSM `Success` and response code zero, not merely a successful `SendCommand` response. If dispatch response is lost, polling fails, the workflow is cancelled or timeout occurs, **do not redispatch blindly**: an administrator must find the corresponding command/run and inspect the host's journal/lock/actual containers. A cancelled GitHub run does not prove that SSM stopped. Recovery/expiry remain host systemd/administrator operations, never extra workflow actions.
+The run summary records source SHA, digest/`previous`, controller bundle hash, SSM command ID and the GitHub deployments link. Controller stdout/stderr are suppressed at this boundary; CI retrieves only SSM status/response code. Success requires terminal SSM `Success` and response code zero, not merely a successful `SendCommand` response. If dispatch response is lost, polling fails, the workflow is cancelled or timeout occurs, **do not redispatch blindly**: an administrator must find the corresponding command/run and inspect the host's journal/lock/actual containers. A cancelled GitHub run does not prove that SSM stopped. Recovery/expiry remain host systemd/administrator operations, never extra workflow actions.
 
 ## Local validation and remaining evidence
 
@@ -145,3 +145,16 @@ python3 tests/cloud-release.test.py
 The stdlib assertions exercise source/action/config validation, scan failures/staleness, exact target/document request construction, the actual inline SSM verifier with synthetic files and mocked execution, checksum/permission/symlink rejection, rollback argument isolation, and declared IAM boundaries. Workflow YAML is additionally parsed with the already-installed `js-yaml`, and its embedded shell is syntax-checked without execution.
 
 This cloud-wiring work does not run CloudFormation `ValidateTemplate`, IAM simulation, ECR push/scan, OIDC assumption, SSM, a Docker daemon, systemd or a production command. AWS CLI is installed locally; Docker, `cfn-lint`, `actionlint` and `systemd-analyze` were not present during initial inspection. The parent implementation supplies `tests/deploy-controller-lab.py` for synthetic Docker/Nginx/TLS/SQLite transitions with accelerated observation; its execution/evidence is reported separately. Passing these local checks proves neither deployed policy behavior nor no-downtime release. Actual AWS bootstrap, normal-duration observation and boot/operational evidence remain gates; **full Z01–Z09 acceptance and M5 operational transition are not claimed**. Preserve the existing plan's browser, request continuity, worker ownership, backup/restore and data-preservation gates. Recovery may accept an expired lease only after process absence is established; it does not automatically clear lease records in the DB, and root owns the journal/backup evidence.
+
+## Automatic final deployment result
+
+The current procedure is [self-service-deployment.md](self-service-deployment.md#전환과-관찰).
+The host uses a repository-scoped GitHub App to create an in-progress production deployment before activation.
+It persists and publishes the final stable, reverted or recovery-unconfirmed outcome after the unchanged controller completes.
+A separate systemd timer retries delivery after network failures or reboot; the Actions runner exits after activation.
+The host role also reads only the Marketing `github-deployment-app` SecureString under the dedicated KMS context.
+SSM accepts a bounded request key and verifies the reporter and timer/service files in the immutable bundle.
+
+GitHub references: [deployment statuses](https://docs.github.com/en/rest/deployments/statuses),
+[scoped installation tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app),
+[environment without automatic deployment](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/deploy-to-environment).

@@ -6,6 +6,7 @@ rolls an interrupted transaction back. Success here means observing, not stable.
 """
 import argparse
 import json
+import uuid
 import re
 import subprocess
 import time
@@ -21,9 +22,10 @@ ENV = {
 }
 
 
-def command(action, revision='', digest=''):
-    if action not in ('release', 'rollback') or (action == 'release' and
-            (not re.fullmatch(r'[0-9a-f]{40}', revision) or not re.fullmatch(r'sha256:[0-9a-f]{64}', digest))):
+def command(action, revision='', digest='', key=''):
+    if (action not in ('release', 'rollback') or not re.fullmatch(r'[0-9a-f]{40}', revision)
+            or not re.fullmatch(r'(?:run-[1-9][0-9]*-[1-9][0-9]*|manual-[0-9a-f-]{36})', key)
+            or (action == 'release' and not re.fullmatch(r'sha256:[0-9a-f]{64}', digest))):
         raise ValueError('invalid release identity')
     args = ['systemd-run', '--quiet', '--collect', '--unit=' + UNIT,
             '--property=Type=exec', '--property=RuntimeMaxSec=3600',
@@ -31,9 +33,10 @@ def command(action, revision='', digest=''):
             '--property=WorkingDirectory=' + str(ROOT), '--property=UMask=0077',
             '--property=StandardOutput=journal', '--property=StandardError=journal']
     args += ['--setenv=' + key + '=' + value for key, value in ENV.items()]
-    args += ['/usr/bin/python3', '-I', str(ROOT / 'deploy/controller.py'), action]
+    args += ['/usr/bin/python3', '-I', str(ROOT / 'deploy/deployment-result.py'), 'run',
+             '--action', action, '--key', key, '--revision', revision]
     if action == 'release':
-        args += ['--revision', revision, '--digest', digest]
+        args += ['--digest', digest]
     return args
 
 
@@ -43,8 +46,9 @@ def activated(state, target):
         release.get(key) == target[key] for key in ('revision', 'digest'))
 
 
-def start(action, revision='', digest=''):
-    args = command(action, revision, digest)
+def start(action, revision='', digest='', key=''):
+    key = key or 'manual-' + str(uuid.uuid4())
+    args = command(action, revision, digest, key)
     state_file = ROOT / 'state/release.json'
     before = json.loads(state_file.read_text())
     if before.get('phase') != 'stable':
@@ -71,5 +75,6 @@ if __name__ == '__main__':
     parser.add_argument('action', choices=('release', 'rollback'))
     parser.add_argument('--revision', default='')
     parser.add_argument('--digest', default='')
+    parser.add_argument('--key', default='')
     args = parser.parse_args()
-    print(json.dumps(start(args.action, args.revision, args.digest)))
+    print(json.dumps(start(args.action, args.revision, args.digest, args.key)))
