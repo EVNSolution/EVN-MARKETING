@@ -113,9 +113,10 @@ npm run deploy:rollback -- --source-sha CURRENT_MAIN_SHA
 
 배포에는 24시간 이내 암호화 EBS snapshot과 별도 볼륨 복원 검증이 필요하다.
 `data-ops.py backup --keep-web`은 웹을 유지하고 worker만 정상 종료한다.
+직전 버전의 웹도 유지하며 보호 시간 때문에 백업을 차단하지 않는다.
 복사 전·복사본·복사 후 DB 행과 업로드 hash가 같아야 백업을 인정한다.
 동시 수정으로 검증이 실패하면 백업을 거부하고 worker를 복구한다.
-기존 완전 정지 백업과 복원 검증 명령도 유지한다. 원본 볼륨은 교체하지 않는다.
+기존 완전 정지 백업은 이전 매핑의 요청을 자동 drain한 뒤 두 웹을 정지한다. 복원 검증 명령도 유지한다. 원본 볼륨은 교체하지 않는다.
 
 GitHub production environment는 main 브랜치만 허용한다.
 OIDC trust는 실제 저장소 immutable subject와 production environment를 정확히 제한한다.
