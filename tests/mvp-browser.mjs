@@ -105,13 +105,13 @@ try {
   assert.match(await manuallyConfirmed.innerText(), /등록완료/)
   assert.equal(await manuallyConfirmed.getByRole('button', { name: '등록하기' }).count(), 0)
   assert.match(await manuallyConfirmed.getByText('등록완료').getAttribute('title'), /직접 등록/)
-  for (const [id, text] of [[2, 'WARP 고객과 연락처가 중복'], [5, '기존 고객의 문의 이력에 연결'], [22, '수집된 문의 또는 홈페이지 문의와 연락처가 중복']]) {
+  for (const [id, text] of [[2, 'WARP 고객 또는 리드와 연락처가 중복'], [5, '기존 고객의 문의 이력에 연결'], [22, '수집된 문의 또는 홈페이지 문의와 연락처가 중복']]) {
     const row = page.getByRole('row').filter({ has: page.getByText(`합성 문의 ${id}`, { exact: true }) })
     assert.equal(await row.getByText('중복확인', { exact: true }).evaluate(el => el.tagName), 'SPAN')
     assert.equal(await row.getByRole('button', { name: '등록하기' }).count(), 0, 'duplicate marker is noninteractive')
     assert.equal(await row.getByRole('button', { name: '검토하기' }).count(), 1)
     assert.match(await row.innerText(), new RegExp(text))
-    assert.match(await row.innerText(), /WARP에서 해당 연락처로 기존 고객을 확인/)
+    assert.match(await row.innerText(), /WARP에서 해당 연락처로 기존 고객과 리드를 확인/)
   }
   for (const [id, label] of [[3, '등록 보류'], [6, '등록 확인 필요']]) {
     const row = page.getByRole('row').filter({ has: page.getByText(`합성 문의 ${id}`, { exact: true }) })
