@@ -70,9 +70,14 @@ export default function AdBillingClient({ initialMonth }: { initialMonth: string
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</p>}
     {message && <p role="status" className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">{message}</p>}
     {view ? <>
-      <section aria-label="월 정산 상태" className={`rounded-xl border p-4 ${view.ready ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
-        <p className="font-bold text-slate-900">{view.ready ? '준비 완료' : '중간집계'}</p>
-        <p className="mt-1 text-sm text-slate-700">{view.ready ? '충전과 집행 모두 월 전체 조회 범위가 확인되었습니다.' : '충전·집행의 월 전체 자료가 확인된 지난달까지 준비 완료로 표시합니다. 수집 당일은 부분일로 남습니다.'}</p>
+      <section aria-label="충전·집행내역 상태" className={`rounded-xl border p-4 ${view.ready ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+        <p className="font-bold text-slate-900">{view.ready ? '충전·집행내역 준비 완료' : '충전·집행내역 중간집계'}</p>
+        <p className="mt-1 text-sm text-slate-700">{view.ready ? '충전과 집행 모두 월 전체 조회 범위가 확인되었습니다.' : '충전·집행의 월 전체 자료가 확인된 지난달까지 내역 준비 완료로 표시합니다. 수집 당일은 부분일로 남습니다.'}</p>
+      </section>
+      <section aria-label="월말 잔액" className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <p className="font-bold text-slate-900">월말 잔액 확인 필요</p>
+        <p className="mt-1 text-sm text-slate-700">기준일: {monthDays(view.month).at(-1)} (한국시간, 마지막 날 소진 후)</p>
+        <p className="mt-2 text-sm leading-6 text-slate-700">원본에 월말 잔액을 확인할 자료가 없어 미확인 상태입니다. 현재 잔액은 월말 잔액으로 사용하지 않습니다.</p>
       </section>
       <div className="grid gap-4 lg:grid-cols-2">
         {view.summaries.map(summary => <article key={summary.kind} aria-label={billingLabels[summary.kind]} className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -88,7 +93,7 @@ export default function AdBillingClient({ initialMonth }: { initialMonth: string
           <button disabled={busy || summary.total === null} onClick={() => download(summary.kind)} className={`mt-5 w-full ${buttonStyle}`}>{billingLabels[summary.kind]} 엑셀</button>
         </article>)}
       </div>
-      <p className="text-sm text-slate-600">충전은 결제한 금액, 집행은 사용한 금액입니다. 두 금액을 합쳐 광고비로 계산하지 않습니다. 미완료 자료는 엑셀 파일명에도 ‘중간집계’로 표시됩니다.</p>
+      <p className="text-sm text-slate-600">충전은 결제한 금액, 집행은 사용한 금액입니다. 두 금액을 합쳐 광고비로 계산하지 않습니다. 충전·집행내역이 미완료인 자료는 엑셀 파일명에도 ‘중간집계’로 표시됩니다.</p>
     </> : !error && <p role="status" className="text-sm text-slate-500">정산 자료를 불러오고 있습니다.</p>}
 
     <section aria-label="당근 원본 CSV 가져오기" className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6">
@@ -114,7 +119,8 @@ export default function AdBillingClient({ initialMonth }: { initialMonth: string
       </fieldset>
       {preview && <section aria-label="저장 전 미리보기" className="mt-6 min-w-0 rounded-lg border border-[#C5D42A] bg-[#FAFBEF] p-4">
         <h3 className="font-bold text-slate-900">저장 전 미리보기</h3>
-        <p className="mt-2 text-sm text-slate-700">{preview.source.start} ~ {preview.source.end} · 원본 {preview.rowCount}건 · 저장 후 {preview.after.ready ? '준비 완료' : '중간집계'}</p>
+        <p className="mt-2 text-sm text-slate-700">{preview.source.start} ~ {preview.source.end} · 원본 {preview.rowCount}건 · 저장 후 {preview.after.ready ? '충전·집행내역 준비 완료' : '충전·집행내역 중간집계'}</p>
+        <p className="mt-1 text-xs text-slate-600">월말 잔액은 별도 확인이 필요합니다.</p>
         <p className="mt-1 text-xs text-slate-600">수집 기준시각: {stamp(preview.source.capturedAt)} (한국시간)</p>
         <div className="mt-3 space-y-2 text-sm text-slate-800">{billingKinds.map(kind => {
           const before = preview.before.summaries.find(v => v.kind === kind)!, after = preview.after.summaries.find(v => v.kind === kind)!

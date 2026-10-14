@@ -86,6 +86,15 @@ function child(root: string, amount: string) {
     p.on('error', reject); p.on('close', code => code === 0 ? resolve(output.trim()) : reject(new Error(errors)))
   })
 }
+function workbookMetadata(buffer: Uint8Array) {
+  const archive = unzipSync(buffer)
+  const strings = [...Buffer.from(archive['xl/sharedStrings.xml']).toString().matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(match => match[1])
+  const rows = [...Buffer.from(archive['xl/worksheets/sheet2.xml']).toString().matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)]
+  return Object.fromEntries(rows.map(row => [...row[1].matchAll(/<c\b[^>]*>([\s\S]*?)<\/c>/g)].map(cell => {
+    const value = cell[1].match(/<v>([^<]+)<\/v>/)?.[1] ?? ''
+    return /\bt="s"/.test(cell[0]) ? strings[Number(value)] : Number(value)
+  })))
+}
 async function main() {
   const root = await mkdtemp(path.join(tmpdir(), 'synthetic-billing-')), env = { UPLOADS_DIR: root }, file = path.join(root, '_reports/ad-billing/2026-09.json')
   try {
@@ -144,7 +153,30 @@ async function main() {
     assert.match(partialWorkbook.filename, /중간집계\.xlsx$/)
     const zeroWorkbook = await billingWorkbook(zero, 'spend', now)
     assert.match(Buffer.from(unzipSync(zeroWorkbook.buffer)['xl/worksheets/sheet1.xml']).toString(), /autoFilter ref="A1:D1"/)
-    console.log('Ad billing passed: KST months/leap, strict RFC4180 and money, partial-day coverage, duplicate rows, replacement/idempotency/fences, cross-process writer lock, private/corrupt storage, real typed XLSX and formula safety')
+    for (const [record, status, lastDay] of [[full, '충전·집행내역 준비 완료', '2026-09-30'], [partial, '충전·집행내역 중간집계', '2026-10-31'], [zero, '충전·집행내역 준비 완료', '2026-09-30']] as const) {
+      const before = JSON.stringify(record)
+      for (const kind of ['topup', 'spend'] as const) {
+        const summary = selectBilling(record, now).summaries.find(item => item.kind === kind)!
+        if (summary.total === null) continue
+        const metadata = workbookMetadata((await billingWorkbook(record, kind, now)).buffer)
+        assert.equal(metadata['충전·집행내역 상태'], status)
+        assert.equal(metadata['월말 잔액 상태'], '미확인 · 확인 필요', 'complete or zero transactions do not confirm a balance')
+        assert.equal(metadata['월말 잔액 기준일 (한국시간)'], lastDay)
+        assert.equal(metadata['월말 잔액 기준'], '해당 월 마지막 날 소진 후')
+        assert.equal(metadata['월말 잔액 안내'], '원본에 월말 잔액을 확인할 자료가 없어 미확인 상태입니다. 현재 잔액은 월말 잔액으로 사용하지 않습니다.')
+        assert.equal(metadata['거래 건수'], summary.count)
+        assert.equal(metadata['합계 (원)'], summary.total)
+        assert.equal(metadata['상태'], undefined, 'no ambiguous overall completion status')
+      }
+      assert.equal(JSON.stringify(record), before, 'exports do not alter stored data')
+    }
+    for (const [month, lastDay] of [['2024-02', '2024-02-29'], ['2025-02', '2025-02-28'], ['2025-12', '2025-12-31']]) {
+      const record = replaceBilling(emptyBilling(month), parse(csv(), { ...september, start: `${month}-01`, end: lastDay }), now).record
+      const metadata = workbookMetadata((await billingWorkbook(record, 'spend', now)).buffer)
+      assert.equal(metadata['월말 잔액 기준일 (한국시간)'], lastDay)
+      assert.equal(metadata['월말 잔액 상태'], '미확인 · 확인 필요')
+    }
+    console.log('Ad billing passed: KST months/leap, strict RFC4180 and money, partial-day coverage, duplicate rows, replacement/idempotency/fences, cross-process writer lock, private/corrupt storage, real typed XLSX, formula safety, separate transaction status and unconfirmed month-end balance')
   } finally { await rm(root, { recursive: true, force: true }) }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

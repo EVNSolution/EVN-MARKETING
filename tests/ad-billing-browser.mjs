@@ -5,6 +5,14 @@ import bcrypt from 'bcryptjs'
 
 // Disposable synthetic DB/uploads only. No live transactions, credentials or outbound collection.
 const csv = '\uFEFF거래 일시,거래 유형,거래 내용,금액\r\n2026.09.03. 12:30:05,유상캐시 충전,합성카드(0000),10000\r\n2026.09.03. 12:30:05,유상캐시 충전,합성카드(0000),10000\r\n2026.09.30. 23:59:59,광고캐시 사용,광고 집행,300\r\n'
+async function checkBalanceNotice(page, lastDay) {
+  const balance = page.getByRole('region', { name: '월말 잔액', exact: true })
+  await balance.getByText('월말 잔액 확인 필요', { exact: true }).waitFor()
+  await balance.getByText(`기준일: ${lastDay} (한국시간, 마지막 날 소진 후)`, { exact: true }).waitFor()
+  assert.match(await balance.innerText(), /원본에 월말 잔액을 확인할 자료가 없어 미확인 상태입니다/)
+  assert.match(await balance.innerText(), /현재 잔액은 월말 잔액으로 사용하지 않습니다/)
+  assert.doesNotMatch(await balance.innerText(), /[\d,]+원|준비 완료/)
+}
 export async function checkAdBillingUi({ page, context, db, base, uploads, output }) {
   const file = path.join(uploads, '_reports/ad-billing/2026-09.json'), prior = await readFile(file).catch(e => { if (e.code !== 'ENOENT') throw e; return null })
   const params = new URLSearchParams({ start: '2026-09-01', end: '2026-09-30', scope: 'both', capturedAt: '2026-10-01T00:00:00.000Z', confirmed: 'true' })
@@ -39,6 +47,7 @@ export async function checkAdBillingUi({ page, context, db, base, uploads, outpu
         await view.getByLabel('정산 월', { exact: true }).fill('2026-09')
         const topup = view.getByRole('article', { name: '충전내역', exact: true }), spend = view.getByRole('article', { name: '집행내역', exact: true })
         await topup.getByText('미수집', { exact: true }).waitFor()
+        await checkBalanceNotice(view, '2026-09-30')
         assert.equal(await view.getByRole('button', { name: '충전내역 엑셀', exact: true }).isDisabled(), true)
         assert.match(await spend.innerText(), /0원이 아닙니다/)
         await view.getByLabel('원본 CSV', { exact: true }).setInputFiles({ name: 'synthetic-ledger.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
@@ -47,14 +56,16 @@ export async function checkAdBillingUi({ page, context, db, base, uploads, outpu
         await view.getByRole('button', { name: '변경 내용 미리보기', exact: true }).click()
         const preview = view.getByRole('region', { name: '저장 전 미리보기', exact: true })
         await preview.waitFor()
-        assert.match(await preview.innerText(), /원본 3건 · 저장 후 준비 완료/)
+        assert.match(await preview.innerText(), /원본 3건 · 저장 후 충전·집행내역 준비 완료/)
+        assert.match(await preview.innerText(), /월말 잔액은 별도 확인이 필요합니다/)
         assert.match(await preview.innerText(), /20,000원 \(2건\)/)
         assert.equal(await readFile(file).catch(() => null), null, 'preview is read-only')
         assert.equal(await view.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
         if (output) await view.screenshot({ path: path.join(output, `ad-billing-${width}-preview.png`), fullPage: true })
         await view.getByRole('button', { name: '확인하고 저장', exact: true }).click()
         await view.getByRole('status').filter({ hasText: '교체해 저장했습니다' }).waitFor()
-        assert.match(await view.getByRole('region', { name: '월 정산 상태' }).innerText(), /준비 완료/)
+        await view.getByRole('region', { name: '충전·집행내역 상태' }).getByText('충전·집행내역 준비 완료', { exact: true }).waitFor()
+        await checkBalanceNotice(view, '2026-09-30')
         assert.match(await topup.innerText(), /20,000원[\s\S]*2건[\s\S]*30\/30일/)
         assert.match(await spend.innerText(), /300원[\s\S]*1건/)
         const response = await context.request.get(base + '/api/ad-billing?month=2026-09'), body = await response.json()
@@ -85,12 +96,17 @@ export async function checkAdBillingUi({ page, context, db, base, uploads, outpu
         assert.equal((await context.request.get(base + '/api/uploads/_reports/ad-billing/2026-09.json')).status(), 404)
         await view.getByLabel('정산 월', { exact: true }).fill('2026-08')
         await topup.getByText('미수집', { exact: true }).waitFor()
+        await checkBalanceNotice(view, '2026-08-31')
+        for (const [month, lastDay] of [['2024-02', '2024-02-29'], ['2025-02', '2025-02-28'], ['2025-12', '2025-12-31'], ['2026-10', '2026-10-31']]) {
+          await view.getByLabel('정산 월', { exact: true }).fill(month)
+          await checkBalanceNotice(view, lastDay)
+        }
         await view.getByLabel('정산 월', { exact: true }).fill('2026-09')
         await topup.getByText('20,000원', { exact: true }).waitFor()
         await view.locator('main').evaluate(el => el.scrollTo(0, 0))
         if (output) await view.screenshot({ path: path.join(output, `ad-billing-${width}-ready.png`), fullPage: true })
         assert.equal(await view.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
-        evidence.push({ width, importPreviewSave: true, ready: true, bothDownloads: true, duplicateRetry: true, monthSwitch: true, noOverflow: true })
+        evidence.push({ width, importPreviewSave: true, ready: true, bothDownloads: true, duplicateRetry: true, monthSwitch: true, balanceUnconfirmed: true, monthEndLeapAndYear: true, noOverflow: true })
       } finally { if (mobile) await mobile.close() }
     }
     await rm(file, { force: true })
@@ -101,7 +117,8 @@ export async function checkAdBillingUi({ page, context, db, base, uploads, outpu
     assert.equal((await post(`/api/ad-billing/import?${partialParams}&mode=import&key=${partialPreview.source.key}&revision=${partialPreview.revision}`)).status(), 200)
     await page.setViewportSize({ width: 1440, height: 1000 }); await page.goto(base + '/ad-billing')
     await page.getByLabel('정산 월', { exact: true }).fill('2026-09')
-    await page.getByRole('region', { name: '월 정산 상태' }).getByText('중간집계', { exact: true }).waitFor()
+    await page.getByRole('region', { name: '충전·집행내역 상태' }).getByText('충전·집행내역 중간집계', { exact: true }).waitFor()
+    await checkBalanceNotice(page, '2026-09-30')
     for (const label of ['충전내역', '집행내역']) {
       const pending = page.waitForEvent('download'); await page.getByRole('button', { name: `${label} 엑셀`, exact: true }).click()
       assert.equal((await pending).suggestedFilename(), `당근_2026-09_${label}_중간집계.xlsx`)
@@ -120,6 +137,6 @@ export async function checkAdBillingUi({ page, context, db, base, uploads, outpu
       assert.equal(await view.getByRole('link', { name: '광고비 정산', exact: true }).count(), 0)
     } finally { await viewer.close(); db.prepare('DELETE FROM User WHERE id=?').run(viewerId) }
     if (output) await writeFile(path.join(output, 'browser-qa.json'), JSON.stringify(evidence, null, 2) + '\n')
-    console.log('Ad billing browser passed: admin/ordinary/anonymous and Origin guards, read-only preview, sparse month coverage, duplicate rows/retry, typed XLSX downloads, month switching, PC1440 + real mobile390/320, private storage')
+    console.log('Ad billing browser passed: admin/ordinary/anonymous and Origin guards, read-only preview, sparse month coverage, duplicate rows/retry, typed XLSX downloads, month switching, separate unconfirmed month-end balance and leap/year dates, PC1440 + real mobile390/320, private storage')
   } finally { if (prior === null) await rm(file, { force: true }); else await writeFile(file, prior) }
 }
