@@ -1,5 +1,5 @@
 import writeExcelFile, { type SheetData } from 'write-excel-file/node'
-import { BillingError, billingHeaders, billingLabels, billingTypes, orderedRows, selectBilling, type BillingKind, type BillingRecord } from './ad-billing'
+import { BillingError, billingHeaders, billingLabels, billingTypes, monthDays, orderedRows, selectBilling, type BillingKind, type BillingRecord } from './ad-billing'
 
 export async function billingWorkbook(record: BillingRecord, kind: BillingKind, now = new Date()) {
   const view = selectBilling(record, now), summary = view.summaries.find(item => item.kind === kind)!
@@ -16,7 +16,11 @@ export async function billingWorkbook(record: BillingRecord, kind: BillingKind, 
     ])]
   const metadata: SheetData = [
     ['항목', '내용'].map(value => ({ value, type: String, fontWeight: 'bold', backgroundColor: '#E9EFBA' })),
-    ['정산 월', record.month], ['거래 유형', billingTypes[kind]], ['상태', view.ready ? '준비 완료' : '중간집계'],
+    ['정산 월', record.month], ['거래 유형', billingTypes[kind]], ['충전·집행내역 상태', view.ready ? '충전·집행내역 준비 완료' : '충전·집행내역 중간집계'],
+    ['월말 잔액 상태', '미확인 · 확인 필요'],
+    ['월말 잔액 기준일 (한국시간)', monthDays(record.month).at(-1)!],
+    ['월말 잔액 기준', '해당 월 마지막 날 소진 후'],
+    ['월말 잔액 안내', '원본에 월말 잔액을 확인할 자료가 없어 미확인 상태입니다. 현재 잔액은 월말 잔액으로 사용하지 않습니다.'],
     ['조회 범위', summary.ranges.map(range => `${range.start} ~ ${range.end}`).join(', ')],
     ['하루 전체 자료 확인', `${summary.completeDays} / ${view.dayCount}일`],
     ['부분일', summary.partialDays.join(', ') || '없음'], ['미수집 날짜', summary.missingDays.join(', ') || '없음'],
@@ -26,7 +30,7 @@ export async function billingWorkbook(record: BillingRecord, kind: BillingKind, 
     ['마지막 저장시각 (한국시간)', new Date(new Date(summary.importedAt!).getTime() + 9 * 3600000).toISOString().replace('T', ' ').slice(0, 19)],
     ['집계 안내', '충전과 집행은 별도 거래입니다. 두 금액을 합쳐 광고비로 계산하지 않습니다.'],
     ['범위 안내', '건수가 아니라 사용자가 확인한 원본 조회 기간·유형·수집 기준시각으로 자료 범위를 판정합니다.'],
-    ['중간집계 안내', '양쪽 유형의 월 전체 자료가 확인된 지난달까지 준비 완료로 표시합니다. 수집 당일은 부분일입니다.'],
+    ['중간집계 안내', '양쪽 유형의 월 전체 자료가 확인된 지난달까지 충전·집행내역 준비 완료로 표시합니다. 수집 당일은 부분일입니다.'],
   ]
   for (const row of metadata.slice(1)) {
     if (typeof row[1] === 'string') {
