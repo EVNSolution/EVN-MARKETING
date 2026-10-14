@@ -79,6 +79,9 @@ RUN apt-get update \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libx11-6)" ge 2:1.8.7-1ubuntu0.1 \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libx11-data)" ge 2:1.8.7-1ubuntu0.1 \
     && rm -rf /var/lib/apt/lists/*
+# Chromium resolves download names through the Linux native filesystem encoding.
+# The bare Ubuntu C locale can discard Korean names and fall back to "download".
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # The controller lab replaces the collector with a synthetic worker. Its image
 # uses the exact same application files and base OS, without unused browsers.

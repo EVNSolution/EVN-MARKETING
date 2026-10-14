@@ -7,6 +7,9 @@ import { recordSyntheticMigrations } from './schema-fixture.mjs'
 
 const require = createRequire('/app/package.json')
 assert.notEqual(process.getuid(), 0)
+const nativeCharset = spawnSync('locale', ['charmap'], { encoding: 'utf8' })
+assert.equal(nativeCharset.status, 0)
+assert.match(nativeCharset.stdout.trim(), /^UTF-?8$/i, 'Chromium must preserve Korean download names in the runtime filesystem encoding')
 for (const path of [
   '/app/node_modules/prisma',
   '/app/node_modules/@prisma/config',

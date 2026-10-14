@@ -62,6 +62,12 @@ export async function checkAdBillingUi({ page, context, db, base, uploads, outpu
         assert.doesNotMatch(JSON.stringify(body), /합성카드|description/)
         assert.equal(body.ready, true)
         for (const [kind, label] of [['topup', '충전내역'], ['spend', '집행내역']]) {
+          const attachment = await context.request.get(base + `/api/ad-billing/export?month=2026-09&kind=${kind}&revision=${body.revision}`)
+          assert.equal(attachment.status(), 200)
+          assert.equal(attachment.headers()['content-type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+          const disposition = attachment.headers()['content-disposition']
+          assert.match(disposition, /^attachment; filename="daangn-2026-09-(topup|spend)\.xlsx";/)
+          assert.equal(decodeURIComponent(disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1] ?? ''), `당근_2026-09_${label}.xlsx`, 'server filename must match the real browser download')
           const pending = view.waitForEvent('download')
           await view.getByRole('button', { name: `${label} 엑셀`, exact: true }).click()
           const download = await pending

@@ -22,6 +22,8 @@
 
 API는 관리자만 접근할 수 있으며 `private, no-store` 응답을 사용합니다. 쓰기에는 동일 출처 및 설정된 AUTH_URL 출처 확인이 필요합니다. 운영 비밀값이나 실거래 자료는 소스·테스트에 넣지 않습니다.
 
+브라우저가 포함된 운영 이미지에는 `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`을 설정합니다. Linux Chromium은 파일명을 네이티브 파일시스템 문자 인코딩으로 변환하므로 기본 C/ASCII 로캘에서는 한글 이름이 `download`로 대체될 수 있습니다. 컨테이너 검사에서 실제 `locale charmap`이 UTF-8인지 확인하고, API의 UTF-8 Content-Disposition과 실제 브라우저 다운로드 이름을 모두 검사합니다. 한글 파일명 기대값은 그대로 유지합니다.
+
 ## 라이브러리 및 검증
 
 - [write-excel-file 4.1.1 공식 저장소](https://github.com/catamphetamine/write-excel-file): MIT, Node 18 이상, runtime dependency fflate. 정확한 버전/무결성은 package-lock.json에 고정합니다. 숫자/날짜/문자열 타입과 기본 고정 행 기능을 사용하고, 공식 Feature transform 확장으로 worksheet 필터만 추가합니다.
