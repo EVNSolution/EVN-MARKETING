@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "seed": "tsx prisma/seed.ts",
     "test:db": "tsx tests/db.test.ts",
+    "test:ad-billing": "tsx tests/ad-billing.test.ts",
     "test:external-dashboard": "tsx tests/external-dashboard.test.ts && tsx tests/registered-inflow.test.ts && tsx tests/ad-spend.test.ts && tsx tests/naver-ad-spend.test.ts && tsx tests/daangn-ad-spend.test.ts && tsx tests/daangn-mcp-ad-spend.test.ts && tsx tests/ad-spend-worker.test.ts",
     "check:external-dashboard": "tsx scripts/check-external-dashboard.ts",
     "test:landing": "tsx tests/landing-inquiries.test.ts && node tests/landing-expansion-audit.test.mjs",
@@ -48,7 +49,8 @@
     "playwright-core": "^1.63.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "write-excel-file": "4.1.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -19,6 +19,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             className="flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10">
             대시보드(외부)
           </Link>
+          {user?.role === 'admin' && <Link href="/ad-billing"
+            className="flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10">
+            광고비 정산
+          </Link>}
           <Link href="/inquiries"
             className="flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10">
             문의 내역
