@@ -29,6 +29,8 @@ jobs:
         run: npm run test:landing
       - name: External dashboard read-only collection and private storage
         run: npm run test:external-dashboard
+      - name: Monthly accounting ledger and XLSX exports
+        run: npm run test:ad-billing
       - name: Release controller and cloud declaration checks
         run: python3 tests/deployment-result.test.py && python3 tests/start-release.test.py && python3 tests/release-artifact.test.py && python3 tests/selective-ci.test.py && python3 tests/ci-images.test.py && python3 tests/deploy-controller.test.py && python3 tests/cloud-release.test.py && python3 tests/server-foundation.test.py && python3 tests/manual-release.test.py && python3 tests/operator-release.test.py && python3 tests/landing-expand.test.py && python3 tests/deploy-controller-lab.py --self-test
       - name: Offline backup and bounded receipt recovery

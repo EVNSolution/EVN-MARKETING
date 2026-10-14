@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { checkLandingWarpUi } from './landing-warp-browser.mjs'
 import { checkExternalDashboardUi } from './external-dashboard-browser.mjs'
+import { checkAdBillingUi } from './ad-billing-browser.mjs'
 
 // Owns a fresh synthetic DB, a loopback-only web process and a temporary browser profile.
 // Never starts a collector or uses the caller's database, credentials or browser session.
@@ -159,6 +160,7 @@ try {
   assert.equal((await ordinary.context.request.post(reviewUrl, { headers: { Origin: base }, data: decision })).status(), 403)
   await checkLandingWarpUi({ page, context, db, base })
   await checkExternalDashboardUi({ page, context, db, base, uploads: path.join(directory, 'uploads') })
+  await checkAdBillingUi({ page, context, db, base, uploads: path.join(directory, 'uploads') })
   await page.getByRole('button', { name: '로그아웃', exact: true }).click()
   await page.waitForURL('**/login')
   assert.equal((await context.request.get(base + '/api/inquiries', { maxRedirects: 0 })).status(), 307)
