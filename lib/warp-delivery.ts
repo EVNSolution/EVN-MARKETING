@@ -20,6 +20,7 @@ export const DUPLICATE_RECHECK_FAILED = 'warp_duplicate_recheck_failed'
 export const DUPLICATE_REVIEWED = 'warp_duplicate_reviewed'
 export const EXISTING_CUSTOMER_REVIEWED = 'warp_existing_customer_reviewed'
 export const REVIEW_CLEARED = 'warp_duplicate_review_cleared'
+export const DUPLICATE_OF = 'warp_duplicate_of:'
 export const scope = { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID }
 export const deliveryScopes = { OR: [scope, landingScope] }
 const connectionErrors = ['warp_auth_required', 'warp_not_configured', 'warp_endpoint_missing', 'warp_unavailable', 'warp_invalid_receipt', 'warp_registration_guard_unavailable', 'warp_duplicate_check_unavailable']
@@ -42,7 +43,13 @@ export function warpConfigured(env: Env = process.env) {
   return env.WARP_DELIVERY_ENABLED === 'true' && keyConfigured(env)
 }
 
-export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError: string | null }, localDuplicate = false) {
+type DeliveryStateRow = { warpDeliveredAt: Date | null; warpError: string | null }
+export function duplicateRepresentativeId(error: string | null) {
+  const id = error?.startsWith(DUPLICATE_OF) ? error.slice(DUPLICATE_OF.length) : ''
+  return /^[A-Za-z0-9_-]{1,160}$/.test(id) ? id : null
+}
+
+export function warpDeliveryState(row: DeliveryStateRow, localDuplicate = false, representative?: DeliveryStateRow) {
   if (row.warpError === CUSTOMER_ONLY) return { status: 'blocked', label: '고객 등록 확인 · 리드 미완료',
     reason: '기존 고객 등록 기록만 확인됐습니다. 과거 문의의 리드를 자동 생성하지 않으므로 담당자 검토가 필요합니다. 새 고객은 다시 만들지 않습니다.' }
   if (row.warpError === 'warp_lead_mapping_unavailable') return { status: 'retrying', label: '고객·리드 등록 보류',
@@ -66,11 +73,22 @@ export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError
   if (row.warpError === MANUAL_CONFIRMATION) return {
     status: 'delivered', label: '등록 완료', reason: '사용자가 WARP에 직접 등록했음을 확인했습니다.',
   }
+  if (representative && warpDeliveryState(representative).status === 'delivered') return {
+    status: 'duplicate_linked', label: '중복 문의 · 대표 건 등록완료',
+    reason: '같은 연락처의 대표 문의가 WARP에 등록됐습니다. 이 문의는 추가 문의로 보존하며 별도로 전송하지 않습니다.',
+  }
+  if (row.warpError?.startsWith(DUPLICATE_OF)) return {
+    status: 'duplicate', label: '중복 문의 · 대표 건 확인 필요',
+    reason: representative ? '선택한 대표 문의의 등록 상태를 확인해 주세요. 이 문의는 별도로 전송하지 않습니다.'
+      : '연결된 대표 문의를 확인할 수 없어 전송을 보류합니다. 담당자 확인이 필요합니다.',
+  }
   if (row.warpError === DUPLICATE_RECHECK) return { status: 'duplicate', label: '중복확인', reason: '중복 재확인을 요청했습니다. 확인하는 동안 전송하지 않습니다.' }
   if (row.warpError === DUPLICATE_RECHECK_FAILED) return { status: 'duplicate', label: '중복확인', reason: '중복 재확인에 실패해 전송을 보류했습니다. 연결을 확인한 뒤 다시 재확인해 주세요.' }
   if (localDuplicate || duplicateErrors.includes(row.warpError ?? '')) return {
     status: 'duplicate', label: '중복확인',
-    reason: `${localDuplicate || row.warpError === 'warp_local_duplicate' ? '수집된 문의 또는 홈페이지 문의와 연락처가 중복됩니다.' : 'WARP 고객 또는 리드와 연락처가 중복됩니다.'} ${duplicateRemedy}`,
+    reason: ['warp_phone_duplicate', 'warp_customer_conflict'].includes(row.warpError ?? '')
+      ? `WARP 고객 또는 리드와 연락처가 중복됩니다. ${duplicateRemedy}`
+      : 'EV&Marketing에 같은 연락처의 문의가 여러 건 있습니다. WARP 등록 여부와는 별개이며, 검토창에서 대표 문의 1건을 선택해 등록할 수 있습니다.',
   }
   if (row.warpError === REVIEW_CLEARED) return { status: 'pending', label: '등록 검토', reason: '재확인 결과 중복이 없습니다. 내용을 확인한 뒤 등록하기를 눌러 주세요. 자동으로 전송하지 않습니다.' }
   if (row.warpError === 'warp_duplicate_check_unavailable') return { status: 'retrying', label: '중복 조회 실패', reason: 'WARP 중복 조회에 실패해 전송하지 않았습니다. 연결을 확인한 뒤 다시 요청해 주세요.' }
@@ -82,20 +100,51 @@ export function warpDeliveryState(row: { warpDeliveredAt: Date | null; warpError
   return { status: 'pending', label: '등록 대기', reason: null }
 }
 
-/** Match all supported sources; every unsent same-phone inquiry waits for review. */
-export async function duplicateInquiryIds(db: Pick<PrismaClient, 'inquiry'>) {
-  // ponytail: one O(n) scan is enough for this small inbox; add a normalized index only if volume proves it necessary.
-  const rows = await db.inquiry.findMany({ where: deliveryScopes, select: { id: true, phone: true },
+export const duplicateSelect = { id: true, phone: true, name: true, warpError: true, warpDeliveredAt: true, warpActivityId: true, warpCustomerId: true } as const
+type DuplicateRow = { id: string; phone: string; name: string | null; warpActivityId: string | null; warpCustomerId: string | null } & DeliveryStateRow
+export function hasWarpEvidence(row: DuplicateRow) {
+  return Boolean(row.warpDeliveredAt || row.warpActivityId || row.warpCustomerId
+    || [MANUAL_CONFIRMATION, WARP_RECEIPT_UNVERIFIED, CUSTOMER_ONLY, WARP_EXISTING_CUSTOMER, EXISTING_CUSTOMER_REVIEWED].includes(row.warpError ?? ''))
+}
+
+/** A representative may send only while every same-phone peer still points to it. */
+export async function inquiryDuplicateContext(db: Pick<PrismaClient, 'inquiry'>) {
+  const rows = await db.inquiry.findMany({ where: deliveryScopes, select: duplicateSelect,
     orderBy: [{ firstSeenAt: 'asc' }, { inquiryDate: 'asc' }, { inquiryTime: 'asc' }, { sourceId: 'asc' }, { id: 'asc' }] })
-  const seen = new Map<string, string>(), duplicates = new Set<string>()
+  const groups = new Map<string, DuplicateRow[]>(), duplicates = new Set<string>(), representatives = new Map<string, DuplicateRow>()
+  const byId = new Map(rows.map(row => [row.id, row])), changedLinks = new Set<string>()
   for (const row of rows) {
+    // Missing targets, corrected numbers and malformed pointers must never become sendable.
+    if (row.warpError?.startsWith(DUPLICATE_OF)) duplicates.add(row.id)
+    const targetId = duplicateRepresentativeId(row.warpError)
+    const target = targetId ? byId.get(targetId) : undefined
+    if (target && normalizeInquiryPhone(target.phone) !== normalizeInquiryPhone(row.phone)) {
+      changedLinks.add(target.id)
+      duplicates.add(target.id)
+    }
     const phone = normalizeInquiryPhone(row.phone)
     if (!phone) continue
-    const first = seen.get(phone)
-    if (first) { duplicates.add(first); duplicates.add(row.id) }
-    else seen.set(phone, row.id)
+    const group = groups.get(phone) ?? []
+    group.push(row)
+    groups.set(phone, group)
   }
-  return duplicates
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    for (const row of group) duplicates.add(row.id)
+    const targets = new Set(group.map(row => duplicateRepresentativeId(row.warpError)).filter(Boolean))
+    if (targets.size !== 1) continue
+    const representative = group.find(row => targets.has(row.id) && !row.warpError?.startsWith(DUPLICATE_OF))
+    if (!representative) continue
+    for (const row of group) representatives.set(row.id, representative)
+    if (!changedLinks.has(representative.id) && group.every(row => row.id === representative.id || (duplicateRepresentativeId(row.warpError) === representative.id && !hasWarpEvidence(row)))) {
+      duplicates.delete(representative.id)
+    }
+  }
+  return { duplicates, representatives }
+}
+
+export async function duplicateInquiryIds(db: Pick<PrismaClient, 'inquiry'>) {
+  return (await inquiryDuplicateContext(db)).duplicates
 }
 
 export function warpActivityId(sourceId: string, sourceScope = scope) {
@@ -109,7 +158,7 @@ export async function requestWarpRegistration(db: PrismaClient, id: string, now 
     const row = await tx.inquiry.findFirst({ where: { ...deliveryScopes, id }, select: { source: true, warpDeliveredAt: true, warpError: true } })
     if (!row) return 'not_found' as const
     const status = warpDeliveryState(row, (await duplicateInquiryIds(tx)).has(id)).status
-    if (['duplicate', 'duplicate_reviewed'].includes(status)) return 'duplicate' as const
+    if (['duplicate', 'duplicate_reviewed', 'duplicate_linked'].includes(status)) return 'duplicate' as const
     if (status === 'blocked') return 'blocked' as const
     if (status === 'delivered') return 'delivered' as const
     if (status === 'queued' || status === 'sending') return 'queued' as const
@@ -198,17 +247,18 @@ export async function checkWarpConnection(send: typeof fetch = fetch, env: Env =
 }
 
 export async function warpDeliverySummary(db: PrismaClient, env: Env = process.env, visibleScope: Prisma.InquiryWhereInput = deliveryScopes) {
-  const [rows, localDuplicates] = await Promise.all([
+  const [rows, context] = await Promise.all([
     db.inquiry.findMany({ where: visibleScope, select: { id: true, warpDeliveredAt: true, warpError: true } }),
-    duplicateInquiryIds(db),
+    inquiryDuplicateContext(db),
   ])
   const counts = { delivered: 0, pending: 0, failed: 0, duplicates: 0, reviewPending: 0, reviewed: 0 }
   for (const row of rows) {
-    const status = warpDeliveryState(row, localDuplicates.has(row.id)).status
+    const representative = context.representatives.get(row.id)
+    const status = warpDeliveryState(row, context.duplicates.has(row.id), representative?.id !== row.id ? representative : undefined).status
     if (status === 'delivered') counts.delivered++
-    else if (status === 'duplicate' || status === 'duplicate_reviewed') {
+    else if (status === 'duplicate' || status === 'duplicate_reviewed' || status === 'duplicate_linked') {
       counts.duplicates++
-      if (status === 'duplicate_reviewed') counts.reviewed++
+      if (status === 'duplicate_reviewed' || status === 'duplicate_linked') counts.reviewed++
       else counts.reviewPending++
     }
     else {
@@ -225,7 +275,7 @@ async function pendingRows(db: PrismaClient, now: Date, take: number, respectRet
   const retryBefore = new Date(now.getTime() - RETRY_MS)
   return db.inquiry.findMany({
     where: { ...scope, id: { notIn: [...duplicates] }, warpDeliveredAt: null, AND: [
-      { OR: [{ warpError: null }, { warpError: { notIn: [...duplicateErrors, REVIEW_CLEARED, WARP_RECEIPT_UNVERIFIED, CUSTOMER_ONLY, 'warp_registration_guard_unavailable', MANUAL_CONFIRMATION] } }] },
+      { OR: [{ warpError: null }, { warpError: { notIn: [...duplicateErrors, REVIEW_CLEARED, WARP_RECEIPT_UNVERIFIED, CUSTOMER_ONLY, 'warp_registration_guard_unavailable', MANUAL_CONFIRMATION], not: { startsWith: DUPLICATE_OF } } }] },
       ...(respectRetry ? [{ OR: [{ warpError: MANUAL_REGISTRATION }, { warpAttemptedAt: null }, { warpAttemptedAt: { lte: retryBefore } }] }] : []),
     ] },
     orderBy: [{ inquiryDate: 'asc' }, { inquiryTime: 'asc' }, { sourceId: 'asc' }],

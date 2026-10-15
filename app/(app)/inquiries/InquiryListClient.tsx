@@ -14,7 +14,7 @@ type Inquiry = {
   name: string | null
   phone: string
   landingReceipt?: { kind: string | null; region: string | null; consentVersion: string | null; consentedAt: string | null } | null
-  warpDelivery: { status: 'sending' | 'delivered' | 'pending' | 'duplicate' | 'duplicate_reviewed' | 'blocked' | 'retrying' | 'queued'; label: string; reason: string | null }
+  warpDelivery: { status: 'sending' | 'delivered' | 'pending' | 'duplicate' | 'duplicate_reviewed' | 'duplicate_linked' | 'blocked' | 'retrying' | 'queued'; label: string; reason: string | null }
 }
 
 type SyncRun = {
@@ -226,9 +226,11 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                       {row.warpDelivery.status === 'delivered' ? (
                         <span title={row.warpDelivery.reason ?? undefined} className="inline-block rounded-full bg-lime-100 px-2 py-1 font-semibold text-lime-800">{row.warpDelivery.label === '등록 완료' ? '등록완료' : row.warpDelivery.label}</span>
                       ) : row.warpDelivery.status === 'duplicate' ? (
-                        <span className="inline-block rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-800">중복확인</span>
+                        <span className="inline-block rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-800">{row.warpDelivery.label}</span>
                       ) : row.warpDelivery.status === 'duplicate_reviewed' ? (
-                        <span className="inline-block rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">검토완료</span>
+                        <span className="inline-block rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{row.warpDelivery.label}</span>
+                      ) : row.warpDelivery.status === 'duplicate_linked' ? (
+                        <span className="inline-block rounded-full bg-lime-50 px-2 py-1 font-semibold text-lime-800">{row.warpDelivery.label}</span>
                       ) : row.warpDelivery.status === 'blocked' ? (
                         <span className="inline-block rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{row.warpDelivery.label}</span>
                       ) : isAdmin ? (
@@ -245,7 +247,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
                           {row.warpDelivery.reason || registrationMessages[row.id] || (isAdmin && row.warpDelivery.status !== 'queued' ? row.warpDelivery.label : '')}
                         </p>
                       )}
-                      {['duplicate', 'duplicate_reviewed'].includes(row.warpDelivery.status) && (
+                      {['duplicate', 'duplicate_reviewed', 'duplicate_linked'].includes(row.warpDelivery.status) && (
                         <button type="button" onClick={() => setReviewId(row.id)} className="mt-1 min-h-11 rounded-lg px-2 text-xs font-semibold text-slate-700 underline underline-offset-4">검토하기</button>
                       )}
     </div>
@@ -278,7 +280,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">최근 실행</div>
             {isAdmin && (
               <button type="button" onClick={requestSync} disabled={syncing || sync?.currentStatus === 'running' || sync?.currentStatus === 'pending'}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45">
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45">
                 <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
                 지금 가져오기
               </button>
@@ -322,19 +324,19 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
           <label className="grid gap-1 text-[11px] font-semibold text-slate-500">
             시작일
             <input type="date" value={from} onChange={(event) => setFrom(event.target.value)}
-              className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400" />
+              className="min-h-11 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400" />
           </label>
           <label className="grid gap-1 text-[11px] font-semibold text-slate-500">
             종료일
             <input type="date" value={to} onChange={(event) => setTo(event.target.value)}
-              className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400" />
+              className="min-h-11 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-slate-400" />
           </label>
           <label className="grid min-w-52 flex-1 gap-1 text-[11px] font-semibold text-slate-500">
             검색
             <span className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input value={query} onChange={(event) => setQuery(event.target.value)} maxLength={100} placeholder="성함 또는 연락처"
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-xs text-slate-700 outline-none focus:border-slate-400" />
+                className="min-h-11 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-xs text-slate-700 outline-none focus:border-slate-400" />
             </span>
           </label>
           <label className="space-y-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
@@ -353,7 +355,7 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
               {loading ? '문의 내역을 불러오는 중입니다.' : '문의 내역을 불러오지 못했습니다.'}
               {!loading && (
                 <button type="button" onClick={() => void load()}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                  className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
                   다시 시도
                 </button>
               )}
@@ -405,16 +407,16 @@ export default function InquiryListClient({ isAdmin }: { isAdmin: boolean }) {
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <b className="text-slate-800">{data.pagination.total.toLocaleString()}</b>건
               <select aria-label="페이지당 문의 수" value={data.pagination.limit} onChange={(event) => navigate({ limit: event.target.value, page: '1' })}
-                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs outline-none">
+                className="min-h-11 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs outline-none">
                 {[20, 50, 100, 200].map((size) => <option key={size} value={size}>{size}개씩</option>)}
               </select>
             </div>
             <div className="flex items-center gap-2">
               <button type="button" disabled={data.pagination.page <= 1} onClick={() => navigate({ page: String(data.pagination.page - 1) })}
-                aria-label="이전 페이지" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-30"><ChevronLeft size={15} /></button>
+                aria-label="이전 페이지" className="min-h-11 min-w-11 rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-30"><ChevronLeft size={15} /></button>
               <span className="min-w-20 text-center text-xs font-semibold text-slate-600">{data.pagination.page} / {data.pagination.totalPages}</span>
               <button type="button" disabled={data.pagination.page >= data.pagination.totalPages} onClick={() => navigate({ page: String(data.pagination.page + 1) })}
-                aria-label="다음 페이지" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-30"><ChevronRight size={15} /></button>
+                aria-label="다음 페이지" className="min-h-11 min-w-11 rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-30"><ChevronRight size={15} /></button>
             </div>
           </div>
         )}
