@@ -1,5 +1,5 @@
-import { constants } from 'node:fs'
-import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises'
+import { constants, renameSync } from 'node:fs'
+import { lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { PrismaClient, Prisma } from '@/app/generated/prisma/client'
@@ -50,17 +50,21 @@ async function read(file: string): Promise<NameJob[]> {
 export async function withNameJobs<T>(db: PrismaClient, env: Env,
   change: (jobs: NameJob[], tx: Prisma.TransactionClient) => Promise<T>, now: Date, owner?: string): Promise<T> {
   const directory = await folder(env), file = path.join(directory, 'pending.json')
+  const startedAt = Date.now()
   return db.$transaction(async tx => {
     await tx.$executeRaw`UPDATE "InquirySyncState" SET "updatedAt" = "updatedAt" WHERE "id" = ${INQUIRY_SCOPE_ID}`
     const fence = async () => {
-      if (!owner) return
+      // Even web writers must prove the transaction is still live after slow file I/O.
       const lease = await tx.inquirySyncState.findUnique({ where: { id: INQUIRY_SCOPE_ID } })
-      if (lease?.workerOwner !== owner || !lease.workerLeaseExpiresAt || lease.workerLeaseExpiresAt <= now) throw new SyncError('lost_worker_lease')
+      if (owner && (lease?.workerOwner !== owner || !lease.workerLeaseExpiresAt
+        || lease.workerLeaseExpiresAt.getTime() <= now.getTime() + Date.now() - startedAt)) throw new SyncError('lost_worker_lease')
     }
     await fence()
     const before = await read(file)
     // Short-lived review data only. Permanent change evidence lives in WARP's customer activity.
-    const jobs = before.filter(job => job.createdAt > now.getTime() - 20 * 60_000)
+    // An accepted confirmation survives until its outcome is recorded, including after a worker restart.
+    const jobs = before.filter(job => job.phase === 'confirm'
+      || (job.phase === 'preview' ? job.createdAt : job.updatedAt) > now.getTime() - 20 * 60_000)
     const original = JSON.stringify(before)
     const result = await change(jobs, tx)
     if (JSON.stringify(jobs) === original) return result
@@ -71,7 +75,8 @@ export async function withNameJobs<T>(db: PrismaClient, env: Env,
       const fd = await open(temporary, 'wx', 0o600)
       try { await fd.writeFile(contents); await fd.sync() } finally { await fd.close() }
       await fence()
-      await rename(temporary, file)
+      // No async publication may escape the live SQLite writer reservation.
+      renameSync(temporary, file)
       if (process.platform !== 'win32') {
         const dir = await open(directory, 'r'); try { await dir.sync() } finally { await dir.close() }
       }

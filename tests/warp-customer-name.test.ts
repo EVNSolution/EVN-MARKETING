@@ -9,6 +9,8 @@ import { claimWorker, INQUIRY_SCOPE_ID } from '@/lib/inquiry-sync'
 import { landingScope } from '@/lib/landing-inquiries'
 import { scope } from '@/lib/warp-delivery'
 import { dispatchNameJobs, requestNameJob, readNameJob } from '@/lib/warp-customer-name'
+import { withNameJobs } from '@/lib/warp-customer-name-store'
+import { setTimeout as delay } from 'node:timers/promises'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
 const at = new Date('2026-10-15T05:00:00Z'), owner = 'name-review-worker'
@@ -118,6 +120,35 @@ async function main() {
     }
   })
 
+  await fixture(async (db, env, selected, named) => {
+    const form = await input(db, selected, named), calls: Record<string, unknown>[] = []
+    const job = await requestNameJob(db, selected, form, actor, env, at)
+    const later = new Date(at.getTime() + 19 * 60_000)
+    await db.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { workerHeartbeatAt: later, workerLeaseExpiresAt: new Date(later.getTime() + 5 * 60_000) } })
+    await dispatchNameJobs(db, owner, undefined, provider(calls), env, () => later)
+    await requestNameJob(db, selected, { ...form, action: 'confirm', jobId: job.id }, actor, env, later)
+    const crossing = new Date(at.getTime() + 21 * 60_000)
+    assert.equal((await readNameJob(db, selected, job.id, actor.id, env, crossing)).phase, 'confirm', 'accepted confirmation survives creation-age boundary')
+    await dispatchNameJobs(db, owner, undefined, provider(calls), env, () => crossing)
+    assert.equal((await readNameJob(db, selected, job.id, actor.id, env, crossing)).result?.status, 'updated', 'late successful result remains readable')
+  })
+  await fixture(async (db, env, selected, named) => {
+    const form = await input(db, selected, named)
+    const first = await requestNameJob(db, selected, form, actor, env, at)
+    let callbackFinished: () => void = () => {}
+    const lateCallback = new Promise<void>(resolve => { callbackFinished = resolve })
+    const slow = withNameJobs(db, env, async jobs => {
+      jobs[0].phase = 'failed'; jobs[0].error = 'stale publisher must never win'
+      await delay(10_300)
+      callbackFinished()
+    }, at)
+    await assert.rejects(slow, /[Tt]ransaction/)
+    const secondActor = { id: 'second-admin', name: '다른 합성 관리자' }
+    const second = await requestNameJob(db, selected, form, secondActor, env, at)
+    await lateCallback; await delay(100)
+    assert.equal((await readNameJob(db, selected, first.id, actor.id, env, at)).phase, 'preview', 'expired web transaction cannot publish its stale queue')
+    assert.equal((await readNameJob(db, selected, second.id, secondActor.id, env, at)).phase, 'preview', 'accepted newer request survives a late old callback')
+  })
   await fixture(async (db, env, selected, named) => {
     await db.inquirySyncState.update({ where: { id: INQUIRY_SCOPE_ID }, data: { workerLeaseExpiresAt: at } })
     await assert.rejects(requestNameJob(db, selected, await input(db, selected, named), actor, env, at), /수집 연결/)

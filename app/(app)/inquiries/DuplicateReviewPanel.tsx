@@ -108,7 +108,7 @@ export default function DuplicateReviewPanel({ id, isAdmin, onClose, onChanged }
           </section>}
           <p className="text-xs leading-relaxed text-slate-500">EV&amp;Marketing에 같은 연락처 문의가 반복되어도 WARP에 고객이나 리드가 있다는 뜻은 아닙니다. 원격 WARP 조회에 실패하면 안전을 위해 등록 요청을 전송하지 않습니다. 고객 통합이나 연락처 정정 후 재확인할 수 있으며, 원본 문의의 번호가 잘못됐다면 담당자에게 정정을 요청해 주세요.</p>
           <a href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">WARP 고객관리 열기 ↗</a>
-          {isAdmin && <CustomerNameReview key={review.reviewToken} review={review} disabled={busy || Boolean(error)} onBusy={setNameBusy} />}
+          {isAdmin && <CustomerNameReview key={review.reviewToken} review={review} disabled={busy || Boolean(error)} onBusy={setNameBusy} onRefresh={load} />}
           {review.hasReceipt && <p className="text-xs text-slate-500">이 문의에는 기존 전송 이력이 있습니다. 기록을 보존하며 다시 전송하지 않습니다.</p>}
           {review.queued && <p role="status" className="rounded-lg bg-sky-50 p-3 text-xs text-sky-800">중복 여부를 확인 중입니다. 이 작업은 WARP 고객을 등록하거나 수정하지 않습니다.</p>}
           {review.registrationQueued && <p role="status" className="rounded-lg bg-sky-50 p-3 text-xs text-sky-800">대표 문의의 WARP 등록을 확인 중입니다. 완료되면 결과가 표시됩니다.</p>}

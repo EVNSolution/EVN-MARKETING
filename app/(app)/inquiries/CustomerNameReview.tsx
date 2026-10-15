@@ -15,13 +15,14 @@ const explanations = {
   unchanged: 'WARP에서 동일한 이름 보완의 처리 완료를 확인했습니다. 중복으로 수정하지 않았습니다.',
 }
 
-export default function CustomerNameReview({ review, disabled, onBusy }: { review: Review; disabled: boolean; onBusy: (busy: boolean) => void }) {
+export default function CustomerNameReview({ review, disabled, onBusy, onRefresh }: { review: Review; disabled: boolean; onBusy: (busy: boolean) => void; onRefresh: () => Promise<void> }) {
   const [candidateId, setCandidateId] = useState(review.nameCandidates.length === 1 ? review.nameCandidates[0].id : '')
   const [job, setJob] = useState<NameJobView | null>(null)
   const [confirmed, setConfirmed] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [timedOut, setTimedOut] = useState(false)
+  const [needsRefresh, setNeedsRefresh] = useState(false)
   const pending = Boolean(job && ['preview', 'confirm'].includes(job.phase))
   const jobId = job?.id
   const busy = sending || (pending && !timedOut)
@@ -50,18 +51,26 @@ export default function CustomerNameReview({ review, disabled, onBusy }: { revie
   }, [jobId, pending, timedOut, url]) // Poll only the current operation; never submit on a timer.
 
   async function submit(action: 'preview' | 'confirm') {
-    if (busy || disabled || !candidateId || (action === 'confirm' && (!confirmed || job?.phase !== 'ready'))) return
-    setSending(true); setError(''); setTimedOut(false)
+    if (busy || disabled || needsRefresh || !candidateId || (action === 'confirm' && (!confirmed || job?.phase !== 'ready'))) return
+    setSending(true); setError(''); setTimedOut(false); setConfirmed(false)
+    let uncertain = true
     try {
       const response = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, candidateId, reviewToken: review.reviewToken, ...(action === 'confirm' ? { jobId: job!.id } : {}) }) })
       const body = await response.json()
-      if (!response.ok) throw new Error(body.error)
+      if (!response.ok) {
+        if ([400, 401, 403, 404, 409, 429].includes(response.status)) {
+          uncertain = false
+          if (action === 'confirm') setJob(null)
+          if (response.status === 409) setNeedsRefresh(true)
+        }
+        throw new Error(body.error)
+      }
       setJob(body); setConfirmed(false)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '이름 보완 요청에 실패했습니다.')
       // A lost response can follow an accepted confirmation. Read its state before allowing a different proposal.
-      if (action === 'confirm' && job) setJob({ ...job, phase: 'confirm' })
+      if (action === 'confirm' && job && uncertain) setJob({ ...job, phase: 'confirm' })
     }
     finally { setSending(false) }
   }
@@ -74,7 +83,7 @@ export default function CustomerNameReview({ review, disabled, onBusy }: { revie
     <div><h3 className="font-semibold text-slate-900">WARP 이름 보완</h3>
       <p className="mt-1 text-xs leading-relaxed text-slate-600">같은 휴대폰 번호의 실명 문의로 기존 고객의 미상 이름만 보완합니다. 원본 문의와 등록 상태는 유지됩니다.</p></div>
     <label className="block text-xs font-medium">반영할 이름이 있는 문의
-      <select aria-label="반영할 이름이 있는 문의" value={candidateId} disabled={busy || disabled || pending} onChange={event => {
+      <select aria-label="반영할 이름이 있는 문의" value={candidateId} disabled={busy || disabled || pending || needsRefresh} onChange={event => {
         setCandidateId(event.target.value); setJob(null); setConfirmed(false); setError('')
       }} className="mt-2 min-h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm">
         <option value="" disabled>이름을 선택해 주세요</option>
@@ -82,7 +91,7 @@ export default function CustomerNameReview({ review, disabled, onBusy }: { revie
       </select>
     </label>
     {review.nameCandidates.length > 1 && <p className="text-xs text-amber-800">같은 번호에 서로 다른 이름이 있습니다. 동일 고객인지 확인한 뒤 선택해 주세요.</p>}
-    {!pending && <button type="button" disabled={!candidateId || busy || disabled} onClick={() => void submit('preview')}
+    {!pending && !needsRefresh && <button type="button" disabled={!candidateId || busy || disabled} onClick={() => void submit('preview')}
       className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold disabled:opacity-40">WARP 이름 확인</button>}
     {pending && !timedOut && <p role="status" className="text-xs leading-relaxed text-sky-800">{job?.phase === 'confirm' ? '기존 고객 이름을 보완하고 있습니다.' : 'WARP의 현재 고객 이름을 확인하고 있습니다.'} 연결 상태에 따라 잠시 걸릴 수 있습니다.</p>}
     {timedOut && <button type="button" onClick={() => { setTimedOut(false); setError('') }} className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 text-xs font-semibold">처리 결과 다시 확인</button>}
@@ -101,5 +110,7 @@ export default function CustomerNameReview({ review, disabled, onBusy }: { revie
     </>}
     {job?.phase === 'done' && result && result.status !== 'ready' && <p role="status" className="text-xs leading-relaxed text-slate-700">{explanations[result.status]}</p>}
     {(error || job?.error) && <p role="alert" className="text-xs leading-relaxed text-red-700">{error || job?.error}</p>}
+    {needsRefresh && <button type="button" onClick={() => void onRefresh().then(() => { setNeedsRefresh(false); setError(''); setJob(null); setConfirmed(false) })}
+      className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 text-xs font-semibold">검토 내용 새로고침</button>}
   </section>
 }
