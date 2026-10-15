@@ -47,11 +47,11 @@ export async function POST(request: Request, context: Context) {
   }
   if (!input || typeof input !== 'object' || Array.isArray(input)) return NextResponse.json({ error: '검토 요청을 확인해 주세요.' }, { status: 400 })
   const body = input as Record<string, unknown>
-  if (Object.keys(body).length !== 2 || !['hold', 'recheck'].includes(String(body.action)) || typeof body.reviewToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.reviewToken)) {
+  if (Object.keys(body).length !== 2 || !['hold', 'recheck', 'register-representative'].includes(String(body.action)) || typeof body.reviewToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.reviewToken)) {
     return NextResponse.json({ error: '검토 요청을 확인해 주세요.' }, { status: 400 })
   }
   try {
-    const result = await reviewInquiry(prisma, id, body.action as 'hold' | 'recheck', body.reviewToken)
+    const result = await reviewInquiry(prisma, id, body.action as 'hold' | 'recheck' | 'register-representative', body.reviewToken)
     if (result === 'queued') return NextResponse.json({ queued: true }, { status: 202 })
     if (result === 'reviewed') return NextResponse.json({ reviewed: true })
     const messages = { not_found: '문의를 찾을 수 없습니다.', stale: '검토 중 문의 정보가 바뀌었습니다. 새로고침 후 다시 확인해 주세요.',

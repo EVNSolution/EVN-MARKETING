@@ -4,7 +4,7 @@ import { claimWorker, INQUIRY_SCOPE_ID } from '@/lib/inquiry-sync'
 import { inquiryReview, reviewInquiry } from '@/lib/inquiry-review'
 import { planWarpRecovery } from '@/lib/warp-recovery'
 import { normalizeInquiryPhone } from '@/lib/format'
-import { checkedDeliver, dispatchPendingWarp, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, DUPLICATE_REVIEWED, MANUAL_CONFIRMATION, REVIEW_CLEARED,
+import { checkedDeliver, dispatchPendingWarp, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, MANUAL_CONFIRMATION, REVIEW_CLEARED, WARP_DUPLICATE_REVIEWED,
   requestWarpRegistration, scope, WARP_EXISTING_CUSTOMER, CUSTOMER_ONLY, warpActivityId, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { withWorkerDatabase } from './worker-runtime-helper'
 
@@ -70,7 +70,7 @@ async function main() {
     assert.ok(review)
     assert.equal(await reviewInquiry(db, row.id, 'hold', review.reviewToken, at), 'reviewed')
     const reviewed = await db.inquiry.findUniqueOrThrow({ where: { id: row.id } })
-    assert.equal(reviewed.warpError, DUPLICATE_REVIEWED)
+    assert.equal(reviewed.warpError, WARP_DUPLICATE_REVIEWED)
     assert.equal(reviewed.warpAttemptedAt?.getTime(), held.warpAttemptedAt?.getTime())
     assert.equal(reviewed.warpDeliveredAt, null)
     assert.equal(warpDeliveryState(reviewed).status, 'duplicate_reviewed')

@@ -13,9 +13,10 @@ export async function checkExternalDashboardUi({ page, context, db, base, upload
   const file = path.join(uploads, '_reports/external-dashboard/current.json')
   await mkdir(path.dirname(file), { recursive: true })
   const dates = Array.from({ length: 27 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`)
+  const collectedAt = new Date().toISOString()
   const record = {
     format: 1, source: 'mleverage-admin', companyScopeId: '55f9a8bb-73f9-4316-bcd7-7dcdce0bdcc3', homepageScopeId: '5c7a6115-a0a9-4e8d-bf65-efce52195fa4',
-    lastAttemptAt: new Date().toISOString(), lastSuccessfulAt: new Date().toISOString(), error: null,
+    lastAttemptAt: collectedAt, lastSuccessfulAt: collectedAt, error: null,
     data: {
       aggregationDates: dates,
       monthlyViews: dates.map((date, i) => ({ date, visitorCount: 10 + i, pageViewCount: 20 + 2 * i })),
@@ -88,6 +89,7 @@ export async function checkExternalDashboardUi({ page, context, db, base, upload
   const historyFile = path.join(path.dirname(file), 'history.json'), snapshots = path.join(path.dirname(file), 'snapshots')
   await writeFile(historyFile, JSON.stringify(history)); await mkdir(snapshots, { recursive: true })
   await writeFile(path.join(snapshots, '2026-09-28.json'), JSON.stringify(older))
+  assert.equal((await context.request.get(base + '/api/external-dashboard')).status(), 200, 'restored synthetic history must be readable before browser checks')
   const change = async action => {
     const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/external-dashboard')
     void response.catch(() => {})

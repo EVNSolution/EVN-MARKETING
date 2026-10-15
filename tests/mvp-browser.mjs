@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { checkLandingWarpUi } from './landing-warp-browser.mjs'
 import { checkExternalDashboardUi } from './external-dashboard-browser.mjs'
 import { checkAdBillingUi } from './ad-billing-browser.mjs'
+import { checkRepresentativeUi } from './inquiry-representative-browser.mjs'
 
 // Owns a fresh synthetic DB, a loopback-only web process and a temporary browser profile.
 // Never starts a collector or uses the caller's database, credentials or browser session.
@@ -20,7 +21,8 @@ const Database = require('better-sqlite3')
 const { chromium } = require('playwright-core')
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const bcrypt = createRequire(path.join(source, 'package.json'))('bcryptjs')
-const directory = mkdtempSync(path.join(tmpdir(), 'marketing-mvp-'))
+// macOS aliases /var to /private/var; storage correctly requires a canonical root.
+const directory = realpathSync(mkdtempSync(path.join(tmpdir(), 'marketing-mvp-')))
 const dbPath = path.join(directory, 'synthetic.db')
 const db = new Database(dbPath)
 const password = randomBytes(24).toString('hex')
@@ -106,13 +108,13 @@ try {
   assert.match(await manuallyConfirmed.innerText(), /등록완료/)
   assert.equal(await manuallyConfirmed.getByRole('button', { name: '등록하기' }).count(), 0)
   assert.match(await manuallyConfirmed.getByText('등록완료').getAttribute('title'), /직접 등록/)
-  for (const [id, text] of [[2, 'WARP 고객 또는 리드와 연락처가 중복'], [5, '기존 고객의 문의 이력에 연결'], [22, '수집된 문의 또는 홈페이지 문의와 연락처가 중복']]) {
+  for (const [id, text] of [[2, 'WARP 고객 또는 리드와 연락처가 중복'], [5, '기존 고객의 문의 이력에 연결'], [22, 'EV&Marketing에 같은 연락처의 문의가 여러 건']]) {
     const row = page.getByRole('row').filter({ has: page.getByText(`합성 문의 ${id}`, { exact: true }) })
     assert.equal(await row.getByText('중복확인', { exact: true }).evaluate(el => el.tagName), 'SPAN')
     assert.equal(await row.getByRole('button', { name: '등록하기' }).count(), 0, 'duplicate marker is noninteractive')
     assert.equal(await row.getByRole('button', { name: '검토하기' }).count(), 1)
     assert.match(await row.innerText(), new RegExp(text))
-    assert.match(await row.innerText(), /WARP에서 해당 연락처로 기존 고객과 리드를 확인/)
+    if (id !== 22) assert.match(await row.innerText(), /WARP에서 해당 연락처로 기존 고객과 리드를 확인/)
   }
   for (const [id, label] of [[3, '등록 보류'], [6, '등록 확인 필요']]) {
     const row = page.getByRole('row').filter({ has: page.getByText(`합성 문의 ${id}`, { exact: true }) })
@@ -158,6 +160,7 @@ try {
   assert.equal((await ordinary.context.request.post(base + '/api/inquiries/sync', { headers: { Origin: base } })).status(), 403)
   assert.equal((await ordinary.context.request.get(reviewUrl)).status(), 200)
   assert.equal((await ordinary.context.request.post(reviewUrl, { headers: { Origin: base }, data: decision })).status(), 403)
+  await checkRepresentativeUi({ page, context, ordinary, db, base, output: process.env.MARKETING_UI_OUTPUT })
   await checkLandingWarpUi({ page, context, db, base })
   await checkExternalDashboardUi({ page, context, db, base, uploads: path.join(directory, 'uploads') })
   await checkAdBillingUi({ page, context, db, base, uploads: path.join(directory, 'uploads') })

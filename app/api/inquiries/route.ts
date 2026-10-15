@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
-import { duplicateInquiryIds, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
+import { inquiryDuplicateContext, warpDeliveryState, warpDeliverySummary } from '@/lib/warp-delivery'
 import { inquiryCustomerName } from '@/lib/format'
 import { landingScope } from '@/lib/landing-inquiries'
 import {
@@ -52,9 +52,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const duplicates = await duplicateInquiryIds(prisma)
+    const context = await inquiryDuplicateContext(prisma)
+    const stateFor = (row: { id: string; warpDeliveredAt: Date | null; warpError: string | null }) => {
+      const representative = context.representatives.get(row.id)
+      return warpDeliveryState(row, context.duplicates.has(row.id), representative?.id !== row.id ? representative : undefined)
+    }
     const reviewRows = review ? await prisma.inquiry.findMany({ where: visibleScope, select: { id: true, warpDeliveredAt: true, warpError: true } }) : []
-    const reviewIds = reviewRows.filter(row => warpDeliveryState(row, duplicates.has(row.id)).status === (review === 'pending' ? 'duplicate' : 'duplicate_reviewed')).map(row => row.id)
+    const reviewIds = reviewRows.filter(row => (review === 'pending' ? ['duplicate'] : ['duplicate_reviewed', 'duplicate_linked']).includes(stateFor(row).status)).map(row => row.id)
     const where = {
       AND: [visibleScope, ...(query ? [{ OR: [{ name: { contains: query } }, { phone: { contains: query } }] }] : [])],
       ...(review ? { id: { in: reviewIds } } : {}),
@@ -104,7 +108,7 @@ export async function GET(request: Request) {
       rows: rows.map(({ warpDeliveredAt, warpError, ...row }) => ({
         ...row,
         name: inquiryCustomerName(row.name, row.phone),
-        warpDelivery: warpDeliveryState({ warpDeliveredAt, warpError }, duplicates.has(row.id)),
+        warpDelivery: stateFor({ id: row.id, warpDeliveredAt, warpError }),
       })),
       warp,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },

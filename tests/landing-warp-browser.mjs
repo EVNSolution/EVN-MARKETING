@@ -47,7 +47,7 @@ export async function checkLandingWarpUi({ page, context, db, base, output }) {
     assert.match(await review.innerText(), /기존 수집 문의/)
     assert.equal(await review.evaluate(el => el.scrollWidth <= el.clientWidth), true)
     if (output) await page.screenshot({ path: path.join(output, `landing-crm-review-${width}.png`) })
-    await review.getByRole('checkbox').check()
+    await review.getByRole('checkbox', { name: '이 문의가 중복임을 확인했으며, 전송하지 않고 보류하는 것에 동의합니다.' }).check()
     await review.getByRole('button', { name: '검토완료 · 전송 보류', exact: true }).click()
     await review.getByText('중복으로 검토 완료했습니다. 이 문의는 전송하지 않습니다.', { exact: true }).waitFor()
     await review.getByRole('button', { name: '검토창 닫기' }).click()
