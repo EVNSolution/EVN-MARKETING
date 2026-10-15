@@ -5,6 +5,7 @@ import { workerActivationAllowed } from './worker-activation'
 import { collectExternalDashboard } from './external-dashboard-sync'
 import { readDashboardRecord } from '@/lib/external-dashboard-store'
 import { collectNaverAdSpend } from './ad-spend-sync'
+import { dispatchNameJobs } from '@/lib/warp-customer-name'
 
 async function main() {
   const enabled = collectorEnabled()
@@ -38,7 +39,13 @@ async function main() {
       claimNextRun: sync.claimNextRun,
       reconcile: sync.reconcile,
       finishRun: sync.finishRun,
-      dispatchPendingWarp: (db, owner, signal) => warp.dispatchPendingWarp(db, owner, undefined, undefined, undefined, signal),
+      dispatchPendingWarp: async (db, owner, signal) => {
+        try { await dispatchNameJobs(db, owner, signal) } catch (error) {
+          if (error instanceof sync.SyncError && error.type === 'lost_worker_lease') throw error
+          if (!signal?.aborted) console.error('customer_name_review_failed')
+        }
+        if (!signal?.aborted) return warp.dispatchPendingWarp(db, owner, undefined, undefined, undefined, signal)
+      },
       collectAdSpend: collectNaverAdSpend,
       launchSourceBrowser: source.launchSourceBrowser,
       openLogin: source.openLogin,

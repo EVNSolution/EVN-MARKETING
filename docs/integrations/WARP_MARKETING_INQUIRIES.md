@@ -1,5 +1,21 @@
 # 마케팅 문의 수신 연동 검토
 
+## 2026-10-15 기존 고객 이름 보완 — 검토 대상
+
+신규 또는 과거 같은 번호 문의에 실명이 있고 WARP에는 이름 미상 고객이 있는 경우, 별도 `POST /api/external/marketing-inquiries/customer-name`에서 **미리보기 → 사용자 확인 → 이름 보완**을 수행한다. 새 고객·리드를 등록하거나 기존 리드의 이름을 수정하는 기능이 아니다. 과거 문의, 등록 영수증, 등록완료 상태와 유입 집계는 보존한다.
+
+- 전용 `WARP_MARKETING_API_KEY`로 새 제한 권한 `customer.unknown-name.enrich`만 추가한다. BUILDUP 키·일반 고객 수정 권한은 사용하지 않는다. 기존 append는 고객 정보를 덮어쓰지 않고, check는 기존 응답 형식을 그대로 유지한다.
+- 정확한 두 출처 튜플과 원본 문의 UUID를 요구한다. Marketing 서버가 보관 중인 동일 번호 문의에서 실명을 선택하고, 인증된 관리자 세션에서 요청자 ID·이름을 정한다. 웹에는 키를 추가하지 않으며 기존 lease 소유 worker가 보호된 단기 작업을 처리한다. 서명된 미리보기 토큰은 서버에서만 보관하고 브라우저에 전달하지 않는다.
+- 입력은 action/source/companyScopeId/homepageScopeId/sourceId/phone/name/actor의 정확한 필드만 허용한다. confirm에는 previewToken이 추가로 필수이고 preview에는 허용하지 않는다. actor는 id/name만 받는다. 본문 16KB, 이름 100자, 요청자 ID 128자, 요청자 이름 100자, 휴대폰 40자, 토큰 2,048자 한도이며 제어문자나 이름·요청자의 앞뒤 공백은 거부한다.
+- 유효한 국내 휴대폰 기본 연락처로만 비교한다(+82/0082·기존 011/016/017/018/019 포함). 회사 번호·보조 연락처·리드 단독 번호는 이름 수정 대상을 찾는 근거가 아니다. 일치 고객이 없으면 not_found, 여러 명이면 ambiguous로 보류하며 후보 고객 정보는 반환하지 않는다.
+- 유일한 현재 고객이 공란·하이픈·정확한 미상/신원미상 형식(괄호 부연 가능)이거나 이름 자체가 같은 휴대폰일 때만 ready다. 실제 이름이 이미 있으면 already_named, 제안 이름과 같으면 same_name이며 수정 토큰을 발급하지 않는다. 실제 이름에 ‘미상’이라는 글자가 포함됐다는 이유로 덮어쓰지 않는다.
+- preview는 읽기 전용이며 유일한 고객의 id/name/정규화된 요청 phone과 proposedName만 노출한다. ready인 경우 전용 키 HMAC으로 출처·원본 문의·전화·실명·요청자·고객 ID·기존 이름/수정시각·10분 만료를 묶은 토큰을 발급한다.
+- confirm은 customerWrite의 공통 쓰기 잠금에서 고객 유일성, 통합되지 않은 동일 고객 ID, 이름/updatedAt 일치와 미상 여부를 다시 확인한다. 다른 담당자가 수정했거나 고객이 통합·삭제되었으면 409 stale_preview로 새 미리보기를 요구한다. 토큰 위변조·만료는 400 invalid_preview이며 고객 정보는 바뀌지 않는다.
+- 성공 시 Customer.name과 자동 updatedAt만 바꾸고 CustomerActivity에 변경 전후 이름, 정확한 출처와 원본 문의 ID, 요청자, 시각을 같은 트랜잭션으로 남긴다. 감사 저장 실패 시 이름 변경도 취소된다. 감사 ID는 미리보기 토큰에서 결정하며 기존 문의 등록 활동 ID와 구분한다.
+- 같은 확인 요청의 재전송은 토큰 유효기간 내 보관된 감사와 현재 고객 이름/updatedAt/휴대폰/정체성이 일치할 때만 unchanged로 응답한다. 정상 최초 저장은 updated다. 감사 삭제·변경이나 이후 고객 변경은 성공 재전송으로 간주하지 않는다. 기존 CustomerActivity의 보존 기간과 편집 권한을 사용하는 변경 이력이며 별도 불변 감사 저장소를 신설하지 않는다.
+
+기계 판독 계약과 응답·오류 목록은 JSON의 customer_name_enrichment에 있다. Marketing은 사용자 확인을 받아 이 경로만 실행하고, 이름 보완 성공을 신규 등록완료 또는 새 DB 유입으로 집계하지 않는다. 운영 공개 전에 양쪽 PR 링크를 JSON에 채우고 파일을 동일하게 맞춘다. 검토 범위는 [기존 Issue #48](https://github.com/EVNSolution/EVN-WARP/issues/48)과 [CRM 위임](https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448)이며 배포 순서는 WARP → Marketing이다. 실제 고객 수정·리드 생성·일괄 보정 없이 합성 DB로 검증한다. 스키마·IAM·배포 경로 변경은 없다.
+
 ## 2026-10-08 홈페이지 수동 CRM 등록 확장 — 검토 대상
 
 이번 변경은 기존 전용 키와 두 외부 경로를 재사용한다. 기존 mleverage 계약과 활동 ID는 유지하고, 홈페이지의 정확한 출처 evn-landing / evnsolution / pv5를 별도로 허용한다. 홈페이지는 HH:mm:ss, 기존 수집 문의는 종전 HH:mm 형식을 유지한다. 홈페이지 고객의 source는 evn-landing이며 활동 제목·상담 종류·지역·동의 버전/시각을 원본대로 보관한다. 새 테이블이나 열은 없다.
@@ -15,21 +31,19 @@ Marketing에서는 출처 전체의 정규화 번호가 겹치는 미전송 문�
 아래는 이전 계약 및 활성화 작업의 기록이다. 현재 확장 범위는 위 설명과 JSON 계약을 따른다.
 
 
-2026-09-17 · 운영 담당자: OziinG · 상태: 신규 이름 규칙의 후속 Owner 검토 대기
+2026-09-17 · 운영 담당자: OziinG · 상태: Owner 소스 검토, 발신측 활성화 대기
 
-기계 판독 계약은 [WARP_MARKETING_INQUIRIES.json](WARP_MARKETING_INQUIRIES.json)이다. 이 변경은 기존 WARP–BUILDUP 계약과 공유키 권한을 수정하지 않는다. [Issue #48](https://github.com/EVNSolution/EVN-WARP/issues/48)과 [PR #49](https://github.com/EVNSolution/EVN-WARP/pull/49)는 빈 이름을 그대로 두던 이전 계약의 검토 이력이다. 이번 신규 고객 표시 이름 규칙은 후속 Owner 검토가 필요하다. 2026-09-17 기존 Owner 검토에서는 UUID 대소문자 중복 및 독립 DB 연결의 잠금 경합을 재현해 수정했다. 최종 승인·배포 Revision과 결과는 [후속 PR #50](https://github.com/EVNSolution/EVN-WARP/pull/50)에 기록한다.
-
-2026-10-01 Marketing 임시 보호는 기존 9개 문자열 필드에 `rejectExistingCustomer: true`를 추가한다. 이를 지원하는 [WARP PR #51](https://github.com/EVNSolution/EVN-WARP/pull/51)은 아직 승인·배포되지 않았으며 현재 수신기는 guarded payload를 HTTP 400 `bad_payload`로 거부한다. Marketing은 이를 `warp_registration_guard_unavailable`로 보관하고 신규 등록을 닫힌 상태로 보류한다. WARP #51 배포 전에는 새 등록을 재개하지 않는다.
+기계 판독 계약은 [WARP_MARKETING_INQUIRIES.json](WARP_MARKETING_INQUIRIES.json)이다. 이 변경은 기존 WARP–BUILDUP 계약과 공유키 권한을 수정하지 않는다. [검토 Issue #48](https://github.com/EVNSolution/EVN-WARP/issues/48)과 [검토 PR #49](https://github.com/EVNSolution/EVN-WARP/pull/49)에 연결한다. 2026-09-17 Owner 검토에서 UUID 대소문자 중복 및 독립 DB 연결의 잠금 경합을 재현해 수정하고 회귀 검사를 추가했다. 최종 승인·배포 Revision과 결과는 PR에 기록한다. 발신측 저장소는 이번 검토 환경에 없으므로 활성화 전에 수정된 계약의 일치와 발신측 검증을 확인해야 한다.
 
 ## 변경 결과
 
 `POST /api/external/marketing-inquiries`는 전용 `WARP_MARKETING_API_KEY`로 고정된 mleverage-admin 회사·홈페이지 문의만 받는다. 키는 32자 이상·공백 없음이어야 하며, 비어 있으면 503으로 비활성화한다. 요청은 16KB까지만 읽는다.
 
-기본 연락처를 숫자로 정규화한 완전일치 고객이 한 명이면 문의 이력만 추가한다. 기존 이름·상태·담당자·메모는 바꾸지 않는다. 일치 고객이 없으면 B2C 잠재고객을 만들고, 원본 성함을 다듬은 값이 비어 있을 때 WARP의 `unknownCustomerName({ phone })`으로 표시 이름을 생성한다(예: `미상(📞 8888)`). 이름이 같고 연락처가 다르면 별도 고객이다. 같은 연락처의 고객이 여러 명이면 409로 보류한다.
+기본 연락처를 숫자로 정규화한 완전일치 고객이 한 명이면 문의 이력만 추가한다. 기존 이름·상태·담당자·메모는 바꾸지 않는다. 일치 고객이 없으면 성함·연락처를 입력한 B2C 잠재고객을 만들며 빈 이름을 허용한다. 이름이 같고 연락처가 다르면 별도 고객이다. 같은 연락처의 고객이 여러 명이면 409로 보류한다.
 
 활동 ID는 `mleverage_` 접두사와 출처·회사·홈페이지·소문자로 정규화한 원본 UUID의 SHA-256이다. 고객 생성과 활동 추가를 같은 트랜잭션에서 처리하고, 활동이 보존된 동안의 재전송은 기존 receipt를 돌려준다. 새로운 DB 테이블·열은 없고 기존 Customer/CustomerActivity를 사용한다. 조회 전에 행을 변경하지 않는 UPDATE로 SQLite 쓰기 잠금을 확보해 독립 연결의 read-to-write 잠금 교착을 막는다. 해당 트랜잭션 연결의 busy timeout은 0으로 두고 기존 비동기 재시도를 사용한다. 동일 문의·같은 연락처의 별도 문의 병렬 전송과 경합 이후 쓰기를 합성 SQLite로 검증한다.
 
-활동 내용에는 원본 문의일자·문의시간·상담상태·성함·연락처와 문의 ID를 읽을 수 있는 문장으로 저장한다. 수신기는 받은 성함을 활동에 보존한다. 2026-09-29 Marketing 후속 변경은 이름이 없는 문의를 저장·조회·발신할 때 동일한 신원미상 규칙으로 채우므로 해당 요청의 활동에도 생성된 이름이 남는다. WARP 자체의 빈 이름 처리와 구분하여 Marketing PR #21에서 검토한다. 원본 날짜·시간은 분 단위 문자열로 보존하고 CRM 날짜는 한국 시간으로 해석한다. 원본 화면에 시간대 표기가 없으므로 한국 시간 해석은 확인이 필요한 가정이다.
+활동 내용에는 원본 문의일자·문의시간·상담상태·성함·연락처와 문의 ID를 읽을 수 있는 문장으로 저장한다. 원본 날짜·시간은 분 단위 문자열로 보존하고 CRM 날짜는 한국 시간으로 해석한다. 원본 화면에 시간대 표기가 없으므로 한국 시간 해석은 확인이 필요한 가정이다.
 
 ## 로컬 검증
 
@@ -75,7 +89,7 @@ console.log('Authentication and public HTTPS access passed; no CRM records writt
 JS
 ```
 
-다음 단계에서는 계약의 9개 문자열 필드와 `rejectExistingCustomer: true`에 맞는 실제 원본 문의 한 건을 발신기에서 전송한다. 첫 응답은 200과 `created: true`, 같은 `sourceId`의 재전송은 200과 `duplicate: true`여야 한다. CRM의 고객 및 문의 이력을 확인한 후 미전달 문의 처리를 시작한다. 409 `phone_exists`와 `ambiguous_phone`은 자동 재시도하지 말고 담당자가 중복 연락처를 확인한다. 400 `bad_payload`는 WARP #51 미배포로 보고 등록을 보류한다. 503 `temporarily_unavailable`은 같은 `sourceId`를 유지한 채 지연 재시도한다. 서버 로그에는 `marketing_inquiry_failed`와 허용된 오류 코드·재시도 여부만 남는다.
+다음 단계에서는 계약의 9개 필드에 맞는 실제 원본 문의 한 건을 발신기에서 전송한다. 첫 응답은 200과 `created: true`, 같은 `sourceId`의 재전송은 200과 `duplicate: true`여야 한다. CRM의 고객 및 문의 이력을 확인한 후 미전달 문의 처리를 시작한다. 409 `ambiguous_phone`은 자동 재시도하지 말고 담당자가 중복 연락처를 확인한다. 503 `temporarily_unavailable`은 같은 `sourceId`를 유지한 채 지연 재시도한다. 서버 로그에는 `marketing_inquiry_failed`와 허용된 오류 코드·재시도 여부만 남는다.
 
 
 ## 고객·잠재리드 통합 등록 — 2026-10-13 확장
