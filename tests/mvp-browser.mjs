@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -21,7 +21,8 @@ const Database = require('better-sqlite3')
 const { chromium } = require('playwright-core')
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const bcrypt = createRequire(path.join(source, 'package.json'))('bcryptjs')
-const directory = mkdtempSync(path.join(tmpdir(), 'marketing-mvp-'))
+// macOS aliases /var to /private/var; storage correctly requires a canonical root.
+const directory = realpathSync(mkdtempSync(path.join(tmpdir(), 'marketing-mvp-')))
 const dbPath = path.join(directory, 'synthetic.db')
 const db = new Database(dbPath)
 const password = randomBytes(24).toString('hex')

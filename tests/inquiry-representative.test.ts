@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { claimWorker, INQUIRY_SCOPE_ID, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
 import { inquiryReview, reviewInquiry } from '@/lib/inquiry-review'
 import { landingScope } from '@/lib/landing-inquiries'
-import { DUPLICATE_OF, DUPLICATE_REVIEWED, MANUAL_CONFIRMATION, CUSTOMER_LEAD_COMPLETE, dispatchPendingWarp,
+import { DUPLICATE_OF, DUPLICATE_REVIEWED, MANUAL_CONFIRMATION, CUSTOMER_LEAD_COMPLETE, WARP_DUPLICATE_REVIEWED, dispatchPendingWarp,
   duplicateInquiryIds, inquiryDuplicateContext, requestWarpRegistration, scope, warpActivityId, warpDeliverySummary } from '@/lib/warp-delivery'
 import { completedLead } from './customer-lead-helper'
 import { withWorkerDatabase } from './worker-runtime-helper'
@@ -113,6 +113,18 @@ async function main() {
     await db.inquiry.update({ where: { id: peer.id }, data: evidence })
     const review = await inquiryReview(db, row.id); assert.ok(review)
     assert.equal(review.canRegisterRepresentative, false)
+    assert.equal(await reviewInquiry(db, row.id, 'register-representative', review.reviewToken, at), 'not_duplicate')
+  })
+
+  for (const warpError of ['warp_phone_duplicate', 'warp_customer_conflict']) await database(async db => {
+    await worker(db)
+    const row = await add(db), peer = await add(db)
+    await db.inquiry.update({ where: { id: peer.id }, data: { warpError } })
+    const duplicate = await inquiryReview(db, peer.id); assert.ok(duplicate)
+    assert.equal(await reviewInquiry(db, peer.id, 'hold', duplicate.reviewToken, at), 'reviewed')
+    assert.equal((await db.inquiry.findUniqueOrThrow({ where: { id: peer.id } })).warpError, WARP_DUPLICATE_REVIEWED)
+    const review = await inquiryReview(db, row.id); assert.ok(review)
+    assert.equal(review.canRegisterRepresentative, false, 'review keeps remote WARP duplicate evidence')
     assert.equal(await reviewInquiry(db, row.id, 'register-representative', review.reviewToken, at), 'not_duplicate')
   })
 

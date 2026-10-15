@@ -3,7 +3,7 @@ import type { PrismaClient } from '@/app/generated/prisma/client'
 import { inquiryCustomerName, normalizeInquiryPhone } from '@/lib/format'
 import { INQUIRY_SCOPE_ID, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
 import { landingScope } from '@/lib/landing-inquiries'
-import { DUPLICATE_OF, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED, MANUAL_REGISTRATION, WARP_EXISTING_CUSTOMER,
+import { DUPLICATE_OF, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED, MANUAL_REGISTRATION, WARP_DUPLICATE_REVIEWED, WARP_EXISTING_CUSTOMER,
   duplicateRepresentativeId, hasWarpEvidence, inquiryDuplicateContext, deliveryScopes, warpDeliveryState } from '@/lib/warp-delivery'
 
 type Db = Pick<PrismaClient, 'inquiry'>
@@ -70,8 +70,10 @@ export async function reviewInquiry(db: PrismaClient, id: string, action: 'hold'
       return 'queued' as const
     }
     const row = await tx.inquiry.findFirstOrThrow({ where: { ...deliveryScopes, id }, select: reviewSelect })
+    const reviewedError = row.warpError === WARP_EXISTING_CUSTOMER ? EXISTING_CUSTOMER_REVIEWED
+      : ['warp_phone_duplicate', 'warp_customer_conflict'].includes(row.warpError ?? '') ? WARP_DUPLICATE_REVIEWED : DUPLICATE_REVIEWED
     await tx.inquiry.update({ where: { id }, data: {
-      warpError: action === 'recheck' ? DUPLICATE_RECHECK : row.warpError === WARP_EXISTING_CUSTOMER ? EXISTING_CUSTOMER_REVIEWED : DUPLICATE_REVIEWED,
+      warpError: action === 'recheck' ? DUPLICATE_RECHECK : reviewedError,
     } })
     // Preserve raw inquiry and receipt/attempt timestamps; a review is not a delivery.
     return action === 'recheck' ? 'queued' as const : 'reviewed' as const

@@ -19,12 +19,13 @@ export const DUPLICATE_RECHECK = 'warp_duplicate_recheck_requested'
 export const DUPLICATE_RECHECK_FAILED = 'warp_duplicate_recheck_failed'
 export const DUPLICATE_REVIEWED = 'warp_duplicate_reviewed'
 export const EXISTING_CUSTOMER_REVIEWED = 'warp_existing_customer_reviewed'
+export const WARP_DUPLICATE_REVIEWED = 'warp_duplicate_evidence_reviewed'
 export const REVIEW_CLEARED = 'warp_duplicate_review_cleared'
 export const DUPLICATE_OF = 'warp_duplicate_of:'
 export const scope = { source: INQUIRY_SOURCE, companyScopeId: INQUIRY_COMPANY_ID, homepageScopeId: INQUIRY_HOMEPAGE_ID }
 export const deliveryScopes = { OR: [scope, landingScope] }
 const connectionErrors = ['warp_auth_required', 'warp_not_configured', 'warp_endpoint_missing', 'warp_unavailable', 'warp_invalid_receipt', 'warp_registration_guard_unavailable', 'warp_duplicate_check_unavailable']
-const duplicateErrors = ['warp_customer_conflict', 'warp_phone_duplicate', 'warp_local_duplicate', WARP_EXISTING_CUSTOMER, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED]
+const duplicateErrors = ['warp_customer_conflict', 'warp_phone_duplicate', 'warp_local_duplicate', WARP_EXISTING_CUSTOMER, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED, WARP_DUPLICATE_REVIEWED]
 const duplicateRemedy = 'WARP에서 해당 연락처로 기존 고객과 리드를 확인해 주세요. 연락처가 잘못됐다면 원본 문의를 수정해 주세요.'
 export type Env = Readonly<Record<string, string | undefined>>
 type InquiryPayload = typeof scope & { sourceId: string; inquiryDate: string; inquiryTime: string; sourceStatus: string; name: string; phone: string;
@@ -58,9 +59,11 @@ export function warpDeliveryState(row: DeliveryStateRow, localDuplicate = false,
     reason: '고객 등록과 잠재리드 생성을 확인했습니다.' }
   if (row.warpError === LANDING_WARP_SENDING) return { status: 'sending', label: '등록중', reason: 'WARP 등록 결과를 확인 중입니다. 확인이 끝난 뒤 상담을 종료할 수 있습니다.' }
   if (row.warpError === 'warp_landing_interrupted') return { status: 'retrying', label: '등록 결과 확인 필요', reason: '등록 도중 연결이 중단되었습니다. 등록하기를 누르면 기존 전송 기록부터 확인합니다.' }
-  if ([DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED].includes(row.warpError ?? '')) return {
+  if ([DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED, WARP_DUPLICATE_REVIEWED].includes(row.warpError ?? '')) return {
     status: 'duplicate_reviewed', label: '검토완료',
-    reason: row.warpError === EXISTING_CUSTOMER_REVIEWED ? '기존 고객에 연결된 문의 이력을 확인했습니다. 새 고객은 생성되지 않았으며 전송 기록을 보존합니다.' : '중복 문의로 검토를 마쳤습니다. WARP에 전송하지 않습니다.',
+    reason: row.warpError === EXISTING_CUSTOMER_REVIEWED ? '기존 고객에 연결된 문의 이력을 확인했습니다. 새 고객은 생성되지 않았으며 전송 기록을 보존합니다.'
+      : row.warpError === WARP_DUPLICATE_REVIEWED ? 'WARP 고객 또는 리드와 연락처가 중복된 근거를 보존하고 검토를 마쳤습니다. 새로 등록하지 않습니다.'
+        : '중복 문의로 검토를 마쳤습니다. WARP에 전송하지 않습니다.',
   }
   if (row.warpError === WARP_EXISTING_CUSTOMER) return {
     status: 'duplicate', label: '중복확인',
@@ -104,7 +107,8 @@ export const duplicateSelect = { id: true, phone: true, name: true, warpError: t
 type DuplicateRow = { id: string; phone: string; name: string | null; warpActivityId: string | null; warpCustomerId: string | null } & DeliveryStateRow
 export function hasWarpEvidence(row: DuplicateRow) {
   return Boolean(row.warpDeliveredAt || row.warpActivityId || row.warpCustomerId
-    || [MANUAL_CONFIRMATION, WARP_RECEIPT_UNVERIFIED, CUSTOMER_ONLY, WARP_EXISTING_CUSTOMER, EXISTING_CUSTOMER_REVIEWED].includes(row.warpError ?? ''))
+    || [MANUAL_CONFIRMATION, WARP_RECEIPT_UNVERIFIED, CUSTOMER_ONLY, WARP_EXISTING_CUSTOMER, EXISTING_CUSTOMER_REVIEWED,
+      'warp_phone_duplicate', 'warp_customer_conflict', WARP_DUPLICATE_REVIEWED].includes(row.warpError ?? ''))
 }
 
 /** A representative may send only while every same-phone peer still points to it. */
