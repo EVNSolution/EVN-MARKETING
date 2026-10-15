@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { PrismaClient } from '@/app/generated/prisma/client'
-import { inquiryCustomerName, normalizeInquiryPhone } from '@/lib/format'
+import { inquiryCustomerName, inquiryRealName, normalizeInquiryPhone } from '@/lib/format'
 import { INQUIRY_SCOPE_ID, WORKER_LEASE_MS } from '@/lib/inquiry-sync'
 import { landingScope } from '@/lib/landing-inquiries'
 import { DUPLICATE_OF, DUPLICATE_RECHECK, DUPLICATE_RECHECK_FAILED, DUPLICATE_REVIEWED, EXISTING_CUSTOMER_REVIEWED, MANUAL_REGISTRATION, WARP_DUPLICATE_REVIEWED, WARP_EXISTING_CUSTOMER,
@@ -30,9 +30,16 @@ export async function inquiryReview(db: Db, id: string) {
   const canRegisterRepresentative = Boolean(phone && peers.length && !linked && (!representative || representative.id === id)
     && [row, ...peers].every(item => !hasWarpEvidence(item) && (selectable.includes(item.warpError) || duplicateRepresentativeId(item.warpError) === id)))
   const reviewToken = createHash('sha256').update(JSON.stringify({ row, peers })).digest('hex')
+  const names = new Set<string>()
+  const nameCandidates = /^(010\d{8}|01[16789]\d{7,8})$/.test(phone) ? [row, ...peers].flatMap(item => {
+    const name = inquiryRealName(item.name, item.phone)
+    if (!name || names.has(name)) return []
+    names.add(name)
+    return [{ id: item.id, name, inquiryDate: item.inquiryDate, inquiryTime: item.inquiryTime }]
+  }) : []
   return {
     row: { id: row.id, source: row.source, name: inquiryCustomerName(row.name, row.phone), phone: row.phone, inquiryDate: row.inquiryDate, inquiryTime: row.inquiryTime },
-    state, reviewToken, peerCount: peers.length,
+    state, reviewToken, peerCount: peers.length, nameCandidates,
     representative: representative ? { id: representative.id, name: inquiryCustomerName(representative.name, representative.phone), state: warpDeliveryState(representative) } : null,
     registrationQueued: Boolean(representative && ['queued', 'sending'].includes(warpDeliveryState(representative).status)),
     canRegisterRepresentative,

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/release-client'
 import type { inquiryReview } from '@/lib/inquiry-review'
+import CustomerNameReview from './CustomerNameReview'
 
 type Review = NonNullable<Awaited<ReturnType<typeof inquiryReview>>>
 
@@ -15,6 +16,7 @@ export default function DuplicateReviewPanel({ id, isAdmin, onClose, onChanged }
   const [holdConfirmed, setHoldConfirmed] = useState(false)
   const [representativeConfirmed, setRepresentativeConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [nameBusy, setNameBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -49,7 +51,7 @@ export default function DuplicateReviewPanel({ id, isAdmin, onClose, onChanged }
   }, [review?.queued, review?.registrationQueued, load])
 
   const decide = async (action: 'hold' | 'recheck' | 'register-representative') => {
-    if (!review || busy || (action === 'hold' && !holdConfirmed)
+    if (!review || busy || nameBusy || (action === 'hold' && !holdConfirmed)
       || (action === 'register-representative' && (!review.canRegisterRepresentative || !representativeConfirmed))) return
     setBusy(true)
     setMessage('')
@@ -106,6 +108,7 @@ export default function DuplicateReviewPanel({ id, isAdmin, onClose, onChanged }
           </section>}
           <p className="text-xs leading-relaxed text-slate-500">EV&amp;Marketing에 같은 연락처 문의가 반복되어도 WARP에 고객이나 리드가 있다는 뜻은 아닙니다. 원격 WARP 조회에 실패하면 안전을 위해 등록 요청을 전송하지 않습니다. 고객 통합이나 연락처 정정 후 재확인할 수 있으며, 원본 문의의 번호가 잘못됐다면 담당자에게 정정을 요청해 주세요.</p>
           <a href="https://warp.cleversystem.ai/customers" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">WARP 고객관리 열기 ↗</a>
+          {isAdmin && <CustomerNameReview key={review.reviewToken} review={review} disabled={busy || Boolean(error)} onBusy={setNameBusy} onRefresh={load} />}
           {review.hasReceipt && <p className="text-xs text-slate-500">이 문의에는 기존 전송 이력이 있습니다. 기록을 보존하며 다시 전송하지 않습니다.</p>}
           {review.queued && <p role="status" className="rounded-lg bg-sky-50 p-3 text-xs text-sky-800">중복 여부를 확인 중입니다. 이 작업은 WARP 고객을 등록하거나 수정하지 않습니다.</p>}
           {review.registrationQueued && <p role="status" className="rounded-lg bg-sky-50 p-3 text-xs text-sky-800">대표 문의의 WARP 등록을 확인 중입니다. 완료되면 결과가 표시됩니다.</p>}
@@ -124,11 +127,11 @@ export default function DuplicateReviewPanel({ id, isAdmin, onClose, onChanged }
           </label>}
           {message && <p role="status" className="text-xs leading-relaxed text-slate-600">{message}</p>}
           {isAdmin && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            {review.canRegisterRepresentative && <button type="button" disabled={busy || !representativeConfirmed || Boolean(error)} onClick={() => void decide('register-representative')}
+            {review.canRegisterRepresentative && <button type="button" disabled={busy || nameBusy || !representativeConfirmed || Boolean(error)} onClick={() => void decide('register-representative')}
               className="min-h-11 rounded-lg bg-sky-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">이 문의를 대표로 등록</button>}
-            {review.canConfirm && <button type="button" disabled={busy || !holdConfirmed || Boolean(error)} onClick={() => void decide('hold')}
+            {review.canConfirm && <button type="button" disabled={busy || nameBusy || !holdConfirmed || Boolean(error)} onClick={() => void decide('hold')}
               className="min-h-11 rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">검토완료 · 전송 보류</button>}
-            {review.canRecheck && <button type="button" disabled={busy || Boolean(error)} onClick={() => void decide('recheck')}
+            {review.canRecheck && <button type="button" disabled={busy || nameBusy || Boolean(error)} onClick={() => void decide('recheck')}
               className="min-h-11 rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-40">중복 재확인</button>}
           </div>}
           <p className="text-xs leading-relaxed text-slate-400">보류와 재확인만으로는 등록되지 않습니다. 대표 등록을 요청하거나, 중복 해소 후 문의 목록의 등록하기를 눌러 주세요.</p>

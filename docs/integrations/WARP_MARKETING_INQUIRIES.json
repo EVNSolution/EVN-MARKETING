@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract_id": "warp-marketing-inquiries",
-  "status": "customer-lead-extension-review-pending",
+  "status": "unknown-customer-name-extension-review-pending",
   "owner": "OziinG",
   "review": {
     "issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
@@ -21,7 +21,8 @@
     "environment": "WARP_MARKETING_API_KEY",
     "scope": "marketing.inquiry.append",
     "existing_buildup_key_accepted": false,
-    "read_scope": "marketing.customer-phone.exists"
+    "read_scope": "marketing.customer-phone.exists",
+    "name_enrichment_scope": "customer.unknown-name.enrich"
   },
   "repositories": {
     "EVN-WARP": {
@@ -74,6 +75,24 @@
         "evn-marketing": {
           "file": "lib/warp-delivery.ts",
           "token": "WARP_CHECK_ENDPOINT"
+        }
+      }
+    },
+    {
+      "id": "warp.marketing-customer-name.enrich",
+      "method": "POST",
+      "path": "/api/external/marketing-inquiries/customer-name",
+      "provider": "EVN-WARP",
+      "caller": "evn-marketing",
+      "capability": "customer.unknown-name.enrich",
+      "sources": {
+        "EVN-WARP": {
+          "file": "app/api/external/marketing-inquiries/customer-name/route.ts",
+          "token": "export async function POST"
+        },
+        "evn-marketing": {
+          "file": "lib/warp-customer-name.ts",
+          "token": "/api/external/marketing-inquiries/customer-name"
         }
       }
     }
@@ -130,7 +149,11 @@
     "A v1 check includes optional registrationPolicy:customer-lead-v1 and returns the same bounded registration evidence in own receipts; absence or invalid completion evidence must not be acknowledged as customer-plus-lead completion.",
     "All Marketing worker registrations from the shared Register action opt into v1. Existing delivered rows, manual confirmations and legacy operator recovery/pilot semantics are unchanged; no backfill is authorized.",
     "Marketing saves warp_customer_lead_complete only for validated full completion, including receipt recovery after response loss. Customer-only evidence retains customer/activity IDs with no delivered timestamp, holds for review and never enables automatic replay creation.",
-    "For customer-lead-v1, an existing normalized primary phone on any SalesDeal also blocks lookup and registration, including a lead without a Customer link. This check runs under the same writer reservation; never merge or update the existing lead."
+    "For customer-lead-v1, an existing normalized primary phone on any SalesDeal also blocks lookup and registration, including a lead without a Customer link. This check runs under the same writer reservation; never merge or update the existing lead.",
+    "The separate customer-name endpoint is the sole customer.unknown-name.enrich capability: explicit preview and confirmation may replace only an unknown name on one unique canonical primary-mobile Customer. Append never overwrites any existing profile; check retains its existing DTO.",
+    "Name enrichment changes only Customer.name and its automatic updatedAt and appends a scoped audit activity in the same serialized customerWrite transaction. It creates no customer or lead, does not edit SalesDeal names, and does not alter inquiry or registration receipts.",
+    "Marketing derives the real name and source reference from a retained same-mobile inquiry and the actor from its authenticated administrator session. Its existing key-owning worker sends the request; browser clients never receive the dedicated key or raw signed preview token.",
+    "Customer name enrichment is not registration completion or a new acquisition. Unknown-name candidates and existing delivered same-mobile inquiries may be reviewed without replaying registration or rewriting original inquiry records."
   ],
   "optional_request_fields": {
     "rejectExistingCustomer": true,
@@ -252,6 +275,98 @@
     "review_pull_requests": {
       "EVN-WARP": "https://github.com/EVNSolution/EVN-WARP/pull/101",
       "EVN-MARKETING": "https://github.com/EVNSolution/EVN-MARKETING/pull/44"
+    }
+  },
+  "customer_name_enrichment": {
+    "capability": "customer.unknown-name.enrich",
+    "method": "POST",
+    "path": "/api/external/marketing-inquiries/customer-name",
+    "max_body_bytes": 16384,
+    "request": {
+      "exact_fields": [
+        "action",
+        "source",
+        "companyScopeId",
+        "homepageScopeId",
+        "sourceId",
+        "phone",
+        "name",
+        "actor"
+      ],
+      "action": "preview | confirm; confirm additionally requires previewToken; preview forbids it",
+      "source_scope": "Exactly source_scope or landing_source_scope; sourceId is a UUID canonicalized to lowercase",
+      "phone": "1-40 trimmed characters; normalizeCustomerMobile valid Korean mobiles only, including +82/0082 and legacy 011/016/017/018/019; no fixed-line, company-phone, secondary-contact or lead-only match",
+      "name": "1-100 trimmed characters without control or format characters; reject unknown placeholders and phone-only names",
+      "actor": {
+        "exact_fields": [
+          "id",
+          "name"
+        ],
+        "id": "1-128 trimmed characters",
+        "name": "1-100 trimmed characters",
+        "trust": "Server-derived authenticated Marketing administrator identity; no control or format characters; worker must preserve the reviewed identity"
+      },
+      "previewToken": "Confirm only: 1-2048 characters; signed, server-only; 10 minute expiry"
+    },
+    "preview": {
+      "response_fields": [
+        "ok",
+        "status",
+        "proposedName"
+      ],
+      "status": "ready | already_named | same_name | not_found | ambiguous",
+      "customer": "Only on a unique canonical match: {id,name,phone}; phone is normalized request mobile; no unrelated fields",
+      "previewToken": "Only ready; HMAC-SHA256 with dedicated key and capability domain binds exact source tuple, sourceId, normalized phone, proposed name, actor, customer ID, name/updatedAt snapshot and expiry",
+      "unknown_name": "Blank/whitespace, hyphen, full-string 미상 or 신원미상 (optional whitespace/one parenthesized suffix), or name normalizing to that exact primary mobile",
+      "writes": "None; read-only transaction snapshot"
+    },
+    "confirm": {
+      "response_fields": [
+        "ok",
+        "status",
+        "customer",
+        "proposedName",
+        "auditId"
+      ],
+      "status": "updated | unchanged; unchanged only valid retry with retained audit and matching current customer snapshot",
+      "guard": "Shared customerWrite writer reservation; recheck expiry, unique normalized primary mobile, original canonical customer ID, exact before name/updatedAt and still unknown name immediately before update",
+      "audit_id": "marketing_name_ + SHA256(JSON string of signed preview token); separate from registration activity IDs",
+      "audit": "CustomerActivity includes before/after name, exact source tuple and inquiry UUID, server-supplied actor id/name and timestamp; same transaction as Customer.name update",
+      "replay": "Within token expiry, same confirm returns unchanged only if retained matching audit and current customer name/updatedAt/phone/identity are consistent. A changed or merged customer, deleted/malformed receipt, or conflicting write cannot claim a successful replay.",
+      "writes": "Customer.name and automatic updatedAt; one CustomerActivity. No schema change, Customer/SalesDeal creation, lead update, contact update, deletion, registration backfill or merge."
+    },
+    "errors": {
+      "400": [
+        "invalid_request",
+        "invalid_preview"
+      ],
+      "401": [
+        "unauthorized"
+      ],
+      "409": [
+        "stale_preview"
+      ],
+      "503": [
+        "not_configured",
+        "temporarily_unavailable"
+      ]
+    },
+    "error_response": {
+      "ok": false,
+      "error": "one generic code only"
+    },
+    "stale_vs_invalid": "A correctly signed unexpired token with a different request binding or changed customer returns 409 stale_preview. Bad signature, malformed token, expired/future token returns 400 invalid_preview.",
+    "rollout": [
+      "Review paired WARP/Marketing PRs within delegated CRM scope; keep this manifest byte-identical.",
+      "Deploy WARP receiver before Marketing caller; old receiver or unavailable preview must fail closed.",
+      "Use synthetic fixtures; no live customer update, lead creation, historical registration or name backfill for release validation.",
+      "The existing Marketing lease-owning worker calls WARP using its current dedicated key; no web key, new schema, infrastructure or IAM permission is required."
+    ],
+    "review_issue": "https://github.com/EVNSolution/EVN-WARP/issues/48",
+    "delegation": "https://github.com/EVNSolution/EVN-WARP/pull/56#issuecomment-6009236448",
+    "review_pull_requests": {
+      "EVN-WARP": "https://github.com/EVNSolution/EVN-WARP/pull/151",
+      "EVN-MARKETING": "https://github.com/EVNSolution/EVN-MARKETING/pull/53"
     }
   }
 }

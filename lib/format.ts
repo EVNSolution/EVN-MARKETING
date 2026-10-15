@@ -69,3 +69,12 @@ export function inquiryCustomerName(name: string | null | undefined, phone: stri
   const trimmed = name?.trim()
   return trimmed && trimmed !== '-' ? trimmed : unknownCustomerName({ phone })
 }
+
+/** Only a supplied real name may enrich an unknown WARP customer. */
+export function inquiryRealName(name: string | null | undefined, phone: string): string | null {
+  const value = name?.trim() ?? ''
+  if (!value || value === '-' || value.length > 100 || /[\p{Cc}\p{Cf}]/u.test(value)
+    || /^(?:신원\s*)?미상(?:\s*\([^]*\))?$/.test(value)
+    || normalizeInquiryPhone(value) === normalizeInquiryPhone(phone) || /^[\d\s()+.-]+$/.test(value)) return null
+  return value
+}

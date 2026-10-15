@@ -13,6 +13,7 @@ import { checkLandingWarpUi } from './landing-warp-browser.mjs'
 import { checkExternalDashboardUi } from './external-dashboard-browser.mjs'
 import { checkAdBillingUi } from './ad-billing-browser.mjs'
 import { checkRepresentativeUi } from './inquiry-representative-browser.mjs'
+import { checkCustomerNameUi } from './customer-name-browser.mjs'
 
 // Owns a fresh synthetic DB, a loopback-only web process and a temporary browser profile.
 // Never starts a collector or uses the caller's database, credentials or browser session.
@@ -161,6 +162,7 @@ try {
   assert.equal((await ordinary.context.request.get(reviewUrl)).status(), 200)
   assert.equal((await ordinary.context.request.post(reviewUrl, { headers: { Origin: base }, data: decision })).status(), 403)
   await checkRepresentativeUi({ page, context, ordinary, db, base, output: process.env.MARKETING_UI_OUTPUT })
+  await checkCustomerNameUi({ page, context, ordinary, db, base, uploads: path.join(directory, 'uploads'), output: process.env.MARKETING_UI_OUTPUT })
   await checkLandingWarpUi({ page, context, db, base })
   await checkExternalDashboardUi({ page, context, db, base, uploads: path.join(directory, 'uploads') })
   await checkAdBillingUi({ page, context, db, base, uploads: path.join(directory, 'uploads') })
