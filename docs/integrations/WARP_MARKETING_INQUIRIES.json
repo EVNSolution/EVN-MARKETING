@@ -142,7 +142,7 @@
     "For legacy customer-only registration: A landing retry after error or interruption requires a fresh manual registration request. Recovered receipts remain registration-unverified unless fresh Customer creation was confirmed.",
     "Marketing serializes landing dispatch claim and closure using its SQLite writer lock. Closure cancels unsent queued work, rejects in-flight work, and deletes only local landing PII. WARP records require a separate WARP process.",
     "An explicit registrationPolicy:customer-lead-v1 requires rejectExistingCustomer:true and extends only new guarded registration with a mapped lead. Omitted policy preserves the legacy receiver contract.",
-    "For the opt-in policy, one shared customerWrite transaction creates the online Customer, deterministic CustomerActivity, deterministic SalesDeal, completed B2C 1-1 checklist, and null→1-1→1-2 StageHistory. Any failure rolls back every write.",
+    "For the opt-in policy, one shared customerWrite transaction creates the online Customer, deterministic CustomerActivity, deterministic SalesDeal at B2C stage 1-1 with no completed checks, and one null→1-1 StageHistory row. Marketing intake never marks 1-1-call complete or promotes the lead to 1-2. Any failure rolls back every write.",
     "The new lead source is 온라인, assignee is 최도준, and productId resolves exactly one active Product with code STEGO K1 and name PV5 오픈배드냉탑 (구변). A missing or ambiguous Product or User returns 503 lead_mapping_unavailable before writes.",
     "The new lead memo is YYYY-MM-DD SNS 유입 using the successful registration transaction time in Asia/Seoul, retained as CustomerActivity.createdAt. Retries read existing evidence and never reset dates, memo, assignee, product, source, stage or checklist.",
     "Only an activity marked marketing:customer-lead-v1 and its retained linked deterministic lead return registration.state:complete. Legacy receipts or deleted/unlinked leads return customer_only and never create a historical lead.",
@@ -258,9 +258,9 @@
         "active": true,
         "requireUnique": true
       },
-      "checklist": "all B2C 1-1 keys from bundled data/pipeline-checklists.json; leave 1-2 checks unset",
+      "checklist": "no checks are completed by Marketing intake; 1-1-call requires an actual salesperson phone call",
       "initialStage": "1-1",
-      "finalStage": "1-2",
+      "finalStage": "1-1",
       "memo": "first successful registration KST date + SNS 유입"
     },
     "error": "503 lead_mapping_unavailable: no new customer, activity, lead or history committed; retry after mapping is resolved",

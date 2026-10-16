@@ -99,7 +99,7 @@ JS
 - 적용 경로: 홈페이지 문의 및 mleverage 문의의 동일 등록 버튼 → 공통 worker → 기존 marketing-inquiries API. 기존 완료 문의·수동 완료 기록은 변경하지 않는다. 운영 복구/pilot은 기존 고객 이력용이며 새 정책 확인이나 과거 리드 생성에 사용하지 않는다.
 - 운영에서 읽기 전용으로 확인한 매핑은 담당자 이름 최도준, Product.code=STEGO K1, Product.name=PV5 오픈배드냉탑 (구변)이다. 수신기가 정확히 일치하는 활성 제품 ID 한 개와 담당자 이름 한 개를 확인한다. 없는 값·중복 이름·비활성 제품은 `lead_mapping_unavailable`로 쓰기 전에 보류한다. User에는 활성 플래그가 없다.
 - 신규 Customer.source와 SalesDeal.source는 온라인이다. 신규 리드는 실제 Product ID 및 최도준을 연결한다. 메모는 최초 성공 등록 시점의 한국 날짜 + ` SNS 유입`이다. 원본 문의 시각은 기존 collectedAt/문의 이력에 유지한다.
-- Customer, CustomerActivity, SalesDeal, B2C 미성숙리드(1-1) 체크 전체, 최초 생성과 1-2 전환 이력을 같은 customerWrite 트랜잭션에 저장한다. 현재 1-1 항목은 배송업 의향 확인(1-1-0)이며 1-2 체크는 설정하지 않는다. 마지막 이력 저장이 실패해도 고객까지 모두 취소된다.
+- Customer, CustomerActivity, SalesDeal과 최초 미성숙리드(1-1) 이력을 같은 customerWrite 트랜잭션에 저장한다. 신규 리드는 체크를 자동 완료하지 않고 1-1에 둔다. 전화통화 완료(1-1-call)는 실제 통화 후 영업 담당자가 확인하며, 문의 등록만으로 1-2로 전환하지 않는다. 최초 이력 저장이 실패해도 고객까지 모두 취소된다.
 - 리드 ID는 `lead_ + activityId`로 고정한다. 신규 활동의 result에 정책 마커를 보관하고 createdAt을 등록 시각으로 보존한다. 재전송/동시 요청/응답 유실은 보관된 동일 고객·리드·등록 시각을 반환하며 영업 담당자나 후속 메모·단계를 덮어쓰지 않는다.
 - v1 응답의 registration은 policy/state/leadId/registeredAt을 포함한다. 정책 마커와 연결 리드가 확인돼야 complete다. 과거 고객 전용 이력이나 삭제/연결 해제된 리드는 customer_only로 돌려주고 소급 생성하지 않는다. Marketing은 고객 ID/활동 ID만 보관하고 완료 시각을 기록하지 않으며 ‘고객 등록 확인 · 리드 미완료’로 검토 보류한다.
 - 신규 실패는 중복 확인부터 안전하게 재시도한다. 홈페이지 문의의 수동 재요청 정책과 기존 자동 등록 설정은 유지한다. 연락처가 이미 존재하면 고객과 리드 모두 생성하지 않는다.
